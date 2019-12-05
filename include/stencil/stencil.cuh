@@ -74,8 +74,77 @@ double cubeness(double x, double y, double z) {
 
 size_t div_ceil(size_t n, size_t d) { return (n + d - 1) / d; }
 
+// information about a neighboring domain
+class RemoteDomain {
+  // MPI rank and GPU for the remote domain
+  int rank_;
+  int device_;
+};
+
+class LocalDomain {
+private:
+
+  // my location in the distributed domain
+  size_t xIdx_;
+  size_t yIdx_;
+  size_t zIdx_;
+
+  // my local data size
+  size_t xSz_;
+  size_t ySz_;
+  size_t zSz_;
+
+  // my origin's global location
+  size_t xOff_;
+  size_t yOff_;
+  size_t zOff_;
+
+  std::vector<void *> dataPtrs_;
+  std::vector<size_t> dataElemSize_;
+
+public:
+
+  // send in positive x direction
+  void send_px() {
+
+    // get my rank
+    int rank;
+
+    // get the neighbor's rank and GPU
+    int nbrRank;
+
+    if (rank == nbrRank) { // on-rank
+
+    } else { // off-rank
+
+    }
+  }
+
+  // recv from positive x direction
+  void recv_px() {
+
+  }
+
+  void wait_all() {
+
+  }
+
+};
+
+
+
 class Domain {
 private:
+
+
+  typedef size_t (*RankFn)(size_t x, size_t y, size_t z);
+  typedef size_t (*GPUFn)(size_t x, size_t y, size_t z);
+
+  // get the rank of a particular index
+  RankFn rankFn_;
+  // get the gpu of a particular index
+  GPUFn gpuFn_;
+
   size_t x_;
   size_t y_;
   size_t z_;
@@ -86,23 +155,17 @@ private:
 
   std::vector<Dim3> radii_;
 
-  std::vector<void *> dataPtrs_;
-  std::vector<size_t> dataElemSize_;
+  // the actual data associated with this rank
+  std::vector<LocalDomain> domains_;
 
 public:
   Domain(size_t x, size_t y, size_t z) : x_(x), y_(y), z_(z) {
-
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &size_);
     CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount_));
   }
 
-  ~Domain() {
-    for (auto &p : dataPtrs_) {
-      delete[] static_cast<char *>(p);
-      p = nullptr;
-    }
-  }
+  ~Domain() {}
 
   Radius add_radius(size_t x, size_t y, size_t z) {
     size_t idx = radii_.size();
@@ -136,7 +199,8 @@ public:
 
     // recursively split region among MPI ranks to make it ~cubical
     Dim3 splitSize(x_, y_, z_);
-    Dim3 splitDim(1, 1, 1);
+    Dim3 rankDim(1, 1, 1); // how MPI ranks are split among dimensions
+    Dim3 gpuDim(1, 1, 1); // how GPUs are split among dimensions
     auto factors = prime_factors(size_);
     std::sort(factors.begin(), factors.end(),
               [](size_t a, size_t b) { return b < a; });
@@ -163,27 +227,40 @@ public:
           printf("x split: %f\n", xSplitCubeness);
         }
         splitSize.x = div_ceil(splitSize.x, amt);
-        splitDim.x *= amt;
+        rankDim.x *= amt;
       } else if (ySplitCubeness >
                  max(xSplitCubeness, ySplitCubeness)) { // split in y
         if (rank_ == 0) {
           printf("y split: %f\n", ySplitCubeness);
         }
         splitSize.y = div_ceil(splitSize.y, amt);
-        splitDim.y *= amt;
+        rankDim.y *= amt;
       } else { // split in z
         if (rank_ == 0) {
           printf("z split: %f\n", zSplitCubeness);
         }
         splitSize.z = div_ceil(splitSize.z, amt);
-        splitDim.z *= amt;
+        rankDim.z *= amt;
       }
     }
 
-    if (rank_ == 0) {
-      printf("%lux%lux%lu of %lux%lux%lux\n", splitSize.x, splitSize.y,
-             splitSize.z, splitDim.x, splitDim.y, splitDim.z);
+
+
+    // split biggest dimension across GPUs
+    if (splitSize.x > max(splitSize.y, splitSize.z)) {
+      gpuDim.x = deviceCount_;
+    } else if (splitSize.y > max(splitSize.x, splitSize.x)) {
+      gpuDim.y = deviceCount_;
+    } else {
+      gpuDim.z = deviceCount_;
     }
+
+    if (rank_ == 0) {
+      printf("%lux%lux%lu of %lux%lux%lux (gpus %lux%lux%lu)\n", splitSize.x, splitSize.y,
+             splitSize.z, rankDim.x, rankDim.y, rankDim.z, gpuDim.x, gpuDim.y, gpuDim.z);
+    }
+
+    // create local domains
 
     // allocate each data region
     for (size_t i = 0; i < dataElemSize_.size(); ++i) {
@@ -209,12 +286,31 @@ public:
   */
   void exchange_async(const Radius &r) {
     assert(r.id_ < radii_.size() && "invalid radius handle");
+
+    for (auto &d : domains_) {
+      // send to / recv from +x
+      d.send_px();
+      d.recv_px();
+
+    }
+
+
   }
 
   /*!
   wait for async exchange
   */
-  void sync() {}
+  void sync() {
+
+    // wait for all domain communication
+    for (auto &d : domains_) {
+      d.wait_all();
+    }
+
+    // wait for everyone else's exchanges to be done
+    MPI_Barrier(MPI_COMM_WORLD);
+
+  }
 
   /*!
   do a halo exchange and return
