@@ -29,6 +29,9 @@ private:
 
   void sender(const char *data) {
     fprintf(stderr, "would send %luB from rank %lu gpu %lu to rank %lu\n", n_, srcRank, srcGPU, dstRank);
+
+    using namespace std::chrono_literals;
+    std::this_thread::sleep_for(2s);
 }
 
   std::future<void> waiter;
@@ -46,13 +49,14 @@ public:
 
 
   void send(const char *data) override {
-    waiter = std::move(std::async(&NoOpSender::sender, this, data));
+    waiter = std::async(&NoOpSender::sender, this, data);
     // fprintf(stderr, "would send %luB from rank %lu gpu %lu to rank %lu\n", n_, srcRank, srcGPU, dstRank);
     return; // no-op
   }
   void wait() override {
-    fprintf(stderr, "would wait\n");
+    
     if (waiter.valid()) {
+        fprintf(stderr, "waiting\n");
         waiter.wait();
     }
     return; // no-op
