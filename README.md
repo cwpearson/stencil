@@ -20,6 +20,7 @@ mpirun -n 4 src/main
     * joint stencils over multiple data types
     * user-defined stencil kernels (Astaroth)
     * edge communication (Astaroth)
+    * Use the minimum number of GPUs
   * future
     * optimize communication for multi-GPU topology (comm-scope)
     * support corners
