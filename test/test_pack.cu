@@ -71,7 +71,7 @@ TEMPLATE_TEST_CASE("pack", "[factorial][template]", int) {
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
     pack<<<dimGrid, dimBlock>>>(dst, src, arrSz, pitch, Dim3(0, 0, arrSz.z - 1),
-                                Dim3(arrSz.x, arrSz.y, 1));
+                                Dim3(arrSz.x, arrSz.y, 1), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
     REQUIRE(dst[0] == 48);
@@ -82,7 +82,8 @@ TEMPLATE_TEST_CASE("pack", "[factorial][template]", int) {
       CUDA_RUNTIME(
           cudaMemset(dst2, 0, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
       unpack<<<dimGrid, dimBlock>>>(dst2, arrSz, pitch, Dim3(0, 0, arrSz.z - 1),
-                                    Dim3(arrSz.x, arrSz.y, 1), dst);
+                                    Dim3(arrSz.x, arrSz.y, 1), dst,
+                                    sizeof(TestType));
       CUDA_RUNTIME(cudaDeviceSynchronize());
       REQUIRE(dst2[48] == 48);
       REQUIRE(dst2[59] == 59);
@@ -95,7 +96,7 @@ TEMPLATE_TEST_CASE("pack", "[factorial][template]", int) {
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
     pack<<<dimGrid, dimBlock>>>(dst, src, arrSz, pitch, Dim3(0, 0, 0),
-                                Dim3(1, arrSz.y, arrSz.z));
+                                Dim3(1, arrSz.y, arrSz.z), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
     REQUIRE(dst[0] == 0);
@@ -110,7 +111,7 @@ TEMPLATE_TEST_CASE("pack", "[factorial][template]", int) {
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
     pack<<<dimGrid, dimBlock>>>(dst, src, arrSz, pitch, Dim3(0, 1, 0),
-                                Dim3(arrSz.x, 1, arrSz.z));
+                                Dim3(arrSz.x, 1, arrSz.z), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
     REQUIRE(dst[0] == 3);

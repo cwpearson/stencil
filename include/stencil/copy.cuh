@@ -5,10 +5,11 @@
 // pitch calculations
 // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html#group__CUDART__MEMORY_1g32bd7a39135594788a542ae72217775c
 
-template <typename T>
-__global__ void pack(T *dst, const T *src, const Dim3 srcSize,
+__global__ void pack(void *dst, const void *src, const Dim3 srcSize,
                      const size_t srcPitch, const Dim3 srcPos,
-                     const Dim3 srcExtent) {
+                     const Dim3 srcExtent, const size_t elemSize) {
+  char *cDst = reinterpret_cast<char *>(dst);
+  const char *cSrc = reinterpret_cast<const char *>(src);
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -27,15 +28,18 @@ __global__ void pack(T *dst, const T *src, const Dim3 srcSize,
         size_t ii = zi * srcSize.y * srcSize.x + yi * srcSize.x + xi;
         // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
         // xo, yo, zo, oi);
-        dst[oi] = src[ii];
+        memcpy(&cDst[oi * elemSize], &cSrc[ii * elemSize], elemSize);
       }
     }
   }
 }
 
-template <typename T>
-__global__ void unpack(T *dst, const Dim3 dstSize, const size_t dstPitch,
-                       const Dim3 dstPos, const Dim3 dstExtent, const T *src) {
+__global__ void unpack(void *dst, const Dim3 dstSize, const size_t dstPitch,
+                       const Dim3 dstPos, const Dim3 dstExtent, const void *src,
+                       const size_t elemSize) {
+
+  char *cDst = reinterpret_cast<char *>(dst);
+  const char *cSrc = reinterpret_cast<const char *>(src);
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -52,7 +56,7 @@ __global__ void unpack(T *dst, const Dim3 dstSize, const size_t dstPitch,
         size_t xi = x;
         size_t oi = zo * dstExtent.y * dstExtent.x + yo * dstExtent.x + xo;
         size_t ii = zi * dstSize.y * dstSize.x + yi * dstSize.x + xi;
-        dst[oi] = src[ii];
+        memcpy(&cDst[oi * elemSize], &cSrc[ii * elemSize], elemSize);
       }
     }
   }
