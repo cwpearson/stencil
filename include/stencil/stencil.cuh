@@ -10,7 +10,7 @@
 #include "cuda_runtime.hpp"
 
 #include "stencil/dim3.cuh"
-#include "stencil/local_domain.hpp"
+#include "stencil/local_domain.cuh"
 #include "stencil/tx.cuh"
 
 // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
@@ -141,7 +141,8 @@ public:
 
   Dim3 get_idx(size_t rank, size_t gpu) {
     assert(0);
-#warning unimplemented
+#warning get_idx unimplemented
+    return Dim3();
   }
 
   void realize() {
@@ -229,7 +230,7 @@ public:
       i /= gpuDim_.y;
       gpuIdx.z = i;
 
-      LocalDomain ld(splitSize);
+      LocalDomain ld(splitSize, gpu);
       ld.dataElemSize_ = dataElemSize_;
       ld.radius_ = radius_;
 
@@ -266,7 +267,8 @@ public:
         int64_t dstRank = get_rank(dstIdx);
         int64_t dstGPU = get_gpu(dstIdx);
         pzSenders_.push_back(new FaceSender<NoOpSender>(
-            d, srcRank, srcGPU, dstRank, dstGPU, 2 /*z*/, di));
+            d, srcRank, srcGPU, dstRank, dstGPU, 2 /*z*/, true /*pos*/));
+        pzSenders_.back()->allocate();
       }
 
       // create recvers
@@ -277,21 +279,19 @@ public:
       for (auto dz : deltas) {
       }
     }
-  }
+
+}
+
 
   /*!
   start a halo exchange and return.
   Call sync() to block until exchange is done.
   */
   void exchange_async() {
-
     for (size_t di = 0; di < domains_.size(); ++di) {
-      auto &d = domains_[di];
-      for (size_t i = 0; i < d.dataElemSize_.size(); ++i) {
-        pzRecvers_[di]->recv();
+        // pzRecvers_[di]->recv();
         pzSenders_[di]->send();
-      }
-#warning unimplemented
+#warning exchange_async unfinished
     }
   }
 

@@ -7,7 +7,7 @@
 
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
-#include "stencil/local_domain.hpp"
+#include "stencil/local_domain.cuh"
 
 /*! An asynchronous sender
  */
@@ -49,6 +49,10 @@ public:
   NoOpSender(size_t srcRank, int64_t srcGPU, size_t dstRank, size_t dstGPU)
       : srcRank(srcRank), srcGPU(srcGPU), dstRank(dstRank), dstGPU(dstGPU) {}
 
+  NoOpSender(const NoOpSender &other)
+      : srcRank(other.srcRank), srcGPU(other.srcGPU), dstRank(other.dstRank),
+        dstGPU(other.dstGPU) {}
+
   void resize(const size_t n) override {
     n_ = n;
     return; // no-op
@@ -63,7 +67,7 @@ public:
   void wait() override {
 
     if (waiter.valid()) {
-      fprintf(stderr, "waiting\n");
+      fprintf(stderr, "NoOpSender::wait() waiting\n");
       waiter.wait();
     }
     return; // no-op
@@ -151,61 +155,67 @@ public:
 
 template <typename Sender> class FaceSender : public FaceSenderBase {
 private:
-  Sender sender;
-  const LocalDomain *domain_;
-  size_t dim_; // the face dimension
-  size_t idx_; // the data index from the domain
+  const LocalDomain *domain_; // the domain we are sending from
+  size_t dim_;                // the face dimension we are sending
+  bool pos_;                  // positive or negative face
 
-  char *buf_;
+  // one sender per domain data
+  std::vector<Sender> senders_;
+  // one device buffer per domain data
+  std::vector<char *> bufs_;
 
 public:
-  /*!
-   */
   FaceSender(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
-             size_t dstRank, size_t dstGPU, size_t dim, size_t idx)
-      : sender(srcRank, srcGPU, dstRank, dstGPU), domain_(&domain), dim_(dim),
-        idx_(idx) {}
+             size_t dstRank, size_t dstGPU, size_t dim, bool pos)
+      : senders_(domain.num_data(), Sender(srcRank, srcGPU, dstRank, dstGPU)),
+        domain_(&domain), dim_(dim), pos_(pos) {}
 
   virtual void allocate() override {
-    // bytes for face on dim
-    size_t numBytes = domain_->face_bytes(dim_)[idx_];
-
-#warning which device to use
-    // buffer for copy device to packed device
-    CUDA_RUNTIME(cudaMalloc(&buf_, numBytes));
-
-    sender.resize(numBytes);
+    // allocate space for each transfer
+    const int gpu = domain_->gpu();
+    CUDA_RUNTIME(cudaSetDevice(gpu));
+    for (size_t i = 0; i < domain_->num_data(); ++i) {
+      size_t numBytes = domain_->face_bytes(dim_)[i];
+      printf("FaceSender::allocate(): alloc %lu on %d\n", numBytes, gpu);
+      char *buf = nullptr;
+      CUDA_RUNTIME(cudaMalloc(&buf, numBytes));
+      bufs_.push_back(buf);
+      senders_[i].resize(numBytes);
+    }
   }
 
   virtual void send() override {
     allocate();
 
-    // size of the face
-    const size_t pitch = domain_->pitch();
-    const Dim3 facePos = domain_->face_pos();
-    const Dim3 faceExtent = domain_->face_extent();
-    const Dim3 rawSz = domain_->raw_size();
-    const char *src = domain_->data()[idx_];
+    const Dim3 facePos = domain_->face_pos(pos_, dim_);
+    const Dim3 faceExtent = domain_->face_extent(pos_, dim_);
 
-    // pack into buffer
-    if (domain_->elem_size()[idx_] == 4) {
+    for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
+      const Dim3 rawSz = domain_->raw_size(idx);
+      const char *src = domain_->data(idx);
+
+      // pack into buffer
       dim3 dimGrid(10, 10, 10);
       dim3 dimBlock(32, 4, 4);
-#warning which stream to use
-#warning which device to use
-      pack<<<dimGrid, dimBlock>>>((int *)buf_, (const int *)src, rawSz, pitch,
-                                  facePos, faceExtent);
-      CUDA_RUNTIME(cudaDeviceSynchronize());
-    } else {
-      assert(0 && "unsupported data element size");
-    }
+      size_t elemSize = domain_->elem_size()[idx];
+      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+      pack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
+          (int *)bufs_[idx], (const int *)src, rawSz, 0 /*pitch*/, facePos,
+          faceExtent, elemSize);
 
-    // copy to dst rank
-    sender.send(buf_);
+      CUDA_RUNTIME(cudaDeviceSynchronize());
+
+      // copy to dst rank
+      senders_[idx].send(bufs_[idx]);
+    }
   }
 
   // wait for send to be complete
-  virtual void wait() override { sender.wait(); }
+  virtual void wait() override {
+    for (auto &s : senders_) {
+      s.wait();
+    }
+  }
 };
 
 class FaceRecverBase {

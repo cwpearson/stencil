@@ -16,13 +16,16 @@ int main(int argc, char **argv) {
   auto temperatureHandle = dd.add_data<int>();
 
   dd.realize();
+  printf("main(): realize finished\n");
 
   for (auto &d : dd.domains()) {
     auto *pressure = d.get_data(pressureHandle);
     auto *temperature = d.get_data(temperatureHandle);
   }
 
+  printf("main(): call exchange\n");
   dd.exchange();
+  printf("main(): call exchange\n");
   dd.exchange();
 
   MPI_Finalize();
