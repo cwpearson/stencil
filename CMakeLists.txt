@@ -66,7 +66,8 @@ target_include_directories(stencil INTERFACE
   $<INSTALL_INTERFACE:include>
 )
 
-
-add_subdirectory(src)
+# "this command should be in the source directory root for CTest to find the test file"
+enable_testing() 
 add_subdirectory(test)
+add_subdirectory(src)
 

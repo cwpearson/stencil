@@ -35,6 +35,10 @@ public:
     return x != 0 || x != 0 || z != 0;
   }
 
+  size_t flatten() const {
+    return x * y * z;
+  }
+
   Dim3 operator>(const Dim3 &rhs) const {
     Dim3 result;
     result.x = x > rhs.x;

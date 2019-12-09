@@ -20,8 +20,10 @@ mpirun -n 4 src/main
     * joint stencils over multiple data types
     * user-defined stencil kernels
   * future
+    * pitched arrays
     * optimize communication between ranks on the same node
       * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
+      * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node
     * optimize communication for multi-GPU topology (comm-scope)
     * support diagonal radii (astaroth)
     * support nd instead of 3d
