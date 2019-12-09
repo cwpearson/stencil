@@ -10,19 +10,8 @@
 #include "cuda_runtime.hpp"
 
 #include "stencil/dim3.cuh"
+#include "stencil/local_domain.hpp"
 #include "stencil/tx.cuh"
-
-class DistributedDomain;
-class LocalDomain;
-
-template <typename T> class DataHandle {
-  friend class DistributedDomain;
-  friend class LocalDomain;
-  size_t id_;
-
-public:
-  DataHandle(size_t i) : id_(i) {}
-};
 
 // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
 std::vector<size_t> prime_factors(size_t n) {
@@ -58,150 +47,6 @@ double cubeness(double x, double y, double z) {
  */
 size_t div_ceil(size_t n, size_t d) { return (n + d - 1) / d; }
 
-class LocalDomain {
-  friend class DistributedDomain;
-
-private:
-  // my local data size
-  Dim3 sz_;
-
-  //!< radius of stencils that will be applied
-  size_t radius_;
-
-  //!< backing info for the actual data I have
-  std::vector<char *> dataPtrs_;
-  std::vector<size_t> dataElemSize_;
-
-  //!< backing info for the halo exchange buffers for each data
-  std::vector<char *> pzHaloRecv_;
-  std::vector<char *> mzHaloRecv_;
-  std::vector<char *> pyHaloRecv_;
-  std::vector<char *> myHaloRecv_;
-  std::vector<char *> pxHaloRecv_;
-  std::vector<char *> mxHaloRecv_;
-
-  std::vector<char *> pzHaloSend_;
-  std::vector<char *> mzHaloSend_;
-  std::vector<char *> pyHaloSend_;
-  std::vector<char *> myHaloSend_;
-  std::vector<char *> pxHaloSend_;
-  std::vector<char *> mxHaloSend_;
-
-public:
-  LocalDomain(Dim3 sz) : sz_(sz) {}
-
-  // the sizes of the faces in bytes for each data along the requested dimension
-  // x = 0, y = 1, etc
-  std::vector<size_t> face_bytes(const size_t dim) const {
-    std::vector<size_t> results;
-
-    for (auto elemSz : dataElemSize_) {
-      size_t bytes = elemSz;
-      if (0 == dim) {
-        // y * z * radius_
-        bytes *= (sz_.y - 2 * radius_) * (sz_.z - 2 * radius_) * radius_;
-      } else if (1 == dim) {
-        // x * z * radius_
-        bytes *= (sz_.x - 2 * radius_) * (sz_.z - 2 * radius_) * radius_;
-      } else if (2 == dim) {
-        // x * y * radius_
-        bytes *= (sz_.x - 2 * radius_) * (sz_.y - 2 * radius_) * radius_;
-
-      } else {
-        assert(0);
-      }
-      results.push_back(bytes);
-    }
-    return results;
-  }
-
-  // the sizes of the edges in bytes for each data along the requested dimension
-  // x = 0, y = 1, etc
-  std::vector<size_t> edge_bytes(const size_t dim0, const size_t dim1) const {
-    std::vector<size_t> results;
-
-    assert(dim0 != dim1 && "no edge between matching dims");
-
-    for (auto elemSz : dataElemSize_) {
-      size_t bytes = elemSz;
-      if (0 != dim0 && 0 != dim1) {
-        bytes *= sz_[0];
-      } else if (1 != dim0 && 1 != dim1) {
-        bytes *= sz_[1];
-      } else if (2 != dim0 && 2 != dim1) {
-        bytes *= sz_[2];
-      } else {
-        assert(0);
-      }
-      results.push_back(bytes);
-    }
-    return results;
-  }
-
-  // the size of the halo corner in bytes for each data
-  std::vector<size_t> corner_bytes() const {
-    std::vector<size_t> results;
-    for (auto elemSz : dataElemSize_) {
-      size_t bytes = elemSz * radius_ * radius_ * radius_;
-      results.push_back(bytes);
-    }
-    return results;
-  }
-
-  template <typename T> DataHandle<T> add_data() {
-    dataElemSize_.push_back(sizeof(T));
-    return DataHandle<T>(dataElemSize_.size() - 1);
-  }
-
-  template <typename T> T *get_data(const DataHandle<T> handle) {
-    assert(dataElemSize_.size() > handle.id_);
-    assert(dataPtrs_.size() > handle.id_);
-    void *ptr = dataPtrs_[handle.id_];
-    assert(sizeof(T) == dataElemSize_[handle.id_]);
-    return static_cast<T *>(ptr);
-  }
-
-  void realize() {
-
-    // allocate each data region
-    for (size_t i = 0; i < dataElemSize_.size(); ++i) {
-      size_t elemSz = dataElemSize_[i];
-
-      size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
-                          (sz_.z + 2 * radius_)) *
-                         elemSz;
-      std::cerr << "Allocate " << elemBytes << "\n";
-      char *p = new char[elemBytes];
-      assert(uintptr_t(p) % elemSz == 0 && "allocation should be aligned");
-      dataPtrs_.push_back(p);
-    }
-
-    // allocate halos
-    for (auto elemSz : dataElemSize_) {
-      std::vector<size_t> xBytes = face_bytes(0);
-      for (auto bytes : xBytes) {
-#warning unimplemented
-      }
-      std::vector<size_t> yBytes = face_bytes(1);
-      for (auto bytes : yBytes) {
-#warning unimplemented
-      }
-      std::vector<size_t> zBytes = face_bytes(2);
-      for (auto bytes : zBytes) {
-        char *data;
-        CUDA_RUNTIME(cudaMalloc(&data, bytes));
-        pzHaloSend_.push_back(data);
-        CUDA_RUNTIME(cudaMalloc(&data, bytes));
-        mzHaloSend_.push_back(data);
-        CUDA_RUNTIME(cudaMalloc(&data, bytes));
-        pzHaloRecv_.push_back(data);
-        CUDA_RUNTIME(cudaMalloc(&data, bytes));
-        mzHaloRecv_.push_back(data);
-      }
-    }
-  }
-};
-
 class DistributedDomain {
 private:
   Dim3 size_;
@@ -227,10 +72,10 @@ private:
 
   // Senders / receivers for each domain
   // faces
-  std::vector<Sender *> pzSenders_; // senders for +z
-  std::vector<Recver *> pzRecvers_;
-  std::vector<Sender *> mzSenders_; // senders for -z
-  std::vector<Recver *> mzRecvers_;
+  std::vector<FaceSenderBase *> pzSenders_; // senders for +z
+  std::vector<FaceRecverBase *> pzRecvers_;
+  std::vector<FaceSenderBase *> mzSenders_; // senders for -z
+  std::vector<FaceRecverBase *> mzRecvers_;
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -419,17 +264,13 @@ public:
         int64_t srcRank = get_rank(srcIdx);
         int64_t srcGPU = get_gpu(srcIdx);
         int64_t dstRank = get_rank(dstIdx);
-        pzSenders_.push_back(new NoOpSender(srcRank, dstRank, srcGPU));
+        int64_t dstGPU = get_gpu(dstIdx);
+        pzSenders_.push_back(new FaceSender<NoOpSender>(
+            d, srcRank, srcGPU, dstRank, dstGPU, 2 /*z*/, di));
       }
 
       // create recvers
       for (auto dz : deltas) {
-        auto dstIdx = indices_[di];
-        Dim3 srcIdx = srcIdx - Dim3(0, 0, dz);
-        int64_t srcRank = get_rank(srcIdx);
-        int64_t dstGPU = get_gpu(dstIdx);
-        int64_t dstRank = get_rank(dstIdx);
-        pzRecvers_.push_back(new NoOpRecver(srcRank, dstRank, dstGPU));
       }
       for (auto dy : deltas) {
       }
@@ -446,12 +287,9 @@ public:
 
     for (size_t di = 0; di < domains_.size(); ++di) {
       auto &d = domains_[di];
-      std::vector<size_t> numBytes = d.face_bytes(2); // z
       for (size_t i = 0; i < d.dataElemSize_.size(); ++i) {
-        pzRecvers_[di]->resize(numBytes[i]);
-        pzSenders_[di]->resize(numBytes[i]);
-        pzRecvers_[di]->recv(d.pzHaloRecv_[i]);
-        pzSenders_[di]->send(d.pzHaloSend_[i]);
+        pzRecvers_[di]->recv();
+        pzSenders_[di]->send();
       }
 #warning unimplemented
     }
