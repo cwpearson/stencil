@@ -10,7 +10,7 @@ int main(int argc, char **argv) {
 
   DistributedDomain dd(x, y, z);
 
-  dd.set_radius(1, 0, 3);
+  dd.set_radius(2);
 
   auto pressureHandle = dd.add_data<double>();
   auto temperatureHandle = dd.add_data<int>();

@@ -53,10 +53,10 @@ if(MPI_FOUND)
   target_link_libraries(stencil INTERFACE ${MPI_CXX_LIBRARIES})
   # target_link_libraries(stencil INTERFACE MPI::MPI_CXX)
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_MPI=1)
-  message(STATUS "compiling with STENCIL_USE_MPI=1")
+  message(STATUS "MPI found, compiling with STENCIL_USE_MPI=1")
 else()
   target_compile_definitions(STENCIL INTERFACE -DSTENCIL_USE_MPI=0)
-  message(STATUS "compiling with STENCIL_USE_MPI=0")
+  message(STATUS "MPI found,  compiling with STENCIL_USE_MPI=0")
 endif()
 
 ## Add include directories

@@ -66,7 +66,7 @@ private:
   Dim3 sz_;
 
   //!< radius of stencils that will be applied
-  Dim3 radius_;
+  size_t radius_;
 
   //!< backing info for the actual data I have
   std::vector<char *> dataPtrs_;
@@ -98,14 +98,14 @@ public:
     for (auto elemSz : dataElemSize_) {
       size_t bytes = elemSz;
       if (0 == dim) {
-        // y * z * radius_.x
-        bytes *= (sz_.y - 2 * radius_.y) * (sz_.z - 2 * radius_.z) * radius_.x;
+        // y * z * radius_
+        bytes *= (sz_.y - 2 * radius_) * (sz_.z - 2 * radius_) * radius_;
       } else if (1 == dim) {
-        // x * z * radius_.y
-        bytes *= (sz_.x - 2 * radius_.x) * (sz_.z - 2 * radius_.z) * radius_.y;
+        // x * z * radius_
+        bytes *= (sz_.x - 2 * radius_) * (sz_.z - 2 * radius_) * radius_;
       } else if (2 == dim) {
-        // x * y * radius_.z
-        bytes *= (sz_.x - 2 * radius_.x) * (sz_.y - 2 * radius_.y) * radius_.z;
+        // x * y * radius_
+        bytes *= (sz_.x - 2 * radius_) * (sz_.y - 2 * radius_) * radius_;
 
       } else {
         assert(0);
@@ -142,7 +142,7 @@ public:
   std::vector<size_t> corner_bytes() const {
     std::vector<size_t> results;
     for (auto elemSz : dataElemSize_) {
-      size_t bytes = elemSz * radius_.x * radius_.y * radius_.z;
+      size_t bytes = elemSz * radius_ * radius_ * radius_;
       results.push_back(bytes);
     }
     return results;
@@ -167,8 +167,8 @@ public:
     for (size_t i = 0; i < dataElemSize_.size(); ++i) {
       size_t elemSz = dataElemSize_[i];
 
-      size_t elemBytes = ((sz_.x + 2 * radius_.x) * (sz_.y + 2 * radius_.y) *
-                          (sz_.z + 2 * radius_.z)) *
+      size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
+                          (sz_.z + 2 * radius_)) *
                          elemSz;
       std::cerr << "Allocate " << elemBytes << "\n";
       char *p = new char[elemBytes];
@@ -213,7 +213,7 @@ private:
   std::vector<int> gpus_;
 
   // the stencil radius
-  Dim3 radius_;
+  size_t radius_;
 
   // the dimension of the domain in MPI ranks and GPUs
   Dim3 rankDim_;
@@ -225,7 +225,8 @@ private:
   // the index of the domain in the distributed domain
   std::vector<Dim3> indices_;
 
-  // The sender for each domain
+  // Senders / receivers for each domain
+  // faces
   std::vector<Sender *> pzSenders_; // senders for +z
   std::vector<Recver *> pzRecvers_;
   std::vector<Sender *> mzSenders_; // senders for -z
@@ -244,7 +245,8 @@ public:
 
     // create a communicator for this node
     MPI_Comm shmcomm;
-    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shmcomm);
+    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
+                        &shmcomm);
     int shmrank, shmsize;
     MPI_Comm_rank(shmcomm, &shmrank);
     MPI_Comm_size(shmcomm, &shmsize);
@@ -259,18 +261,16 @@ public:
     } else { // if more ranks, share gpus among ranks
       gpus_.push_back(shmrank % deviceCount);
     }
-    
+
     for (const auto gpu : gpus_) {
-      printf("rank %d/%d local=%d using gpu %d\n", rank_, worldSize_, shmrank, gpu);
+      printf("rank %d/%d local=%d using gpu %d\n", rank_, worldSize_, shmrank,
+             gpu);
     }
-
-    
-
   }
 
   std::vector<LocalDomain> &domains() { return domains_; }
 
-  void set_radius(size_t x, size_t y, size_t z) { radius_ = Dim3(x, y, z); }
+  void set_radius(size_t r) { radius_ = r; }
 
   template <typename T> DataHandle<T> add_data() {
     dataElemSize_.push_back(sizeof(T));
@@ -390,7 +390,7 @@ public:
 
       domains_.push_back(ld);
       Dim3 idx = rankIdx * gpuDim_ + gpuIdx;
-      printf("rank,gpu=%d,%lu => idx %ld %ld %ld\n", rank_, gpu, idx.x, idx.y,
+      printf("rank,gpu=%d,%d => idx %ld %ld %ld\n", rank_, gpu, idx.x, idx.y,
              idx.z);
       indices_.push_back(rankIdx * gpuDim_ + gpuIdx);
     }
