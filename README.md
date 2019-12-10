@@ -4,6 +4,8 @@ A prototype MPI/CUDA stencil halo exchange library
 
 ## Quick Start
 
+Install MPI and CUDA, then
+
 ```
 git clone git@github.com:cwpearson/stencil.git
 cd stencil
@@ -15,6 +17,14 @@ mpirun -n 4 src/main
 ```
 
 ## Tests
+
+Install MPI and CUDA, then
+
+```
+make && make test
+```
+
+Some tests are tagged:
 
 MPI tests only
 ```
