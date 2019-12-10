@@ -3,8 +3,8 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
-#include <vector>
 #include <set>
+#include <vector>
 
 #include <mpi.h>
 
@@ -77,6 +77,14 @@ private:
   std::vector<FaceRecverBase *> pzRecvers_;
   std::vector<FaceSenderBase *> mzSenders_; // senders for -z
   std::vector<FaceRecverBase *> mzRecvers_;
+  std::vector<FaceSenderBase *> pySenders_; // senders for +y
+  std::vector<FaceRecverBase *> pyRecvers_;
+  std::vector<FaceSenderBase *> mySenders_; // senders for -y
+  std::vector<FaceRecverBase *> myRecvers_;
+  std::vector<FaceSenderBase *> pxSenders_; // senders for +x
+  std::vector<FaceRecverBase *> pxRecvers_;
+  std::vector<FaceSenderBase *> mxSenders_; // senders for -x
+  std::vector<FaceRecverBase *> mxRecvers_;
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -123,7 +131,8 @@ public:
       colocated_.insert(r);
     }
     assert(colocated_.count(rank_) == 1 && "should be colocated with self");
-    printf("DistributedDomain::ctor(): rank %d colocated with %lu ranks\n", rank_, colocated_.size());
+    printf("DistributedDomain::ctor(): rank %d colocated with %lu ranks\n",
+           rank_, colocated_.size());
   }
 
   std::vector<LocalDomain> &domains() { return domains_; }
@@ -266,62 +275,126 @@ public:
       assert(domains_.size() == indices_.size());
 
       auto &d = domains_[di];
-      std::vector<int> deltas{-1, 1};
 
-      // create senders
-      for (auto dx : deltas) {
-      }
-      for (auto dz : deltas) {
-      }
-      for (auto dz : deltas) {
-        Dim3 srcIdx = indices_[di];
-        Dim3 dstIdx = (srcIdx + Dim3(0, 0, dz)).wrap(rankDim_ * gpuDim_);
-        printf("dz=%d: %ld %ld %ld -> %ld %ld %ld\n", dz, srcIdx.x, srcIdx.y,
-               srcIdx.z, dstIdx.x, dstIdx.y, dstIdx.z);
-        int64_t srcRank = rank_;
-        int64_t srcGPU = d.gpu();
-        assert(srcRank == get_rank(srcIdx));
-        assert(srcGPU == get_gpu(srcIdx));
-        int64_t dstRank = get_rank(dstIdx);
-        int64_t dstGPU = get_gpu(dstIdx);
+      for (const auto dim : {0, 1, 2}) { // dimensions (x,y,z)
+        for (const auto dir : {-1, 1}) { // direction (neg, pos)
 
-        FaceSenderBase *sender;
-        if (srcRank == dstRank) { // both domains onwned by this rank
-          printf("DistributedDomain.realize(): same rank\n");
-          sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank, dstGPU, 2/*z*/, dz > 0 /*pos*/);
-        } else if (colocated_.count(dstRank)) { // both domains on this node
-          printf("DistributedDomain.realize(): colocated\n");
-          sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank, dstGPU, 2/*z*/, dz > 0 /*pos*/);
-        } else { // domains on different nodes
-          printf("DistributedDomain.realize(): different nodes\n");
-          sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank, dstGPU, 2/*z*/, dz > 0 /*pos*/);
+          Dim3 srcIdx = indices_[di];
+          Dim3 dstIdx = srcIdx;
+          if (dim == 0) {
+            dstIdx[dim] += dir;
+            dstIdx = dstIdx.wrap(rankDim_ * gpuDim_);
+          }
+
+          printf("dim=%d dir=%d: %ld %ld %ld -> %ld %ld %ld\n", dim, dir,
+                 srcIdx.x, srcIdx.y, srcIdx.z, dstIdx.x, dstIdx.y, dstIdx.z);
+          int64_t srcRank = rank_;
+          int64_t srcGPU = d.gpu();
+          assert(srcRank == get_rank(srcIdx));
+          assert(srcGPU == get_gpu(srcIdx));
+          int64_t dstRank = get_rank(dstIdx);
+          int64_t dstGPU = get_gpu(dstIdx);
+
+          FaceSenderBase *sender = nullptr;
+          if (srcRank == dstRank) { // both domains onwned by this rank
+            printf(
+                "DistributedDomain.realize(): dim=%d dir=%d send same rank\n",
+                dim, dir);
+            sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank,
+                                               dstGPU, dim, dir > 0 /*pos*/);
+          } else if (colocated_.count(dstRank)) { // both domains on this node
+            printf("DistributedDomain.realize(): colocated\n");
+            sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank,
+                                               dstGPU, dim, dir > 0 /*pos*/);
+          } else { // domains on different nodes
+            printf("DistributedDomain.realize(): different nodes\n");
+            sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank,
+                                               dstGPU, dim, dir > 0 /*pos*/);
+          }
+
+          // if positive face is sent, recv negative face.
+          FaceRecverBase *recver = nullptr;
+          if (srcRank == dstRank) { // both domains onwned by this rank
+            printf("DistributedDomain.realize(): same rank\n");
+            recver = new FaceRecver<AnyRecver>(d, srcRank, srcGPU, dstRank,
+                                               dstGPU, dim, dir < 0 /*pos*/);
+          } else if (colocated_.count(dstRank)) { // both domains on this node
+            printf("DistributedDomain.realize(): colocated\n");
+            recver = new FaceRecver<AnyRecver>(d, srcRank, srcGPU, dstRank,
+                                               dstGPU, dim, dir < 0 /*pos*/);
+          } else { // domains on different nodes
+            printf("DistributedDomain.realize(): different nodes\n");
+            recver = new FaceRecver<AnyRecver>(d, srcRank, srcGPU, dstRank,
+                                               dstGPU, dim, dir < 0 /*pos*/);
+          }
+
+          assert(sender != nullptr);
+          assert(recver != nullptr);
+          if (1 == dir) {
+            if (0 == dim) {
+              pxSenders_.push_back(sender);
+              pxSenders_.back()->allocate();
+              pxRecvers_.push_back(recver);
+              pxRecvers_.back()->allocate();
+            } else if (1 == dim) {
+              pySenders_.push_back(sender);
+              pySenders_.back()->allocate();
+              pyRecvers_.push_back(recver);
+              pyRecvers_.back()->allocate();
+            } else if (2 == dim) {
+              pzSenders_.push_back(sender);
+              pzSenders_.back()->allocate();
+              pzRecvers_.push_back(recver);
+              pzRecvers_.back()->allocate();
+            } else {
+              assert(0 && "only 3D supported");
+            }
+          } else if (-1 == dir) {
+            if (0 == dim) {
+              mxSenders_.push_back(sender);
+              mxSenders_.back()->allocate();
+              mxRecvers_.push_back(recver);
+              mxRecvers_.back()->allocate();
+            } else if (1 == dim) {
+              mySenders_.push_back(sender);
+              mySenders_.back()->allocate();
+              myRecvers_.push_back(recver);
+              myRecvers_.back()->allocate();
+            } else if (2 == dim) {
+              mzSenders_.push_back(sender);
+              mzSenders_.back()->allocate();
+              mzRecvers_.push_back(recver);
+              mzRecvers_.back()->allocate();
+            } else {
+              assert(0 && "only 3D supported");
+            }
+          } else {
+            assert(0 && "unexpected direction");
+          }
         }
-        assert(sender != nullptr);
-        pzSenders_.push_back(sender);
-        pzSenders_.back()->allocate();
-      }
-
-      // create recvers
-      for (auto dz : deltas) {
-      }
-      for (auto dy : deltas) {
-      }
-      for (auto dz : deltas) {
       }
     }
-
-}
-
+  }
 
   /*!
   start a halo exchange and return.
   Call sync() to block until exchange is done.
   */
   void exchange_async() {
+    assert(pzSenders_.size() == domains_.size());
+    assert(pySenders_.size() == domains_.size());
+    assert(pxSenders_.size() == domains_.size());
+    assert(pzRecvers_.size() == domains_.size());
+    assert(pyRecvers_.size() == domains_.size());
+    assert(pxRecvers_.size() == domains_.size());
+
     for (size_t di = 0; di < domains_.size(); ++di) {
-        // pzRecvers_[di]->recv();
-        pzSenders_[di]->send();
-#warning exchange_async unfinished
+      pzRecvers_[di]->recv();
+      pyRecvers_[di]->recv();
+      pxRecvers_[di]->recv();
+      pzSenders_[di]->send();
+      pySenders_[di]->send();
+      pxSenders_[di]->send();
     }
   }
 
@@ -334,7 +407,19 @@ public:
     for (auto &tx : pzSenders_) {
       tx->wait();
     }
+    for (auto &tx : pySenders_) {
+      tx->wait();
+    }
+    for (auto &tx : pxSenders_) {
+      tx->wait();
+    }
     for (auto &tx : pzRecvers_) {
+      tx->wait();
+    }
+    for (auto &tx : pyRecvers_) {
+      tx->wait();
+    }
+    for (auto &tx : pxRecvers_) {
       tx->wait();
     }
 
