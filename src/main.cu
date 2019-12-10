@@ -19,8 +19,10 @@ int main(int argc, char **argv) {
   printf("main(): realize finished\n");
 
   for (auto &d : dd.domains()) {
-    auto *pressure = d.get_data(pressureHandle);
-    auto *temperature = d.get_data(temperatureHandle);
+    auto *pressure = d.get_curr(pressureHandle);
+    auto *temperature = d.get_curr(temperatureHandle);
+    auto *np = d.get_next(pressureHandle);
+    auto *nt = d.get_next(temperatureHandle);
   }
 
   printf("main(): call exchange\n");

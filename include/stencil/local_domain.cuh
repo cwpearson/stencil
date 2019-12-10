@@ -1,5 +1,10 @@
 #pragma once
 
+#include <iostream>
+
+#include "stencil/dim3.cuh"
+#include "stencil/cuda_runtime.hpp"
+
 class DistributedDomain;
 
 template <typename T> class DataHandle {
@@ -22,7 +27,8 @@ private:
   size_t radius_;
 
   //!< backing info for the actual data I have
-  std::vector<char *> dataPtrs_;
+  std::vector<char *> currDataPtrs_;
+  std::vector<char *> nextDataPtrs_;
   std::vector<size_t> dataElemSize_;
 
   int dev_;             // CUDA device
@@ -31,89 +37,114 @@ private:
 public:
   LocalDomain(Dim3 sz, int dev) : sz_(sz), dev_(dev), stream_(0) {}
 
-  // the sizes of the faces in bytes for each data along the requested dimension
-  // x = 0, y = 1, etc
-  std::vector<size_t> face_bytes(const size_t dim) const {
-    std::vector<size_t> results;
+  ~LocalDomain() {
 
-    for (auto elemSz : dataElemSize_) {
-      size_t bytes = elemSz;
-      if (0 == dim) {
-        // y * z * radius_
-        bytes *= (sz_.y - 2 * radius_) * (sz_.z - 2 * radius_) * radius_;
-      } else if (1 == dim) {
-        // x * z * radius_
-        bytes *= (sz_.x - 2 * radius_) * (sz_.z - 2 * radius_) * radius_;
-      } else if (2 == dim) {
-        // x * y * radius_
-        bytes *= (sz_.x - 2 * radius_) * (sz_.y - 2 * radius_) * radius_;
-
-      } else {
-        assert(0);
-      }
-      results.push_back(bytes);
+    CUDA_RUNTIME(cudaSetDevice(dev_));
+    for (auto p : currDataPtrs_) {
+      CUDA_RUNTIME(cudaFree(p));
     }
-    return results;
+
+    for (auto p : nextDataPtrs_) {
+      CUDA_RUNTIME(cudaFree(p));
+    }
+
+    if (stream_ != 0) {
+      CUDA_RUNTIME(cudaStreamDestroy(stream_));
+    }
+  }
+
+  // the sizes of the faces in bytes for each data along the requested dimension
+  // (x = 0, y = 1, etc) for data entry idx
+  size_t face_bytes(const size_t dim, const size_t idx) const {
+    assert(idx < dataElemSize_.size());
+    size_t bytes = dataElemSize_[idx];
+    if (0 == dim) { // x face = y * z * radius_
+      bytes *= sz_.y * sz_.z * radius_;
+    } else if (1 == dim) { // y face = x * z * radius
+      bytes *= sz_.x * sz_.z * radius_;
+    } else if (2 == dim) { // z face = x * y * radius_
+      bytes *= sz_.x * sz_.y * radius_;
+    } else {
+      assert(0);
+    }
+    return bytes;
   }
 
   // the sizes of the edges in bytes for each data along the requested dimension
   // x = 0, y = 1, etc
-  std::vector<size_t> edge_bytes(const size_t dim0, const size_t dim1) const {
-    std::vector<size_t> results;
+  size_t edge_bytes(const size_t dim0, const size_t dim1,
+                                 const size_t idx) const {
 
     assert(dim0 != dim1 && "no edge between matching dims");
-
-    for (auto elemSz : dataElemSize_) {
-      size_t bytes = elemSz;
-      if (0 != dim0 && 0 != dim1) {
-        bytes *= sz_[0];
-      } else if (1 != dim0 && 1 != dim1) {
-        bytes *= sz_[1];
-      } else if (2 != dim0 && 2 != dim1) {
-        bytes *= sz_[2];
-      } else {
-        assert(0);
-      }
-      results.push_back(bytes);
+    assert(idx < dataElemSize_.size());
+    size_t bytes = dataElemSize_[idx];
+    if (0 != dim0 && 0 != dim1) {
+      bytes *= sz_[0];
+    } else if (1 != dim0 && 1 != dim1) {
+      bytes *= sz_[1];
+    } else if (2 != dim0 && 2 != dim1) {
+      bytes *= sz_[2];
+    } else {
+      assert(0);
     }
-    return results;
+    return bytes;
   }
 
   // the size of the halo corner in bytes for each data
-  std::vector<size_t> corner_bytes() const {
-    std::vector<size_t> results;
-    for (auto elemSz : dataElemSize_) {
-      size_t bytes = elemSz * radius_ * radius_ * radius_;
-      results.push_back(bytes);
-    }
-    return results;
+  size_t corner_bytes(const size_t idx) const {
+    assert(idx < dataElemSize_.size());
+    return dataElemSize_[idx] * radius_ * radius_ * radius_;
   }
 
   /*
    */
   size_t num_data() const {
-    assert(dataElemSize_.size() == dataPtrs_.size());
-    return dataPtrs_.size();
+    assert(currDataPtrs_.size() == nextDataPtrs_.size());
+    assert(dataElemSize_.size() == currDataPtrs_.size());
+    return currDataPtrs_.size();
   }
 
   template <typename T> DataHandle<T> add_data() {
     dataElemSize_.push_back(sizeof(T));
+    currDataPtrs_.push_back(nullptr);
+    nextDataPtrs_.push_back(nullptr);
     return DataHandle<T>(dataElemSize_.size() - 1);
   }
 
-  template <typename T> T *get_data(const DataHandle<T> handle) {
+  /*! \brief set the radius. Should only be called by DistributedDomain
+   */
+  void set_radius(size_t r) { radius_ = r; }
+
+  /*! \brief retrieve a pointer to current domain values (to read in stencil)
+  */
+  template <typename T> T *get_curr(const DataHandle<T> handle) {
     assert(dataElemSize_.size() > handle.id_);
-    assert(dataPtrs_.size() > handle.id_);
-    void *ptr = dataPtrs_[handle.id_];
+    assert(currDataPtrs_.size() > handle.id_);
+    void *ptr = currDataPtrs_[handle.id_];
     assert(sizeof(T) == dataElemSize_[handle.id_]);
     return static_cast<T *>(ptr);
   }
 
-  std::vector<size_t> elem_size() const { return dataElemSize_; }
+  /*! \brief retrieve a pointer to next domain values (to set in stencil)
+  */
+  template <typename T> T *get_next(const DataHandle<T> handle) {
+    assert(dataElemSize_.size() > handle.id_);
+    assert(nextDataPtrs_.size() > handle.id_);
+    void *ptr = nextDataPtrs_[handle.id_];
+    assert(sizeof(T) == dataElemSize_[handle.id_]);
+    return static_cast<T *>(ptr);
+  }
 
-  char *data(size_t idx) const {
-    assert(idx < dataPtrs_.size());
-    return dataPtrs_[idx];
+  size_t elem_size(const size_t idx) const { return dataElemSize_[idx]; }
+
+  char *curr_data(size_t idx) const {
+    assert(idx < currDataPtrs_.size());
+    return currDataPtrs_[idx];
+  }
+
+  char *next_data(size_t idx) const {
+    assert(idx < nextDataPtrs_.size());
+    return nextDataPtrs_[idx];
   }
 
   size_t pitch() const {
@@ -188,9 +219,15 @@ public:
                           (sz_.z + 2 * radius_)) *
                          elemSz;
       std::cerr << "Allocate " << elemBytes << "\n";
-      char *p = new char[elemBytes];
-      assert(uintptr_t(p) % elemSz == 0 && "allocation should be aligned");
-      dataPtrs_.push_back(p);
+      char *c = nullptr;
+      char *n = nullptr;
+      CUDA_RUNTIME(cudaSetDevice(dev_));
+      CUDA_RUNTIME(cudaMalloc(&c, elemBytes));
+      CUDA_RUNTIME(cudaMalloc(&n, elemBytes));
+      assert(uintptr_t(c) % elemSz == 0 && "allocation should be aligned");
+      assert(uintptr_t(n) % elemSz == 0 && "allocation should be aligned");
+      currDataPtrs_[i] = c;
+      nextDataPtrs_[i] = n;
     }
   }
 };

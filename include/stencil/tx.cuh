@@ -274,7 +274,7 @@ public:
 
     // preallocate each sender
     for (size_t i = 0; i < domain_->num_data(); ++i) {
-      size_t numBytes = domain_->face_bytes(dim_)[i];
+      size_t numBytes = domain_->face_bytes(dim_, i);
       printf("FaceSender::allocate(): alloc %lu on %d\n", numBytes, gpu);
       char *buf = nullptr;
       CUDA_RUNTIME(cudaMalloc(&buf, numBytes));
@@ -291,12 +291,12 @@ public:
 
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
       const Dim3 rawSz = domain_->raw_size(idx);
-      const char *src = domain_->data(idx);
+      const char *src = domain_->curr_data(idx);
 
       // pack into buffer
       dim3 dimGrid(20, 20, 20);
       dim3 dimBlock(32, 4, 4);
-      size_t elemSize = domain_->elem_size()[idx];
+      size_t elemSize = domain_->elem_size(idx);
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
       pack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
           (int *)bufs_[idx], (const int *)src, rawSz, 0 /*pitch*/, facePos,

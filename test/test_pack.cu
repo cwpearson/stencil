@@ -4,9 +4,7 @@
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.cuh"
 
-TEMPLATE_TEST_CASE("pack", "[factorial][template]", int) {
-  REQUIRE(1 == 1);
-
+TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
   Dim3 arrSz(3, 4, 5);
   size_t pitch = sizeof(TestType) * (arrSz.x * arrSz.y);
 
