@@ -105,10 +105,18 @@ public:
   }
 
   template <typename T> DataHandle<T> add_data() {
-    dataElemSize_.push_back(sizeof(T));
+    return DataHandle<T>(add_data(sizeof(T)));
+  }
+
+  /*! Add an untyped data field with an element size of n.
+
+  \returns The index of the added data
+  */
+  size_t add_data(size_t n) {
+    dataElemSize_.push_back(n);
     currDataPtrs_.push_back(nullptr);
     nextDataPtrs_.push_back(nullptr);
-    return DataHandle<T>(dataElemSize_.size() - 1);
+    return dataElemSize_.size() - 1;
   }
 
   /*! \brief set the radius. Should only be called by DistributedDomain
@@ -211,14 +219,17 @@ public:
 
   void realize() {
 
+    assert(currDataPtrs_.size() == nextDataPtrs_.size());
+    assert(dataElemSize_.size() == nextDataPtrs_.size());
+
     // allocate each data region
-    for (size_t i = 0; i < dataElemSize_.size(); ++i) {
+    for (size_t i = 0; i < num_data(); ++i) {
       size_t elemSz = dataElemSize_[i];
 
       size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
                           (sz_.z + 2 * radius_)) *
                          elemSz;
-      std::cerr << "Allocate " << elemBytes << "\n";
+      std::cerr << "Allocate " << elemBytes << "B on gpu " << dev_ << "\n";
       char *c = nullptr;
       char *n = nullptr;
       CUDA_RUNTIME(cudaSetDevice(dev_));

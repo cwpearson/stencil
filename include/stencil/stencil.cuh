@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <vector>
+#include <set>
 
 #include <mpi.h>
 
@@ -80,6 +81,8 @@ private:
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
 
+  std::set<int64_t> colocated_; //<! colocated MPI ranks
+
 public:
   DistributedDomain(size_t x, size_t y, size_t z)
       : size_(x, y, z), rankDim_(1, 1, 1), gpuDim_(1, 1, 1) {
@@ -95,6 +98,7 @@ public:
     int shmrank, shmsize;
     MPI_Comm_rank(shmcomm, &shmrank);
     MPI_Comm_size(shmcomm, &shmsize);
+    printf("DistributedDomain::ctor(): shmcomm rank %d/%d\n", shmrank, shmsize);
 
     // if fewer ranks, round-robin GPUs to ranks
     if (shmsize <= deviceCount) {
@@ -111,6 +115,15 @@ public:
       printf("rank %d/%d local=%d using gpu %d\n", rank_, worldSize_, shmrank,
              gpu);
     }
+
+    // Give every rank a list of co-located ranks
+    std::vector<int> colocated(shmsize);
+    MPI_Allgather(&rank_, 1, MPI_INT, colocated.data(), 1, MPI_INT, shmcomm);
+    for (auto &r : colocated) {
+      colocated_.insert(r);
+    }
+    assert(colocated_.count(rank_) == 1 && "should be colocated with self");
+    printf("DistributedDomain::ctor(): rank %d colocated with %lu ranks\n", rank_, colocated_.size());
   }
 
   std::vector<LocalDomain> &domains() { return domains_; }
@@ -231,19 +244,22 @@ public:
       gpuIdx.z = i;
 
       LocalDomain ld(splitSize, gpu);
-      ld.dataElemSize_ = dataElemSize_;
       ld.radius_ = radius_;
+      for (size_t dataIdx = 0; dataIdx < dataElemSize_.size(); ++dataIdx) {
+        ld.add_data(dataElemSize_[dataIdx]);
+      }
 
       domains_.push_back(ld);
       Dim3 idx = rankIdx * gpuDim_ + gpuIdx;
       printf("rank,gpu=%d,%d => idx %ld %ld %ld\n", rank_, gpu, idx.x, idx.y,
              idx.z);
-      indices_.push_back(rankIdx * gpuDim_ + gpuIdx);
+      indices_.push_back(idx);
     }
 
     // realize local domains
     for (auto &d : domains_) {
       d.realize();
+      printf("DistributedDomain.realize(): finished creating LocalDomain\n");
     }
 
     for (size_t di = 0; di < domains_.size(); ++di) {
@@ -258,16 +274,30 @@ public:
       for (auto dz : deltas) {
       }
       for (auto dz : deltas) {
-        auto srcIdx = indices_[di];
+        Dim3 srcIdx = indices_[di];
         Dim3 dstIdx = (srcIdx + Dim3(0, 0, dz)).wrap(rankDim_ * gpuDim_);
         printf("dz=%d: %ld %ld %ld -> %ld %ld %ld\n", dz, srcIdx.x, srcIdx.y,
                srcIdx.z, dstIdx.x, dstIdx.y, dstIdx.z);
-        int64_t srcRank = get_rank(srcIdx);
-        int64_t srcGPU = get_gpu(srcIdx);
+        int64_t srcRank = rank_;
+        int64_t srcGPU = d.gpu();
+        assert(srcRank == get_rank(srcIdx));
+        assert(srcGPU == get_gpu(srcIdx));
         int64_t dstRank = get_rank(dstIdx);
         int64_t dstGPU = get_gpu(dstIdx);
-        pzSenders_.push_back(new FaceSender<NoOpSender>(
-            d, srcRank, srcGPU, dstRank, dstGPU, 2 /*z*/, true /*pos*/));
+
+        FaceSenderBase *sender;
+        if (srcRank == dstRank) { // both domains onwned by this rank
+          printf("DistributedDomain.realize(): same rank\n");
+          sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank, dstGPU, 2/*z*/, dz > 0 /*pos*/);
+        } else if (colocated_.count(dstRank)) { // both domains on this node
+          printf("DistributedDomain.realize(): colocated\n");
+          sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank, dstGPU, 2/*z*/, dz > 0 /*pos*/);
+        } else { // domains on different nodes
+          printf("DistributedDomain.realize(): different nodes\n");
+          sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank, dstGPU, 2/*z*/, dz > 0 /*pos*/);
+        }
+        assert(sender != nullptr);
+        pzSenders_.push_back(sender);
         pzSenders_.back()->allocate();
       }
 
