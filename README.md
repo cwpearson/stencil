@@ -14,6 +14,18 @@ make
 mpirun -n 4 src/main
 ```
 
+## Tests
+
+MPI tests only
+```
+test/test_all "[mpi]"
+```
+
+CUDA tests only
+```
+test/test_all "[cuda]"
+```
+
 ## Design Goals
   * v1 (prototype)
     * xyz radii (Astaroth)

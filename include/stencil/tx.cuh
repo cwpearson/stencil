@@ -19,12 +19,32 @@ public:
   virtual void resize(const size_t n) = 0;
 
   // send n bytes
-  virtual void send(const char *data) = 0;
+  virtual void send(const void *data) = 0;
 
   /*! block until send is complete
    */
   virtual void wait() = 0;
+
+  virtual ~Sender() {}
 };
+
+
+class Recver {
+public:
+  /*! prepare to recv n bytes (allocate intermediate buffers)
+   */
+  virtual void resize(const size_t n) = 0;
+
+  // recieve into data
+  virtual void recv(void *data) = 0;
+
+  /*! block until recv is complete
+   */
+  virtual void wait() = 0;
+
+  virtual ~Recver() {}
+};
+
 
 class NoOpSender : public Sender {
 private:
@@ -35,7 +55,7 @@ private:
 
   size_t n_;
 
-  void sender(const char *data) {
+  void sender(const void *data) {
     fprintf(stderr, "would send %luB from rank %lu gpu %lu to rank %lu\n", n_,
             srcRank, srcGPU, dstRank);
 
@@ -58,7 +78,7 @@ public:
     return; // no-op
   }
 
-  void send(const char *data) override {
+  void send(const void *data) override {
     waiter = std::async(&NoOpSender::sender, this, data);
     // fprintf(stderr, "would send %luB from rank %lu gpu %lu to rank %lu\n",
     // n_, srcRank, srcGPU, dstRank);
@@ -75,29 +95,56 @@ public:
 };
 
 /*! A data sender that should work as long as MPI and CUDA are installed
-1) cudaMemcpy from src_gpu to src_rank
-2) MPI_Send from src_rank to dst_rank
+1) cudaMemcpy from srcGPU to srcRank
+2) MPI_Send from srcRank to dstRank, tagged with dstGPU
 */
 class AnySender : public Sender {
 private:
-  size_t srcRank;
-  size_t dstRank;
-  size_t srcGPU;
-};
+  int64_t srcRank;
+  int64_t srcGPU;
+  int64_t dstRank;
+  int64_t dstGPU;
 
-class Recver {
+  cudaStream_t stream_;
+  std::vector<char> hostBuf_;
+  MPI_Request req_;
+  std::future<void> waiter;
+
+  void sender(const void *data) {
+    printf("AnySender::sender(): cudaMemcpy %ld -> %ld\n", srcGPU, srcRank);
+    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(), cudaMemcpyDefault, stream_));
+    printf("AnySender::sender(): cuda sync\n");
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    printf("AnySender::sender(): ISend %luB -> %ld (tag=%ld)\n", hostBuf_.size(), dstRank, dstGPU);
+    MPI_Isend(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, dstGPU, MPI_COMM_WORLD, &req_);
+  }
+
 public:
-  /*! prepare to recv n bytes (allocate intermediate buffers)
-   */
-  virtual void resize(const size_t n) = 0;
 
-  // recieve into data
-  virtual void recv(char *data) = 0;
+  AnySender(int64_t srcRank, int64_t srcGPU, int64_t dstRank, int64_t dstGPU) : srcRank(srcRank), srcGPU(srcGPU), dstRank(dstRank), dstGPU(dstGPU) {
+    CUDA_RUNTIME(cudaStreamCreate(&stream_));
+  }
+  ~AnySender() {
+    CUDA_RUNTIME(cudaStreamDestroy(stream_));
+  }
 
-  /*! block until recv is complete
-   */
-  virtual void wait() = 0;
+  void resize(const size_t n) override {hostBuf_.resize(n);}
+
+  void send(const void *data) override {
+    waiter = std::async(&AnySender::sender, this, data);
+  }
+
+  void wait() override {
+    if (waiter.valid()) {
+      waiter.wait();
+    }
+    MPI_Status stat;
+    printf("AnySender::wait(): waiting on Isend\n");
+    MPI_Wait(&req_, &stat);
+  }
 };
+
+
 
 class NoOpRecver : public Recver {
 private:
@@ -116,7 +163,7 @@ public:
     n_ = n;
     return; // no-op
   }
-  void recv(char *data) override {
+  void recv(void *data) override {
     fprintf(stderr, "would recv %luB from rank %lu into rank %lu gpu %lu\n", n_,
             srcRank, dstRank, dstGPU);
     return; // no-op
@@ -127,18 +174,54 @@ public:
   }
 };
 
-/*! A recvr that should work as long as MPI and CUDA are installed
-1) MPI_Recv from src_rank to dst_rank
-2) cudaMemcpy from dst_rank to dst_gpu
+/*! A data recver that should work as long as MPI and CUDA are installed
+1) cudaMemcpy from srcGPU to srcRank
+2) MPI_Send from srcRank to dstRank, tagged with dstGPU
 */
 class AnyRecver : public Recver {
 private:
-  size_t srcRank;
-  size_t dstRank;
-  size_t dstGPU;
+  int64_t srcRank;
+  int64_t srcGPU;
+  int64_t dstRank;
+  int64_t dstGPU;
 
-  // src-to-dst intermediate data
-  std::vector<char> buf;
+  cudaStream_t stream_;
+  std::vector<char> hostBuf_;
+  std::future<void> waiter;
+
+  void recver(void *data) {
+    MPI_Request req;
+    MPI_Status stat;
+    printf("AnyRecver::recver(): Irecv %luB from %ld (tag=%ld)\n", hostBuf_.size(), srcRank, dstGPU);
+    MPI_Irecv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, dstGPU, MPI_COMM_WORLD, &req);
+    printf("AnyRecver::recver(): wait on Irecv\n");
+    MPI_Wait(&req, &stat);
+    printf("AnyRecver::recver(): cudaMemcpyAsync\n");
+    CUDA_RUNTIME(cudaMemcpyAsync(data, hostBuf_.data(), hostBuf_.size(), cudaMemcpyDefault, stream_));
+  }
+
+public:
+
+  AnyRecver(int64_t srcRank, int64_t srcGPU, int64_t dstRank, int64_t dstGPU) : srcRank(srcRank), srcGPU(srcGPU), dstRank(dstRank), dstGPU(dstGPU) {
+    CUDA_RUNTIME(cudaStreamCreate(&stream_));
+  }
+  ~AnyRecver() {
+    CUDA_RUNTIME(cudaStreamDestroy(stream_));
+  }
+
+  void resize(const size_t n) override {hostBuf_.resize(n);}
+
+  void recv(void *data) override {
+    waiter = std::async(&AnyRecver::recver, this, data);
+  }
+
+  void wait() override {
+    if (waiter.valid()) {
+      waiter.wait();
+    }
+    printf("AnyRecver::recver(): wait for cuda sync (stream=%lu)\n", uintptr_t(stream_));
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+  }
 };
 
 class FaceSenderBase {
@@ -152,6 +235,20 @@ public:
   // wait for send to be complete
   virtual void wait() = 0;
 };
+
+class FaceRecverBase {
+public:
+  // prepare to send the appropriate number of bytes
+  virtual void allocate() = 0;
+
+  // recv the face data
+  virtual void recv() = 0;
+
+  // wait for send to be complete
+  virtual void wait() = 0;
+};
+
+
 
 template <typename Sender> class FaceSender : public FaceSenderBase {
 private:
@@ -174,6 +271,8 @@ public:
     // allocate space for each transfer
     const int gpu = domain_->gpu();
     CUDA_RUNTIME(cudaSetDevice(gpu));
+
+    // preallocate each sender
     for (size_t i = 0; i < domain_->num_data(); ++i) {
       size_t numBytes = domain_->face_bytes(dim_)[i];
       printf("FaceSender::allocate(): alloc %lu on %d\n", numBytes, gpu);
@@ -195,7 +294,7 @@ public:
       const char *src = domain_->data(idx);
 
       // pack into buffer
-      dim3 dimGrid(10, 10, 10);
+      dim3 dimGrid(20, 20, 20);
       dim3 dimBlock(32, 4, 4);
       size_t elemSize = domain_->elem_size()[idx];
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
@@ -218,14 +317,3 @@ public:
   }
 };
 
-class FaceRecverBase {
-public:
-  // prepare to send the appropriate number of bytes
-  virtual void allocate() = 0;
-
-  // recv the face data
-  virtual void recv() = 0;
-
-  // wait for send to be complete
-  virtual void wait() = 0;
-};

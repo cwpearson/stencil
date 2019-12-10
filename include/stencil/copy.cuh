@@ -5,7 +5,7 @@
 // pitch calculations
 // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html#group__CUDART__MEMORY_1g32bd7a39135594788a542ae72217775c
 
-__global__ void pack(void *dst, const void *src, const Dim3 srcSize,
+static __global__ void pack(void *dst, const void *src, const Dim3 srcSize,
                      const size_t srcPitch, const Dim3 srcPos,
                      const Dim3 srcExtent, const size_t elemSize) {
   char *cDst = reinterpret_cast<char *>(dst);
@@ -34,7 +34,7 @@ __global__ void pack(void *dst, const void *src, const Dim3 srcSize,
   }
 }
 
-__global__ void unpack(void *dst, const Dim3 dstSize, const size_t dstPitch,
+static __global__ void unpack(void *dst, const Dim3 dstSize, const size_t dstPitch,
                        const Dim3 dstPos, const Dim3 dstExtent, const void *src,
                        const size_t elemSize) {
 
