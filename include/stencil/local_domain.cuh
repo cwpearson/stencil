@@ -241,4 +241,31 @@ public:
       nextDataPtrs_[i] = n;
     }
   }
+
+
+
+  void realize_unified() {
+
+    assert(currDataPtrs_.size() == nextDataPtrs_.size());
+    assert(dataElemSize_.size() == nextDataPtrs_.size());
+
+    // allocate each data region
+    for (size_t i = 0; i < num_data(); ++i) {
+      size_t elemSz = dataElemSize_[i];
+
+      size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
+                          (sz_.z + 2 * radius_)) *
+                         elemSz;
+      std::cerr << "Allocate " << elemBytes << "B on gpu " << dev_ << "\n";
+      char *c = nullptr;
+      char *n = nullptr;
+      CUDA_RUNTIME(cudaSetDevice(dev_));
+      CUDA_RUNTIME(cudaMalloc(&c, elemBytes));
+      CUDA_RUNTIME(cudaMalloc(&n, elemBytes));
+      assert(uintptr_t(c) % elemSz == 0 && "allocation should be aligned");
+      assert(uintptr_t(n) % elemSz == 0 && "allocation should be aligned");
+      currDataPtrs_[i] = c;
+      nextDataPtrs_[i] = n;
+    }
+  }
 };

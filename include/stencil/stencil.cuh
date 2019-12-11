@@ -132,7 +132,7 @@ public:
     }
     assert(colocated_.count(rank_) == 1 && "should be colocated with self");
     printf("DistributedDomain::ctor(): rank %d colocated with %lu ranks\n",
-           rank_, colocated_.size());
+           rank_, colocated_.size() - 1);
   }
 
   std::vector<LocalDomain> &domains() { return domains_; }
@@ -153,7 +153,7 @@ public:
            (idx.z / gpuDim_.z) * rankDim_.y * rankDim_.x;
   }
 
-  size_t get_gpu(const Dim3 idx) {
+  size_t get_logical_gpu(const Dim3 idx) {
     assert(idx.x >= 0);
     assert(idx.y >= 0);
     assert(idx.z >= 0);
@@ -167,7 +167,7 @@ public:
     return Dim3();
   }
 
-  void realize() {
+  void realize(bool useUnified) {
 
     // recursively split region among MPI ranks to make it ~cubical
     Dim3 splitSize = size_;
@@ -233,10 +233,12 @@ public:
     }
 
     // create local domains
-    for (const auto gpu : gpus_) {
+    for (int i=0; i< gpus_.size(); i++) {
+
+      auto gpu = gpus_[i];
 
       Dim3 rankIdx;
-      Dim3 gpuIdx;
+      Dim3 logicalGpuIdx;
 
       auto rank = rank_;
       rankIdx.x = rank % rankDim_.x;
@@ -245,12 +247,11 @@ public:
       rank /= rankDim_.y;
       rankIdx.z = rank;
 
-      auto i = gpu;
-      gpuIdx.x = i % gpuDim_.x;
+      logicalGpuIdx.x = i % gpuDim_.x;
       i /= gpuDim_.x;
-      gpuIdx.y = i % gpuDim_.y;
+      logicalGpuIdx.y = i % gpuDim_.y;
       i /= gpuDim_.y;
-      gpuIdx.z = i;
+      logicalGpuIdx.z = i;
 
       LocalDomain ld(splitSize, gpu);
       ld.radius_ = radius_;
@@ -259,15 +260,17 @@ public:
       }
 
       domains_.push_back(ld);
-      Dim3 idx = rankIdx * gpuDim_ + gpuIdx;
-      printf("rank,gpu=%d,%d => idx %ld %ld %ld\n", rank_, gpu, idx.x, idx.y,
+      Dim3 idx = rankIdx * gpuDim_ + logicalGpuIdx;
+      printf("rank,gpu=%d,%d(gpu actual idx=%d) => idx %ld %ld %ld\n", rank_, i, gpu, idx.x, idx.y,
              idx.z);
       indices_.push_back(idx);
     }
 
     // realize local domains
     for (auto &d : domains_) {
-      d.realize();
+      if(useUnified)
+        d.realize_unified();
+      else d.realize();
       printf("DistributedDomain.realize(): finished creating LocalDomain\n");
     }
 
@@ -286,14 +289,19 @@ public:
             dstIdx = dstIdx.wrap(rankDim_ * gpuDim_);
           }
 
-          printf("dim=%d dir=%d: %ld %ld %ld -> %ld %ld %ld\n", dim, dir,
-                 srcIdx.x, srcIdx.y, srcIdx.z, dstIdx.x, dstIdx.y, dstIdx.z);
           int64_t srcRank = rank_;
           int64_t srcGPU = d.gpu();
+
+          printf("dim=%d dir=%d: %ld %ld %ld -> %ld %ld %ld\n", dim, dir,
+                 srcIdx.x, srcIdx.y, srcIdx.z,  dstIdx.x, dstIdx.y, dstIdx.z);
+
+          int logicalSrcGPU = get_logical_gpu(srcIdx);
+          int logicalDstGPU = get_logical_gpu(dstIdx);
+
           assert(srcRank == get_rank(srcIdx));
-          assert(srcGPU == get_gpu(srcIdx));
+          assert(srcGPU == gpus_[logicalSrcGPU]);
           int64_t dstRank = get_rank(dstIdx);
-          int64_t dstGPU = get_gpu(dstIdx);
+          int64_t dstGPU = gpus_[logicalDstGPU];
 
           FaceSenderBase *sender = nullptr;
           if (srcRank == dstRank) { // both domains onwned by this rank
