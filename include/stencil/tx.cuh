@@ -9,14 +9,11 @@
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/local_domain.cuh"
 
+
 inline int32_t pack_tag(int16_t gpu, int16_t idx) {
   return ((gpu & 0xFF) << 16) | (idx & 0xFF);
 }
 
-inline void unpack_tag(int16_t &gpu, int16_t &idx, const int32_t tag) {
-  gpu = (tag >> 16) & 0xFF;
-  idx = tag & 0xFF;
-}
 
 /*! An asynchronous sender, to be paired with a Recver
  */
@@ -107,10 +104,10 @@ public:
 */
 class AnySender : public Sender {
 private:
-  int64_t srcRank;
-  int64_t srcGPU;
-  int64_t dstRank;
-  int64_t dstGPU;
+  int srcRank;
+  int srcGPU;
+  int dstRank;
+  int dstGPU;
 
   cudaStream_t stream_;
   std::vector<char> hostBuf_;
@@ -118,14 +115,13 @@ private:
   std::future<void> waiter;
 
   void sender(const void *data, int16_t tag) {
-    printf("AnySender::sender(): cudaMemcpy %ld -> %ld\n", srcGPU, srcRank);
+    printf("AnySender::sender(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU);
     CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
-    printf("AnySender::sender(): cuda sync\n");
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
     int32_t mpiTag = pack_tag(dstGPU, tag);
-    printf("AnySender::sender(): ISend %luB -> %ld (tag=%d)\n", hostBuf_.size(),
-           dstRank, mpiTag);
+    printf("AnySender::sender(): r%d,g%d: ISend %luB -> r%d,g%d (tag=%d)\n", srcRank, srcGPU, hostBuf_.size(),
+           dstRank, dstGPU, mpiTag);
 
     MPI_Isend(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, mpiTag,
               MPI_COMM_WORLD, &req_);
@@ -194,10 +190,10 @@ public:
 */
 class AnyRecver : public Recver {
 private:
-  int64_t srcRank;
-  int64_t srcGPU;
-  int64_t dstRank;
-  int64_t dstGPU;
+  int srcRank;
+  int srcGPU;
+  int dstRank;
+  int dstGPU;
 
   cudaStream_t stream_;
   std::vector<char> hostBuf_;
@@ -207,7 +203,7 @@ private:
     MPI_Request req;
     MPI_Status stat;
     int32_t mpiTag = pack_tag(dstGPU, tag);
-    printf("AnyRecver::recver(): Irecv %luB from %ld (tag=%ld)\n",
+    printf("AnyRecver::recver(): Irecv %luB from %d (tag=%d)\n",
            hostBuf_.size(), srcRank, mpiTag);
     MPI_Irecv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, mpiTag,
               MPI_COMM_WORLD, &req);
@@ -313,11 +309,12 @@ public:
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
       const Dim3 rawSz = domain_->raw_size(idx);
       const char *src = domain_->curr_data(idx);
+      const size_t elemSize = domain_->elem_size(idx);
 
       // pack into buffer
       dim3 dimGrid(20, 20, 20);
       dim3 dimBlock(32, 4, 4);
-      size_t elemSize = domain_->elem_size(idx);
+      
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
       pack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
           bufs_[idx], src, rawSz, 0 /*pitch*/, facePos, faceExtent, elemSize);
@@ -327,6 +324,7 @@ public:
 
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
       // copy to dst rank
+      printf("FaceSender::send_impl(): send data %lu\n", dataIdx);
       senders_[dataIdx].send(bufs_[dataIdx], dataIdx);
     }
   }

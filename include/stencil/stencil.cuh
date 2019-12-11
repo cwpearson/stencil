@@ -376,11 +376,12 @@ public:
     }
   }
 
+
+
   /*!
-  start a halo exchange and return.
-  Call sync() to block until exchange is done.
+  do a halo exchange and return
   */
-  void exchange_async() {
+  void exchange() {
     assert(pzSenders_.size() == domains_.size());
     assert(pySenders_.size() == domains_.size());
     assert(pxSenders_.size() == domains_.size());
@@ -388,50 +389,37 @@ public:
     assert(pyRecvers_.size() == domains_.size());
     assert(pxRecvers_.size() == domains_.size());
 
+    // send +z
     for (size_t di = 0; di < domains_.size(); ++di) {
       pzRecvers_[di]->recv();
-      pyRecvers_[di]->recv();
-      pxRecvers_[di]->recv();
       pzSenders_[di]->send();
+    }
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      pzRecvers_[di]->wait();
+      pzSenders_[di]->wait();
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // send +y
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      pyRecvers_[di]->recv();
       pySenders_[di]->send();
+    }
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      pyRecvers_[di]->wait();
+      pySenders_[di]->wait();
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // send +x
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      pxRecvers_[di]->recv();
       pxSenders_[di]->send();
     }
-  }
-
-  /*!
-  wait for async exchange
-  */
-  void sync() {
-
-    // wait for all senders and recvers to be done
-    for (auto &tx : pzSenders_) {
-      tx->wait();
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      pxRecvers_[di]->wait();
+      pxSenders_[di]->wait();
     }
-    for (auto &tx : pySenders_) {
-      tx->wait();
-    }
-    for (auto &tx : pxSenders_) {
-      tx->wait();
-    }
-    for (auto &tx : pzRecvers_) {
-      tx->wait();
-    }
-    for (auto &tx : pyRecvers_) {
-      tx->wait();
-    }
-    for (auto &tx : pxRecvers_) {
-      tx->wait();
-    }
-
-    // wait for everyone else's exchanges to be done
     MPI_Barrier(MPI_COMM_WORLD);
-  }
-
-  /*!
-  do a halo exchange and return
-  */
-  void exchange() {
-    exchange_async();
-    sync();
   }
 };
