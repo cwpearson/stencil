@@ -167,7 +167,7 @@ public:
     return Dim3();
   }
 
-  void realize(bool useUnified) {
+  void realize(bool useUnified = false) {
 
     // recursively split region among MPI ranks to make it ~cubical
     Dim3 splitSize = size_;
