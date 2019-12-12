@@ -302,7 +302,7 @@ public:
 
           std::cout << myIdx << "<->" << nbrIdx << " dim=" << dim
                     << " dir=" << dir << " r" << myRank << ",g" << myGPU
-                    << " -> r" << nbrRank << ",g" << nbrGPU << "\n";
+                    << " <-> r" << nbrRank << ",g" << nbrGPU << "\n";
 
           FaceSenderBase *sender = nullptr;
           if (myRank == nbrRank) { // both domains onwned by this rank
