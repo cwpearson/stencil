@@ -73,17 +73,17 @@ private:
 
   // Senders / receivers for each domain
   // faces
-  std::vector<FaceSenderBase *> pzSenders_; // senders for +z
-  std::vector<FaceRecverBase *> pzRecvers_;
-  std::vector<FaceSenderBase *> mzSenders_; // senders for -z
+  std::vector<FaceSenderBase *> pzSenders_; // how to send +z face
+  std::vector<FaceRecverBase *> pzRecvers_; // how to recv +z face
+  std::vector<FaceSenderBase *> mzSenders_; // how to send -z face
   std::vector<FaceRecverBase *> mzRecvers_;
-  std::vector<FaceSenderBase *> pySenders_; // senders for +y
+  std::vector<FaceSenderBase *> pySenders_;
   std::vector<FaceRecverBase *> pyRecvers_;
-  std::vector<FaceSenderBase *> mySenders_; // senders for -y
+  std::vector<FaceSenderBase *> mySenders_;
   std::vector<FaceRecverBase *> myRecvers_;
-  std::vector<FaceSenderBase *> pxSenders_; // senders for +x
+  std::vector<FaceSenderBase *> pxSenders_;
   std::vector<FaceRecverBase *> pxRecvers_;
-  std::vector<FaceSenderBase *> mxSenders_; // senders for -x
+  std::vector<FaceSenderBase *> mxSenders_;
   std::vector<FaceRecverBase *> mxRecvers_;
 
   // the size in bytes of each data type
@@ -280,6 +280,7 @@ public:
 
       auto &d = domains_[di];
 
+      // consider face neighbor in dimension and direction
       for (const auto dim : {0, 1, 2}) { // dimensions (x,y,z)
         for (const auto dir : {-1, 1}) { // direction (neg, pos)
 
@@ -300,10 +301,11 @@ public:
           int nbrGPU = gpus_[logicalNbrGPU]; // FIXME: assuming everyone has the
                                              // same GPU layout
 
-          std::cout << myIdx << "<->" << nbrIdx << " dim=" << dim
+          std::cout << myIdx << " -> " << nbrIdx << " dim=" << dim
                     << " dir=" << dir << " r" << myRank << ",g" << myGPU
-                    << " <-> r" << nbrRank << ",g" << nbrGPU << "\n";
+                    << " -> r" << nbrRank << ",g" << nbrGPU << "\n";
 
+          // determine how to send face in that direction
           FaceSenderBase *sender = nullptr;
           if (myRank == nbrRank) { // both domains onwned by this rank
             printf(
@@ -312,29 +314,39 @@ public:
             sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
                                                nbrGPU, dim, dir > 0 /*pos*/);
           } else if (colocated_.count(nbrRank)) { // both domains on this node
-            printf("DistributedDomain.realize(): colocated\n");
+            printf(
+                "DistributedDomain.realize(): dim=%d dir=%d  send colocated\n",
+                dim, dir);
             sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
                                                nbrGPU, dim, dir > 0 /*pos*/);
           } else { // domains on different nodes
-            printf("DistributedDomain.realize(): different nodes\n");
+            printf("DistributedDomain.realize(): send different nodes\n");
             sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
                                                nbrGPU, dim, dir > 0 /*pos*/);
           }
 
-          // if positive face is sent, recv negative face here
+          std::cout << myIdx << " <- " << nbrIdx << " dim=" << dim
+                    << " dir=" << dir << " r" << myRank << ",g" << myGPU
+                    << " <- r" << nbrRank << ",g" << nbrGPU << "\n";
+
+          // determine how to receive a face from that direction
           FaceRecverBase *recver = nullptr;
           if (myRank == nbrRank) { // both domains onwned by this rank
-            printf("DistributedDomain.realize(): same rank\n");
+            printf(
+                "DistributedDomain.realize(): dim=%d dir=%d recv same rank\n",
+                dim, dir);
             recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
-                                               myGPU, dim, dir < 0 /*pos*/);
+                                               myGPU, dim, dir > 0 /*pos*/);
           } else if (colocated_.count(nbrRank)) { // both domains on this node
-            printf("DistributedDomain.realize(): colocated\n");
+            printf(
+                "DistributedDomain.realize(): dim=%d dir=%d recv colocated\n",
+                dim, dir);
             recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
-                                               myGPU, dim, dir < 0 /*pos*/);
+                                               myGPU, dim, dir > 0 /*pos*/);
           } else { // domains on different nodes
-            printf("DistributedDomain.realize(): different nodes\n");
+            printf("DistributedDomain.realize(): recv different nodes\n");
             recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
-                                               myGPU, dim, dir < 0 /*pos*/);
+                                               myGPU, dim, dir > 0 /*pos*/);
           }
 
           assert(sender != nullptr);
@@ -343,18 +355,18 @@ public:
             if (0 == dim) {
               pxSenders_.push_back(sender);
               pxSenders_.back()->allocate();
-              mxRecvers_.push_back(recver);
-              mxRecvers_.back()->allocate();
+              pxRecvers_.push_back(recver);
+              pxRecvers_.back()->allocate();
             } else if (1 == dim) {
               pySenders_.push_back(sender);
               pySenders_.back()->allocate();
-              myRecvers_.push_back(recver);
-              myRecvers_.back()->allocate();
+              pyRecvers_.push_back(recver);
+              pyRecvers_.back()->allocate();
             } else if (2 == dim) {
               pzSenders_.push_back(sender);
               pzSenders_.back()->allocate();
-              mzRecvers_.push_back(recver);
-              mzRecvers_.back()->allocate();
+              pzRecvers_.push_back(recver);
+              pzRecvers_.back()->allocate();
             } else {
               assert(0 && "only 3D supported");
             }
@@ -362,18 +374,18 @@ public:
             if (0 == dim) {
               mxSenders_.push_back(sender);
               mxSenders_.back()->allocate();
-              pxRecvers_.push_back(recver);
-              pxRecvers_.back()->allocate();
+              mxRecvers_.push_back(recver);
+              mxRecvers_.back()->allocate();
             } else if (1 == dim) {
               mySenders_.push_back(sender);
               mySenders_.back()->allocate();
-              pyRecvers_.push_back(recver);
-              pyRecvers_.back()->allocate();
+              myRecvers_.push_back(recver);
+              myRecvers_.back()->allocate();
             } else if (2 == dim) {
               mzSenders_.push_back(sender);
               mzSenders_.back()->allocate();
-              pzRecvers_.push_back(recver);
-              pzRecvers_.back()->allocate();
+              mzRecvers_.push_back(recver);
+              mzRecvers_.back()->allocate();
             } else {
               assert(0 && "only 3D supported");
             }

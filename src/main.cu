@@ -15,8 +15,6 @@ int main(int argc, char **argv) {
   dd.set_radius(2);
 
   dd.add_data<int64_t>();
-  dd.add_data<int32_t>();
-  dd.add_data<int16_t>();
 
   dd.realize();
   printf("main(): realize finished\n");
