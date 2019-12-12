@@ -91,6 +91,8 @@ private:
 
   std::set<int64_t> colocated_; //<! colocated MPI ranks
 
+  std::vector<std::vector<bool>> peerAccess_; //<! which GPUs have peer access
+
 public:
   DistributedDomain(size_t x, size_t y, size_t z)
       : size_(x, y, z), rankDim_(1, 1, 1), gpuDim_(1, 1, 1) {
@@ -133,6 +135,25 @@ public:
     assert(colocated_.count(rank_) == 1 && "should be colocated with self");
     printf("DistributedDomain::ctor(): rank %d colocated with %lu ranks\n",
            rank_, colocated_.size() - 1);
+
+    // Try to enable peer access between all GPUs
+    peerAccess_ = std::vector<std::vector<bool>>(
+        gpus_.size(), std::vector<bool>(gpus_.size(), false));
+
+    for (auto &src : gpus_) {
+      for (auto &dst : gpus_) {
+        CUDA_RUNTIME(cudaSetDevice(src))
+        cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
+        if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+          peerAccess_[src][dst] = true;
+          std::cout << src << " -> " << dst << "peer access\n";
+        } else if (cudaErrorInvalidDevice) {
+          peerAccess_[src][dst] = false;
+        } else {
+          assert(0);
+        }
+      }
+    }
   }
 
   std::vector<LocalDomain> &domains() { return domains_; }
