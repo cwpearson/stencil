@@ -71,20 +71,30 @@ private:
   // the index of the domain in the distributed domain
   std::vector<Dim3> indices_;
 
-  // Senders / receivers for each domain
-  // faces
-  std::vector<FaceSenderBase *> pzSenders_; // how to send +z face
-  std::vector<FaceRecverBase *> pzRecvers_; // how to recv +z face
-  std::vector<FaceSenderBase *> mzSenders_; // how to send -z face
-  std::vector<FaceRecverBase *> mzRecvers_;
-  std::vector<FaceSenderBase *> pySenders_;
-  std::vector<FaceRecverBase *> pyRecvers_;
-  std::vector<FaceSenderBase *> mySenders_;
-  std::vector<FaceRecverBase *> myRecvers_;
-  std::vector<FaceSenderBase *> pxSenders_;
-  std::vector<FaceRecverBase *> pxRecvers_;
-  std::vector<FaceSenderBase *> mxSenders_;
-  std::vector<FaceRecverBase *> mxRecvers_;
+  // Senders / receivers for each face
+  std::vector<HaloSender *> pzSenders_; // how to send +z face
+  std::vector<HaloRecver *> pzRecvers_; // how to recv +z face
+  std::vector<HaloSender *> mzSenders_; // how to send -z face
+  std::vector<HaloRecver *> mzRecvers_;
+  std::vector<HaloSender *> pySenders_;
+  std::vector<HaloRecver *> pyRecvers_;
+  std::vector<HaloSender *> mySenders_;
+  std::vector<HaloRecver *> myRecvers_;
+  std::vector<HaloSender *> pxSenders_;
+  std::vector<HaloRecver *> pxRecvers_;
+  std::vector<HaloSender *> mxSenders_;
+  std::vector<HaloRecver *> mxRecvers_;
+
+  // All senders:
+  // x * y * z
+  // 0: not present
+  // 1: positive
+  // 2: negative
+  // a face has not-present in the other two dimensions
+  // an edge has not-present in one dimension
+  // a corner has all dimensions present
+  std::vector<HaloSender> senders[3][3][3];
+  std::vector<HaloRecver> recvers[3][3][3];
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -327,7 +337,7 @@ public:
                     << " -> r" << nbrRank << ",g" << nbrGPU << "\n";
 
           // determine how to send face in that direction
-          FaceSenderBase *sender = nullptr;
+          HaloSender *sender = nullptr;
           if (myRank == nbrRank) { // both domains onwned by this rank
             printf(
                 "DistributedDomain.realize(): dim=%d dir=%d send same rank\n",
@@ -351,7 +361,7 @@ public:
                     << " <- r" << nbrRank << ",g" << nbrGPU << "\n";
 
           // determine how to receive a face from that direction
-          FaceRecverBase *recver = nullptr;
+          HaloRecver *recver = nullptr;
           if (myRank == nbrRank) { // both domains onwned by this rank
             printf(
                 "DistributedDomain.realize(): dim=%d dir=%d recv same rank\n",

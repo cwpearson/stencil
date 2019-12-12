@@ -245,7 +245,9 @@ public:
   }
 };
 
-class FaceSenderBase {
+/*! Interface for sending any part of a halo anywhere
+ */
+class HaloSender {
 public:
   // prepare to send the appropriate number of bytes
   virtual void allocate() = 0;
@@ -257,7 +259,9 @@ public:
   virtual void wait() = 0;
 };
 
-class FaceRecverBase {
+/*! Interface for receiving any part of a halo from anywhere
+ */
+class HaloRecver {
 public:
   // prepare to send the appropriate number of bytes
   virtual void allocate() = 0;
@@ -269,7 +273,9 @@ public:
   virtual void wait() = 0;
 };
 
-template <typename Sender> class FaceSender : public FaceSenderBase {
+/*! Send a LocalDomain face using Sender
+ */
+template <typename Sender> class FaceSender : public HaloSender {
 private:
   const LocalDomain *domain_; // the domain we are sending from
   size_t dim_;                // the face dimension we are sending
@@ -352,7 +358,9 @@ public:
   }
 };
 
-template <typename Recver> class FaceRecver : public FaceRecverBase {
+/*! \brief Receive a LocalDomain face using Recver
+ */
+template <typename Recver> class FaceRecver : public HaloRecver {
 private:
   const LocalDomain *domain_; // the domain we are receiving into
   size_t dim_;                // the face dimension we are receiving
