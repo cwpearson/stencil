@@ -9,11 +9,9 @@
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/local_domain.cuh"
 
-
 inline int32_t pack_tag(int16_t gpu, int16_t idx) {
   return ((gpu & 0xFF) << 16) | (idx & 0xFF);
 }
-
 
 /*! An asynchronous sender, to be paired with a Recver
  */
@@ -120,11 +118,12 @@ private:
                                  cudaMemcpyDefault, stream_));
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
     int32_t mpiTag = pack_tag(dstGPU, tag);
-    printf("AnySender::sender(): r%d,g%d: ISend %luB -> r%d,g%d (tag=%d)\n", srcRank, srcGPU, hostBuf_.size(),
-           dstRank, dstGPU, mpiTag);
-
+    printf("AnySender::sender(): r%d,g%d: Isend %luB -> r%d,g%d (tag=%d)\n",
+           srcRank, srcGPU, hostBuf_.size(), dstRank, dstGPU, mpiTag);
     MPI_Isend(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, mpiTag,
               MPI_COMM_WORLD, &req_);
+
+    std::cout << "AnySender::sender(): return\n";
   }
 
 public:
@@ -149,10 +148,13 @@ public:
   void wait() override {
     if (waiter.valid()) {
       waiter.wait();
+    } else {
+      assert(0 && "wait called before send?");
     }
     MPI_Status stat;
-    printf("AnySender::wait(): waiting on Isend\n");
+    printf("AnySender::wait(): r%d,g%d: wait on Isend\n", srcRank, srcGPU);
     MPI_Wait(&req_, &stat);
+    printf("AnySender::wait(): r%d,g%d: finished Isend\n", srcRank, srcGPU);
   }
 };
 
@@ -203,13 +205,14 @@ private:
     MPI_Request req;
     MPI_Status stat;
     int32_t mpiTag = pack_tag(dstGPU, tag);
-    printf("AnyRecver::recver(): Irecv %luB from %d (tag=%d)\n",
-           hostBuf_.size(), srcRank, mpiTag);
+    printf("AnyRecver::recver(): r%d,g%d Irecv %luB from r%d,g%d (tag=%d)\n",
+           dstRank, dstGPU, hostBuf_.size(), srcRank, srcGPU, mpiTag);
     MPI_Irecv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, mpiTag,
               MPI_COMM_WORLD, &req);
-    printf("AnyRecver::recver(): wait on Irecv\n");
+    printf("AnyRecver::recver(): r%d,g%d: wait on Irecv\n", dstRank, dstGPU);
     MPI_Wait(&req, &stat);
-    printf("AnyRecver::recver(): cudaMemcpyAsync\n");
+    printf("AnyRecver::recver(): r%d,g%d: got Irecv. cudaMemcpyAsync\n",
+           dstRank, dstGPU);
     CUDA_RUNTIME(cudaMemcpyAsync(data, hostBuf_.data(), hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
   }
@@ -293,7 +296,8 @@ public:
     // preallocate each sender
     for (size_t i = 0; i < domain_->num_data(); ++i) {
       size_t numBytes = domain_->face_bytes(dim_, i);
-      printf("FaceSender::allocate():  alloc %lu on gpu %d\n", numBytes, gpu);
+      // printf("FaceSender::allocate():  alloc %lu on gpu %d\n", numBytes,
+      // gpu);
       char *buf = nullptr;
       CUDA_RUNTIME(cudaMalloc(&buf, numBytes));
       bufs_.push_back(buf);
@@ -314,7 +318,7 @@ public:
       // pack into buffer
       dim3 dimGrid(20, 20, 20);
       dim3 dimBlock(32, 4, 4);
-      
+
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
       pack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
           bufs_[idx], src, rawSz, 0 /*pitch*/, facePos, faceExtent, elemSize);
@@ -326,18 +330,22 @@ public:
       // copy to dst rank
       printf("FaceSender::send_impl(): send data %lu\n", dataIdx);
       senders_[dataIdx].send(bufs_[dataIdx], dataIdx);
+      printf("FaceSender::send_impl(): return\n");
     }
   }
 
   void send() override { fut_ = std::async(&FaceSender::send_impl, this); }
 
   // wait for send to be complete
-  virtual void wait() override {
+  void wait() override {
     if (fut_.valid()) {
+      std::cout << "FaceSender::wait() for fut_\n";
       fut_.wait();
+      std::cout << "FaceSender::wait() for senders\n";
       for (auto &s : senders_) {
         s.wait();
       }
+      std::cout << "FaceSender::wait() done\n";
     } else {
       assert(0 && "wait called before send()");
     }
@@ -370,7 +378,7 @@ public:
 
     for (size_t i = 0; i < domain_->num_data(); ++i) {
       size_t numBytes = domain_->face_bytes(dim_, i);
-      printf("FaceRecver::allocate(): alloc %lu on %d\n", numBytes, gpu);
+      // printf("FaceRecver::allocate(): alloc %lu on %d\n", numBytes, gpu);
       char *buf = nullptr;
       CUDA_RUNTIME(cudaMalloc(&buf, numBytes));
       bufs_.push_back(buf);

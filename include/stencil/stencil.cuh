@@ -233,7 +233,7 @@ public:
     }
 
     // create local domains
-    for (int i=0; i< gpus_.size(); i++) {
+    for (int i = 0; i < gpus_.size(); i++) {
 
       auto gpu = gpus_[i];
 
@@ -261,16 +261,17 @@ public:
 
       domains_.push_back(ld);
       Dim3 idx = rankIdx * gpuDim_ + logicalGpuIdx;
-      printf("rank,gpu=%d,%d(gpu actual idx=%d) => idx %ld %ld %ld\n", rank_, i, gpu, idx.x, idx.y,
-             idx.z);
+      printf("rank,gpu=%d,%d(gpu actual idx=%d) => idx %ld %ld %ld\n", rank_, i,
+             gpu, idx.x, idx.y, idx.z);
       indices_.push_back(idx);
     }
 
     // realize local domains
     for (auto &d : domains_) {
-      if(useUnified)
+      if (useUnified)
         d.realize_unified();
-      else d.realize();
+      else
+        d.realize();
       printf("DistributedDomain.realize(): finished creating LocalDomain\n");
     }
 
@@ -282,58 +283,58 @@ public:
       for (const auto dim : {0, 1, 2}) { // dimensions (x,y,z)
         for (const auto dir : {-1, 1}) { // direction (neg, pos)
 
-          Dim3 srcIdx = indices_[di];
-          Dim3 dstIdx = srcIdx;
-          if (dim == 0) {
-            dstIdx[dim] += dir;
-            dstIdx = dstIdx.wrap(rankDim_ * gpuDim_);
-          }
+          Dim3 myIdx = indices_[di];
+          Dim3 nbrIdx = myIdx;
+          nbrIdx[dim] += dir;
+          nbrIdx = nbrIdx.wrap(rankDim_ * gpuDim_);
 
-          int64_t srcRank = rank_;
-          int64_t srcGPU = d.gpu();
+          int myRank = rank_;
+          int myGPU = d.gpu();
 
-          printf("dim=%d dir=%d: %ld %ld %ld -> %ld %ld %ld\n", dim, dir,
-                 srcIdx.x, srcIdx.y, srcIdx.z,  dstIdx.x, dstIdx.y, dstIdx.z);
+          int logicalMyGPU = get_logical_gpu(myIdx);
+          int logicalNbrGPU = get_logical_gpu(nbrIdx);
 
-          int logicalSrcGPU = get_logical_gpu(srcIdx);
-          int logicalDstGPU = get_logical_gpu(dstIdx);
+          assert(myRank == get_rank(myIdx));
+          assert(myGPU == gpus_[logicalMyGPU]);
+          int nbrRank = get_rank(nbrIdx);
+          int nbrGPU = gpus_[logicalNbrGPU]; // FIXME: assuming everyone has the
+                                             // same GPU layout
 
-          assert(srcRank == get_rank(srcIdx));
-          assert(srcGPU == gpus_[logicalSrcGPU]);
-          int64_t dstRank = get_rank(dstIdx);
-          int64_t dstGPU = gpus_[logicalDstGPU];
+          std::cout << myIdx << "<->" << nbrIdx << " dim=" << dim
+                    << " dir=" << dir << " r" << myRank << ",g" << myGPU
+                    << " -> r" << nbrRank << ",g" << nbrGPU << "\n";
 
           FaceSenderBase *sender = nullptr;
-          if (srcRank == dstRank) { // both domains onwned by this rank
+          if (myRank == nbrRank) { // both domains onwned by this rank
             printf(
                 "DistributedDomain.realize(): dim=%d dir=%d send same rank\n",
                 dim, dir);
-            sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank,
-                                               dstGPU, dim, dir > 0 /*pos*/);
-          } else if (colocated_.count(dstRank)) { // both domains on this node
+            sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
+                                               nbrGPU, dim, dir > 0 /*pos*/);
+          } else if (colocated_.count(nbrRank)) { // both domains on this node
             printf("DistributedDomain.realize(): colocated\n");
-            sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank,
-                                               dstGPU, dim, dir > 0 /*pos*/);
+            sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
+                                               nbrGPU, dim, dir > 0 /*pos*/);
           } else { // domains on different nodes
             printf("DistributedDomain.realize(): different nodes\n");
-            sender = new FaceSender<AnySender>(d, srcRank, srcGPU, dstRank,
-                                               dstGPU, dim, dir > 0 /*pos*/);
+            sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
+                                               nbrGPU, dim, dir > 0 /*pos*/);
           }
 
-          // if positive face is sent, recv negative face.
+          // if positive face is sent, recv negative face here
           FaceRecverBase *recver = nullptr;
-          if (srcRank == dstRank) { // both domains onwned by this rank
+          if (myRank == nbrRank) { // both domains onwned by this rank
             printf("DistributedDomain.realize(): same rank\n");
-            recver = new FaceRecver<AnyRecver>(d, srcRank, srcGPU, dstRank,
-                                               dstGPU, dim, dir < 0 /*pos*/);
-          } else if (colocated_.count(dstRank)) { // both domains on this node
+            recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
+                                               myGPU, dim, dir < 0 /*pos*/);
+          } else if (colocated_.count(nbrRank)) { // both domains on this node
             printf("DistributedDomain.realize(): colocated\n");
-            recver = new FaceRecver<AnyRecver>(d, srcRank, srcGPU, dstRank,
-                                               dstGPU, dim, dir < 0 /*pos*/);
+            recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
+                                               myGPU, dim, dir < 0 /*pos*/);
           } else { // domains on different nodes
             printf("DistributedDomain.realize(): different nodes\n");
-            recver = new FaceRecver<AnyRecver>(d, srcRank, srcGPU, dstRank,
-                                               dstGPU, dim, dir < 0 /*pos*/);
+            recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
+                                               myGPU, dim, dir < 0 /*pos*/);
           }
 
           assert(sender != nullptr);
@@ -342,18 +343,18 @@ public:
             if (0 == dim) {
               pxSenders_.push_back(sender);
               pxSenders_.back()->allocate();
-              pxRecvers_.push_back(recver);
-              pxRecvers_.back()->allocate();
+              mxRecvers_.push_back(recver);
+              mxRecvers_.back()->allocate();
             } else if (1 == dim) {
               pySenders_.push_back(sender);
               pySenders_.back()->allocate();
-              pyRecvers_.push_back(recver);
-              pyRecvers_.back()->allocate();
+              myRecvers_.push_back(recver);
+              myRecvers_.back()->allocate();
             } else if (2 == dim) {
               pzSenders_.push_back(sender);
               pzSenders_.back()->allocate();
-              pzRecvers_.push_back(recver);
-              pzRecvers_.back()->allocate();
+              mzRecvers_.push_back(recver);
+              mzRecvers_.back()->allocate();
             } else {
               assert(0 && "only 3D supported");
             }
@@ -361,18 +362,18 @@ public:
             if (0 == dim) {
               mxSenders_.push_back(sender);
               mxSenders_.back()->allocate();
-              mxRecvers_.push_back(recver);
-              mxRecvers_.back()->allocate();
+              pxRecvers_.push_back(recver);
+              pxRecvers_.back()->allocate();
             } else if (1 == dim) {
               mySenders_.push_back(sender);
               mySenders_.back()->allocate();
-              myRecvers_.push_back(recver);
-              myRecvers_.back()->allocate();
+              pyRecvers_.push_back(recver);
+              pyRecvers_.back()->allocate();
             } else if (2 == dim) {
               mzSenders_.push_back(sender);
               mzSenders_.back()->allocate();
-              mzRecvers_.push_back(recver);
-              mzRecvers_.back()->allocate();
+              pzRecvers_.push_back(recver);
+              pzRecvers_.back()->allocate();
             } else {
               assert(0 && "only 3D supported");
             }
@@ -384,8 +385,6 @@ public:
     }
   }
 
-
-
   /*!
   do a halo exchange and return
   */
@@ -393,39 +392,53 @@ public:
     assert(pzSenders_.size() == domains_.size());
     assert(pySenders_.size() == domains_.size());
     assert(pxSenders_.size() == domains_.size());
+
     assert(pzRecvers_.size() == domains_.size());
     assert(pyRecvers_.size() == domains_.size());
     assert(pxRecvers_.size() == domains_.size());
 
+    assert(mzSenders_.size() == domains_.size());
+    assert(mySenders_.size() == domains_.size());
+    assert(mxSenders_.size() == domains_.size());
+
+    assert(mzRecvers_.size() == domains_.size());
+    assert(myRecvers_.size() == domains_.size());
+    assert(mxRecvers_.size() == domains_.size());
+
     // send +z
+
     for (size_t di = 0; di < domains_.size(); ++di) {
-      pzRecvers_[di]->recv();
+      std::cout << "DistributedDomain::exchange(): r" << rank_ << ": recv mz["
+                << di << "]\n";
+      mzRecvers_[di]->recv();
+      std::cout << "DistributedDomain::exchange(): r" << rank_ << ": send pz["
+                << di << "]\n";
       pzSenders_[di]->send();
     }
     for (size_t di = 0; di < domains_.size(); ++di) {
-      pzRecvers_[di]->wait();
+      mzRecvers_[di]->wait();
       pzSenders_[di]->wait();
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
     // send +y
     for (size_t di = 0; di < domains_.size(); ++di) {
-      pyRecvers_[di]->recv();
+      myRecvers_[di]->recv();
       pySenders_[di]->send();
     }
     for (size_t di = 0; di < domains_.size(); ++di) {
-      pyRecvers_[di]->wait();
+      myRecvers_[di]->wait();
       pySenders_[di]->wait();
     }
     MPI_Barrier(MPI_COMM_WORLD);
 
     // send +x
     for (size_t di = 0; di < domains_.size(); ++di) {
-      pxRecvers_[di]->recv();
+      mxRecvers_[di]->recv();
       pxSenders_[di]->send();
     }
     for (size_t di = 0; di < domains_.size(); ++di) {
-      pxRecvers_[di]->wait();
+      mxRecvers_[di]->wait();
       pxSenders_[di]->wait();
     }
     MPI_Barrier(MPI_COMM_WORLD);
