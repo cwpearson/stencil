@@ -313,8 +313,9 @@ public:
 
   void send_impl() {
     assert(bufs_.size() == senders_.size());
-    const Dim3 facePos = domain_->face_pos(pos_, dim_);
-    const Dim3 faceExtent = domain_->face_extent(pos_, dim_);
+    const Dim3 facePos =
+        domain_->face_pos(dim_, pos_, false /*compute region*/);
+    const Dim3 faceExtent = domain_->face_extent(dim_);
 
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
       const Dim3 rawSz = domain_->raw_size(idx);
@@ -409,8 +410,8 @@ public:
 
     // unpack all data into domain
 
-    const Dim3 facePos = domain_->face_pos(pos_, dim_);
-    const Dim3 faceExtent = domain_->face_extent(pos_, dim_);
+    const Dim3 facePos = domain_->face_pos(dim_, pos_, true /*halo region*/);
+    const Dim3 faceExtent = domain_->face_extent(dim_);
 
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
       const Dim3 rawSz = domain_->raw_size(dataIdx);

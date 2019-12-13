@@ -18,6 +18,32 @@ TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
 
   REQUIRE(d0.face_bytes(0, 0) == sizeof(TestType) * sz.y * sz.z * radius);
 
+  SECTION("face position in halo") {
+    bool isHalo = true;
+    REQUIRE(Dim3(0, 4, 4) == d0.face_pos(0, false, isHalo)); // -x
+    REQUIRE(Dim3(34, 4, 4) == d0.face_pos(0, true, isHalo)); // +x
+    REQUIRE(Dim3(4, 0, 4) == d0.face_pos(1, false, isHalo)); // -y
+    REQUIRE(Dim3(4, 44, 4) == d0.face_pos(1, true, isHalo)); // +y
+    REQUIRE(Dim3(4, 4, 0) == d0.face_pos(2, false, isHalo)); // -z
+    REQUIRE(Dim3(4, 4, 54) == d0.face_pos(2, true, isHalo)); // +z
+  }
+
+  SECTION("face position in compute") {
+    bool isHalo = false;
+    REQUIRE(Dim3(4, 4, 4) == d0.face_pos(0, false, isHalo)); // -x
+    REQUIRE(Dim3(30, 4, 4) == d0.face_pos(0, true, isHalo)); // +x
+    REQUIRE(Dim3(4, 4, 4) == d0.face_pos(1, false, isHalo)); // -y
+    REQUIRE(Dim3(4, 40, 4) == d0.face_pos(1, true, isHalo)); // +y
+    REQUIRE(Dim3(4, 4, 4) == d0.face_pos(2, false, isHalo)); // -z
+    REQUIRE(Dim3(4, 4, 50) == d0.face_pos(2, true, isHalo)); // +z
+  }
+
+  SECTION("face extent") {
+    REQUIRE(Dim3(4, 40, 50) == d0.face_extent(0));
+    REQUIRE(Dim3(30, 4, 50) == d0.face_extent(1));
+    REQUIRE(Dim3(30, 40, 4) == d0.face_extent(2));
+  }
+
   SECTION("edge position in halo") {
     bool isHalo = true;
     REQUIRE(Dim3(0, 0, 4) == d0.edge_pos(0, 1, false, false, isHalo)); // -x -y

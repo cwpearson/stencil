@@ -164,25 +164,25 @@ public:
   // return the position of the face relative to get_data()
   // positive or negative
   // x=0, y=1, z=2
-  Dim3 face_pos(bool pos, const size_t dim) const {
+  Dim3 face_pos(const size_t dim, const bool pos, const bool halo) const {
     switch (pos) {
     case false: // negative-facing
       switch (dim) {
       case 0:
-        return Dim3(0, 0, 0);
+        return Dim3(halo ? 0 : radius_, radius_, radius_);
       case 1:
-        return Dim3(0, 0, 0);
+        return Dim3(radius_, halo ? 0 : radius_, radius_);
       case 2:
-        return Dim3(0, 0, 0);
+        return Dim3(radius_, radius_, halo ? 0 : radius_);
       }
     case true: // positive-facing
       switch (dim) {
       case 0:
-        return Dim3(radius_ + sz_.x, 0, 0); // +x
+        return Dim3(sz_.x + (halo ? radius_ : 0), radius_, radius_); // +x
       case 1:
-        return Dim3(0, radius_ + sz_.y, 0); // +y
+        return Dim3(radius_, sz_.y + (halo ? radius_ : 0), radius_); // +y
       case 2:
-        return Dim3(0, 0, radius_ + sz_.z); // +z
+        return Dim3(radius_, radius_, sz_.z + (halo ? radius_ : 0)); // +z
       }
     }
 
@@ -191,18 +191,18 @@ public:
   }
 
   // return the extent of the face in every dimension
-  Dim3 face_extent(bool pos, const size_t dim) const {
+  Dim3 face_extent(const size_t dim) const {
     switch (dim) {
     case 0:
-      return Dim3(0, sz_.y, sz_.z);
+      return Dim3(radius_, sz_.y, sz_.z);
     case 1:
-      return Dim3(sz_.x, 0, sz_.z);
+      return Dim3(sz_.x, radius_, sz_.z);
     case 2:
-      return Dim3(sz_.x, sz_.y, 0);
+      return Dim3(sz_.x, sz_.y, radius_);
+    default:
+      assert(0 && "unreachable");
+      return Dim3(-1, -1, -1);
     }
-
-    assert(0 && "unreachable");
-    return Dim3(-1, -1, -1);
   }
 
   /*! \brief return the position of the edge, to be used in conjunction with
