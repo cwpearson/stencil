@@ -5,13 +5,18 @@
 # 3.13+ for target_link_directories
 cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
-project(stencil LANGUAGES CXX CUDA VERSION 0.1.0.0)
+project(stencil LANGUAGES CXX VERSION 0.1.0.0)
+
+include(CheckLanguage)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
 option(USE_NUMA "compile with NUMA support" ON)
 option(USE_MPI "compile with MPI support" ON)
+option(USE_CUDA "compile with CUDA support" ON)
 
-set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+
+
+
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/GetGitRevisionDescription.cmake")
 
@@ -22,12 +27,21 @@ message(STATUS GIT_REFSPEC=${GIT_REFSPEC})
 message(STATUS GIT_HASH=${GIT_HASH})
 message(STATUS GIT_LOCAL_CHANGES=${GIT_LOCAL_CHANGES})
 
+if (USE_CUDA)
+  check_language(CUDA)
+  if(CMAKE_CUDA_COMPILER)
+    enable_language(CUDA)
+  else()
+    message(STATUS "No CUDA support")
+  endif()
+endif()
+
 if(USE_MPI)
-find_package(MPI)
+  find_package(MPI)
 endif()
 
 if (USE_NUMA)
-find_package(NUMA)
+  find_package(NUMA)
 endif()
 
 add_library(stencil INTERFACE)
@@ -41,6 +55,14 @@ if (NUMA_FOUND)
 else()
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=0)
   message(STATUS "NUMA not found, compiling with STENCIL_USE_NUMA=0")
+endif()
+
+if(CMAKE_CUDA_COMPILER)
+target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=1)
+message(STATUS "CUDA found, compiling with STENCIL_USE_CUDA=1")
+else()
+target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=1)
+message(STATUS "CUDA not found, compiling with STENCIL_USE_CUDA=0")
 endif()
 
 ## just using target_link_libraries(pangolin INTERFACE MPI::MPI_CXX)

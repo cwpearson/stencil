@@ -16,6 +16,18 @@ make
 mpirun -n 4 src/main
 ```
 
+## Documentation
+
+`stencil` optimized communication with CUDA, NUMA, and MPI, depending on whether those are available in the environment.
+Depending on availability, the following compiler defines exist:
+
+| Capability | Available | Not Available |
+|-|-|-|
+| MPI | `STENCIL_USE_MPI=1` | `STENCIL_USE_MPI=0` |
+| CUDA | `STENCIL_USE_CUDA=1` | `STENCIL_USE_CUDA=0` |
+| libnuma | `STENCIL_USE_NUMA=1` | `STENCIL_USE_NUMA=0` |
+
+
 ## Tests
 
 Install MPI and CUDA, then
