@@ -91,4 +91,30 @@ TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
     REQUIRE(d0.edge_pos(0, 1, false, false, isHalo) ==
             d0.edge_pos(1, 0, false, false, isHalo));
   }
+
+  SECTION("corner position in halo") {
+    bool isHalo = true;
+    REQUIRE(Dim3(0, 0, 0) == d0.corner_pos(0, 0, 0, isHalo));    // -x -y -z
+    REQUIRE(Dim3(34, 0, 0) == d0.corner_pos(1, 0, 0, isHalo));   // +x -y -z
+    REQUIRE(Dim3(0, 44, 0) == d0.corner_pos(0, 1, 0, isHalo));   // -x +y -z
+    REQUIRE(Dim3(34, 44, 0) == d0.corner_pos(1, 1, 0, isHalo));  // +x +y -z
+    REQUIRE(Dim3(0, 0, 54) == d0.corner_pos(0, 0, 1, isHalo));   // -x -y +z
+    REQUIRE(Dim3(34, 0, 54) == d0.corner_pos(1, 0, 1, isHalo));  // +x -y +z
+    REQUIRE(Dim3(0, 44, 54) == d0.corner_pos(0, 1, 1, isHalo));  // -x +y +z
+    REQUIRE(Dim3(34, 44, 54) == d0.corner_pos(1, 1, 1, isHalo)); // +x +y +z
+  }
+
+  SECTION("corner position in compute") {
+    bool isHalo = false;
+    REQUIRE(Dim3(4, 4, 4) == d0.corner_pos(0, 0, 0, isHalo));    // -x -y -z
+    REQUIRE(Dim3(30, 4, 4) == d0.corner_pos(1, 0, 0, isHalo));   // +x -y -z
+    REQUIRE(Dim3(4, 40, 4) == d0.corner_pos(0, 1, 0, isHalo));   // -x +y -z
+    REQUIRE(Dim3(30, 40, 4) == d0.corner_pos(1, 1, 0, isHalo));  // +x +y -z
+    REQUIRE(Dim3(4, 4, 50) == d0.corner_pos(0, 0, 1, isHalo));   // -x -y +z
+    REQUIRE(Dim3(30, 4, 50) == d0.corner_pos(1, 0, 1, isHalo));  // +x -y +z
+    REQUIRE(Dim3(4, 40, 50) == d0.corner_pos(0, 1, 1, isHalo));  // -x +y +z
+    REQUIRE(Dim3(30, 40, 50) == d0.corner_pos(1, 1, 1, isHalo)); // +x +y +z
+  }
+
+  SECTION("corner extent") { REQUIRE(Dim3(4, 4, 4) == d0.corner_extent()); }
 }

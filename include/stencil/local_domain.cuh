@@ -53,49 +53,6 @@ public:
     }
   }
 
-  // the sizes of the faces in bytes for each data along the requested dimension
-  // (x = 0, y = 1, etc) for data entry idx
-  size_t face_bytes(const size_t dim, const size_t idx) const {
-    assert(idx < dataElemSize_.size());
-    size_t bytes = dataElemSize_[idx];
-    if (0 == dim) { // x face = y * z * radius_
-      bytes *= sz_.y * sz_.z * radius_;
-    } else if (1 == dim) { // y face = x * z * radius
-      bytes *= sz_.x * sz_.z * radius_;
-    } else if (2 == dim) { // z face = x * y * radius_
-      bytes *= sz_.x * sz_.y * radius_;
-    } else {
-      assert(0);
-    }
-    return bytes;
-  }
-
-  // the sizes of the edges in bytes for each data along the requested dimension
-  // x = 0, y = 1, etc
-  size_t edge_bytes(const size_t dim0, const size_t dim1,
-                    const size_t idx) const {
-
-    assert(dim0 != dim1 && "no edge between matching dims");
-    assert(idx < dataElemSize_.size());
-    size_t bytes = dataElemSize_[idx];
-    if (0 != dim0 && 0 != dim1) {
-      bytes *= sz_[0];
-    } else if (1 != dim0 && 1 != dim1) {
-      bytes *= sz_[1];
-    } else if (2 != dim0 && 2 != dim1) {
-      bytes *= sz_[2];
-    } else {
-      assert(0);
-    }
-    return bytes;
-  }
-
-  // the size of the halo corner in bytes for each data
-  size_t corner_bytes(const size_t idx) const {
-    assert(idx < dataElemSize_.size());
-    return dataElemSize_[idx] * radius_ * radius_ * radius_;
-  }
-
   /*
    */
   size_t num_data() const {
@@ -143,7 +100,10 @@ public:
     return static_cast<T *>(ptr);
   }
 
-  size_t elem_size(const size_t idx) const { return dataElemSize_[idx]; }
+  size_t elem_size(const size_t idx) const {
+    assert(idx < dataElemSize_.size());
+    return dataElemSize_[idx];
+  }
 
   char *curr_data(size_t idx) const {
     assert(idx < currDataPtrs_.size());
@@ -203,6 +163,13 @@ public:
       assert(0 && "unreachable");
       return Dim3(-1, -1, -1);
     }
+  }
+
+  // the sizes of the faces in bytes for each data along the requested dimension
+  // (x = 0, y = 1, etc) for data entry idx
+  size_t face_bytes(const size_t dim, const size_t idx) const {
+    assert(idx < dataElemSize_.size());
+    return dataElemSize_[idx] * face_extent(dim).flatten();
   }
 
   /*! \brief return the position of the edge, to be used in conjunction with
@@ -278,6 +245,35 @@ public:
       assert(0);
       return Dim3(-1, -1, -1);
     }
+  }
+
+  // the sizes of the edges in bytes for each data along the requested dimension
+  // x = 0, y = 1, etc
+  size_t edge_bytes(const size_t dim0, const size_t dim1,
+                    const size_t idx) const {
+    assert(idx < dataElemSize_.size());
+    return dataElemSize_[idx] * edge_extent(dim0, dim1).flatten();
+  }
+
+  /*! corner position for positive/negative corner at each dimension
+   */
+  Dim3 corner_pos(const bool xPos, const bool yPos, const bool zPos,
+                  const bool halo) const {
+    Dim3 result;
+    result.x = xPos ? (sz_.x + (halo ? radius_ : 0)) : (halo ? 0 : radius_);
+    result.y = yPos ? (sz_.y + (halo ? radius_ : 0)) : (halo ? 0 : radius_);
+    result.z = zPos ? (sz_.z + (halo ? radius_ : 0)) : (halo ? 0 : radius_);
+    return result;
+  }
+
+  /*! corner extent for any dimension
+   */
+  Dim3 corner_extent() const { return Dim3(radius_, radius_, radius_); }
+
+  // the size of the halo corner in bytes for each data
+  size_t corner_bytes(const size_t idx) const {
+    assert(idx < dataElemSize_.size());
+    return dataElemSize_[idx] * corner_extent().flatten();
   }
 
   // return the 3d size of the actual allocation for data idx, in terms of
