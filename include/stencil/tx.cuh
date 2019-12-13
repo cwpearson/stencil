@@ -440,14 +440,14 @@ public:
   }
 };
 
-
 /*! \brief Receive a LocalDomain edge using Recver
  */
- template <typename Recver> class EdgeRecver : public HaloRecver {
+template <typename Recver> class EdgeRecver : public HaloRecver {
 private:
   const LocalDomain *domain_; // the domain we are receiving into
-  size_t dim_;                // the face dimension we are receiving
-  bool pos_;                  // positive or negative face
+  size_t dim0_, dim1_;        // the two dimensions the edge shares
+  bool dim0Pos_;              // postive dimension 0
+  bool dim1Pos_;              // positive dimension 1
 
   std::future<void> fut_;
 
@@ -458,7 +458,8 @@ private:
 
 public:
   EdgeRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
-             size_t dstRank, size_t dstGPU, size_t dim0, size_t dim1, bool dim0Pos, bool dim1Pos)
+             size_t dstRank, size_t dstGPU, size_t dim0, size_t dim1,
+             bool dim0Pos, bool dim1Pos)
       : recvers_(domain.num_data(), Recver(srcRank, srcGPU, dstRank, dstGPU)),
         domain_(&domain), dim0_(dim0), dim0Pos_(dim0Pos) {}
 
@@ -492,7 +493,7 @@ public:
     // unpack all data into domain
 
     const Dim3 edgePos = domain_->edge_pos(dim0_, dim1_, dim0Pos_, dim1Pos_);
-    const Dim3 edgeExtent = domain_->edge_extent(dim0_, dim1_, dim0Pos_, dim1Pos_);
+    const Dim3 edgeExtent = domain_->edge_extent(dim0_, dim1_);
 
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
       const Dim3 rawSz = domain_->raw_size(dataIdx);
@@ -504,7 +505,7 @@ public:
       size_t elemSize = domain_->elem_size(dataIdx);
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
       unpack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
-          dst, rawSz, 0 /*pitch*/, facePos, faceExtent, bufs_[dataIdx],
+          dst, rawSz, 0 /*pitch*/, edgePos, edgeExtent, bufs_[dataIdx],
           elemSize);
     }
   }
@@ -521,4 +522,3 @@ public:
     }
   }
 };
-

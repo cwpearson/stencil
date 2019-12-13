@@ -2,8 +2,8 @@
 
 #include <iostream>
 
-#include "stencil/dim3.cuh"
 #include "stencil/cuda_runtime.hpp"
+#include "stencil/dim3.cuh"
 
 class DistributedDomain;
 
@@ -73,7 +73,7 @@ public:
   // the sizes of the edges in bytes for each data along the requested dimension
   // x = 0, y = 1, etc
   size_t edge_bytes(const size_t dim0, const size_t dim1,
-                                 const size_t idx) const {
+                    const size_t idx) const {
 
     assert(dim0 != dim1 && "no edge between matching dims");
     assert(idx < dataElemSize_.size());
@@ -124,7 +124,7 @@ public:
   void set_radius(size_t r) { radius_ = r; }
 
   /*! \brief retrieve a pointer to current domain values (to read in stencil)
-  */
+   */
   template <typename T> T *get_curr(const DataHandle<T> handle) {
     assert(dataElemSize_.size() > handle.id_);
     assert(currDataPtrs_.size() > handle.id_);
@@ -134,7 +134,7 @@ public:
   }
 
   /*! \brief retrieve a pointer to next domain values (to set in stencil)
-  */
+   */
   template <typename T> T *get_next(const DataHandle<T> handle) {
     assert(dataElemSize_.size() > handle.id_);
     assert(nextDataPtrs_.size() > handle.id_);
@@ -205,37 +205,41 @@ public:
     return Dim3(-1, -1, -1);
   }
 
-
-  // return the position of the face relative to get_data()
-  // positive or negative
-  // x=0, y=1, z=2
-  Dim3 edge_pos(const size_t dim0, const size_t dim1, const bool dim0Pos, const bool dim1Pos) const {
-
-    Dim3 result(0,0,0);
-
+  /*! \brief return the position of the edge, to be used in conjunction with
+    edge_extent takes the two dimensions the edge abuts, and whether or not
+    those dimensions are positive
+  */
+  Dim3 edge_pos(const size_t dim0, const size_t dim1, const bool dim0Pos,
+                const bool dim1Pos) const {
     assert(dim0 != dim1);
     assert(dim0 < 3);
     assert(dim1 < 3);
 
+    Dim3 result(0, 0, 0);
+
     size_t dim0Sz = 0;
     size_t dim1Sz = 0;
-    if (0 == dim0) {
-      dim0Sz = sz_.x + radius_;
-    } else if (1 == dim0) {
-      dim0Sz = sz_.y + radius_;
-    } else if (2 == dim0) {
-      dim0Sz = sz_.z + radius_;
-    } else {
-      assert(0);
+    if (dim0Pos) {
+      if (0 == dim0) {
+        dim0Sz = sz_.x + radius_;
+      } else if (1 == dim0) {
+        dim0Sz = sz_.y + radius_;
+      } else if (2 == dim0) {
+        dim0Sz = sz_.z + radius_;
+      } else {
+        assert(0);
+      }
     }
-    if (0 == dim1) {
-      dim1Sz = sz_.x + radius_;
-    } else if (1 == dim1) {
-      dim1Sz = sz_.y + radius_;
-    } else if (2 == dim1) {
-      dim1Sz = sz_.z + radius_;
-    } else {
-      assert(0);
+    if (dim1Pos) {
+      if (dim1Pos && 0 == dim1) {
+        dim1Sz = sz_.x + radius_;
+      } else if (1 == dim1) {
+        dim1Sz = sz_.y + radius_;
+      } else if (2 == dim1) {
+        dim1Sz = sz_.z + radius_;
+      } else {
+        assert(0);
+      }
     }
 
     result[dim0] = dim0Sz;
@@ -244,6 +248,25 @@ public:
     return result;
   }
 
+  /*! \brief return the extent of the edge, to be used in conjunction with
+  takes the two dimensions the edge abuts
+*/
+  Dim3 edge_extent(const size_t dim0, const size_t dim1) const {
+    assert(dim0 != dim1);
+    assert(dim0 < 3);
+    assert(dim1 < 3);
+
+    if (0 != dim0 and 0 != dim1) {
+      return Dim3(sz_.x, radius_, radius_);
+    } else if (1 != dim0 and 1 != dim1) {
+      return Dim3(radius_, sz_.y, radius_);
+    } else if (2 != dim0 and 2 != dim1) {
+      return Dim3(radius_, radius_, sz_.z);
+    } else {
+      assert(0);
+      return Dim3(-1, -1, -1);
+    }
+  }
 
   // return the 3d size of the actual allocation for data idx, in terms of
   // elements
@@ -281,8 +304,6 @@ public:
       nextDataPtrs_[i] = n;
     }
   }
-
-
 
   void realize_unified() {
 

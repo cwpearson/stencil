@@ -53,7 +53,7 @@ public:
     return *this;
   }
 
-  Dim3 operator%(const Dim3 &rhs) {
+  Dim3 operator%(const Dim3 &rhs) const {
     Dim3 result = *this;
     result %= rhs;
     return result;
@@ -66,7 +66,7 @@ public:
     return *this;
   }
 
-  Dim3 operator+(const Dim3 &rhs) {
+  Dim3 operator+(const Dim3 &rhs) const {
     Dim3 result = *this;
     result += rhs;
     return result;
@@ -79,7 +79,7 @@ public:
     return *this;
   }
 
-  Dim3 operator-(const Dim3 &rhs) {
+  Dim3 operator-(const Dim3 &rhs) const {
     Dim3 result = *this;
     result -= rhs;
     return result;
@@ -109,6 +109,14 @@ public:
     Dim3 result = *this;
     result /= rhs;
     return result;
+  }
+
+  bool operator==(const Dim3 &rhs) const {
+    return x == rhs.x && y == rhs.y && z == rhs.z;
+  }
+
+  bool operator!=(const Dim3 &rhs) const {
+    return x != rhs.x || y != rhs.y || z == rhs.z;
   }
 
   Dim3 wrap(const Dim3 &lims) {

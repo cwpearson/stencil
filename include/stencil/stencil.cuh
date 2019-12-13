@@ -166,7 +166,13 @@ public:
     }
   }
 
-  std::vector<LocalDomain> &domains() { return domains_; }
+  ~DistributedDomain(){
+#warning dtor is a no-op
+  }
+
+  std::vector<LocalDomain> &domains() {
+    return domains_;
+  }
 
   void set_radius(size_t r) { radius_ = r; }
 
@@ -441,15 +447,15 @@ public:
           const int nbrGPU = gpus_[logicalNbrGPU];
 
           HaloSender *sender = nullptr;
-          HaloSender *recver = nullptr;
+          HaloRecver *recver = nullptr;
 #if 0
-          sender = EdgeSender<AnySender>(d, myRank, myGPU, nbrRank, nbrGPU,
+          sender = new EdgeSender<AnySender>(d, myRank, myGPU, nbrRank, nbrGPU,
                                          0 /*x*/, 1 /*y*/, xDim > 0 /*xpos*/,
                                          yDir > 0 /*ypos*/);
 #endif
-          recver = EdgeRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank, myGPU,
-                                         0 /*x*/, 1 /*y*/, xDim > 0 /*xpos*/,
-                                         yDir > 0 /*ypos*/);
+          recver = new EdgeRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank, myGPU,
+                                             0 /*x*/, 1 /*y*/, xDir > 0 /*pos*/,
+                                             yDir > 0 /*pos*/);
         }
       }
       // xz faces
