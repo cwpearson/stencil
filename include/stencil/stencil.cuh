@@ -93,8 +93,8 @@ private:
   // a face has not-present in the other two dimensions
   // an edge has not-present in one dimension
   // a corner has all dimensions present
-  std::vector<HaloSender> senders[3][3][3];
-  std::vector<HaloRecver> recvers[3][3][3];
+  std::vector<HaloSender *> senders[3][3][3];
+  std::vector<HaloRecver *> recvers[3][3][3];
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -111,7 +111,7 @@ public:
     int deviceCount;
     CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
 
-    // create a communicator for this node
+    // create a communicator for ranks on the same node
     MPI_Comm shmcomm;
     MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
                         &shmcomm);
@@ -120,7 +120,7 @@ public:
     MPI_Comm_size(shmcomm, &shmsize);
     printf("DistributedDomain::ctor(): shmcomm rank %d/%d\n", shmrank, shmsize);
 
-    // if fewer ranks, round-robin GPUs to ranks
+    // if fewer ranks than GPUs, round-robin GPUs to ranks
     if (shmsize <= deviceCount) {
       for (int gpu = 0; gpu < deviceCount; ++gpu) {
         if (gpu % shmsize == shmrank) {
