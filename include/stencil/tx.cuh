@@ -490,9 +490,10 @@ public:
       r.wait();
     }
 
-    // unpack all data into domain
+    // unpack all data into halo region
 
-    const Dim3 edgePos = domain_->edge_pos(dim0_, dim1_, dim0Pos_, dim1Pos_);
+    const Dim3 edgePos =
+        domain_->edge_pos(dim0_, dim1_, dim0Pos_, dim1Pos_, true /*halo*/);
     const Dim3 edgeExtent = domain_->edge_extent(dim0_, dim1_);
 
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {

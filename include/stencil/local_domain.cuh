@@ -208,42 +208,54 @@ public:
   /*! \brief return the position of the edge, to be used in conjunction with
     edge_extent takes the two dimensions the edge abuts, and whether or not
     those dimensions are positive
+    \param halo \\![in] whether the position is in the halo, or compute region
   */
   Dim3 edge_pos(const size_t dim0, const size_t dim1, const bool dim0Pos,
-                const bool dim1Pos) const {
+                const bool dim1Pos, const bool halo) const {
     assert(dim0 != dim1);
     assert(dim0 < 3);
     assert(dim1 < 3);
 
-    Dim3 result(0, 0, 0);
+    // make dim2 not dim1 or dim0
+    size_t dim2 = 0;
+    while (dim2 == dim1 || dim2 == dim0) {
+      ++dim2;
+    }
 
-    size_t dim0Sz = 0;
-    size_t dim1Sz = 0;
+    size_t dim0Sz;
+    size_t dim1Sz;
+
     if (dim0Pos) {
       if (0 == dim0) {
-        dim0Sz = sz_.x + radius_;
+        dim0Sz = sz_.x + (halo ? radius_ : 0);
       } else if (1 == dim0) {
-        dim0Sz = sz_.y + radius_;
+        dim0Sz = sz_.y + (halo ? radius_ : 0);
       } else if (2 == dim0) {
-        dim0Sz = sz_.z + radius_;
+        dim0Sz = sz_.z + (halo ? radius_ : 0);
       } else {
         assert(0);
       }
+    } else {
+      dim0Sz = halo ? 0 : radius_;
     }
     if (dim1Pos) {
       if (dim1Pos && 0 == dim1) {
-        dim1Sz = sz_.x + radius_;
+        dim1Sz = sz_.x + (halo ? radius_ : 0);
       } else if (1 == dim1) {
-        dim1Sz = sz_.y + radius_;
+        dim1Sz = sz_.y + (halo ? radius_ : 0);
       } else if (2 == dim1) {
-        dim1Sz = sz_.z + radius_;
+        dim1Sz = sz_.z + (halo ? radius_ : 0);
       } else {
         assert(0);
       }
+    } else {
+      dim1Sz = halo ? 0 : radius_;
     }
 
+    Dim3 result;
     result[dim0] = dim0Sz;
     result[dim1] = dim1Sz;
+    result[dim2] = radius_;
 
     return result;
   }
