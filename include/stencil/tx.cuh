@@ -439,3 +439,86 @@ public:
     }
   }
 };
+
+
+/*! \brief Receive a LocalDomain edge using Recver
+ */
+ template <typename Recver> class EdgeRecver : public HaloRecver {
+private:
+  const LocalDomain *domain_; // the domain we are receiving into
+  size_t dim_;                // the face dimension we are receiving
+  bool pos_;                  // positive or negative face
+
+  std::future<void> fut_;
+
+  // one receiver per domain data
+  std::vector<Recver> recvers_;
+  // one device buffer per domain data
+  std::vector<char *> bufs_;
+
+public:
+  EdgeRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
+             size_t dstRank, size_t dstGPU, size_t dim0, size_t dim1, bool dim0Pos, bool dim1Pos)
+      : recvers_(domain.num_data(), Recver(srcRank, srcGPU, dstRank, dstGPU)),
+        domain_(&domain), dim0_(dim0), dim0Pos_(dim0Pos) {}
+
+  virtual void allocate() override {
+    // allocate space for each transfer
+    const int gpu = domain_->gpu();
+    CUDA_RUNTIME(cudaSetDevice(gpu));
+
+    for (size_t i = 0; i < domain_->num_data(); ++i) {
+      size_t numBytes = domain_->edge_bytes(dim0_, dim1_, i);
+      char *buf = nullptr;
+      CUDA_RUNTIME(cudaMalloc(&buf, numBytes));
+      bufs_.push_back(buf);
+      recvers_[i].resize(numBytes);
+    }
+  }
+
+  void recv_impl() {
+    assert(bufs_.size() == recvers_.size());
+
+    // receive all data into flat buffers
+    for (size_t dataIdx = 0; dataIdx < bufs_.size(); ++dataIdx) {
+      recvers_[dataIdx].recv(bufs_[dataIdx], dataIdx);
+    }
+
+    // wait for all data
+    for (auto &r : recvers_) {
+      r.wait();
+    }
+
+    // unpack all data into domain
+
+    const Dim3 edgePos = domain_->edge_pos(dim0_, dim1_, dim0Pos_, dim1Pos_);
+    const Dim3 edgeExtent = domain_->edge_extent(dim0_, dim1_, dim0Pos_, dim1Pos_);
+
+    for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
+      const Dim3 rawSz = domain_->raw_size(dataIdx);
+      char *dst = domain_->curr_data(dataIdx);
+
+      // pack into buffer
+      dim3 dimGrid(20, 20, 20);
+      dim3 dimBlock(32, 4, 4);
+      size_t elemSize = domain_->elem_size(dataIdx);
+      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+      unpack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
+          dst, rawSz, 0 /*pitch*/, facePos, faceExtent, bufs_[dataIdx],
+          elemSize);
+    }
+  }
+
+  void recv() override { fut_ = std::async(&EdgeRecver::recv_impl, this); }
+
+  // wait for send to be complete
+  virtual void wait() override {
+    if (fut_.valid()) {
+      fut_.wait();
+      CUDA_RUNTIME(cudaStreamSynchronize(domain_->stream()));
+    } else {
+      assert(0 && "wait called before recv");
+    }
+  }
+};
+

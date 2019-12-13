@@ -310,12 +310,17 @@ public:
       assert(domains_.size() == indices_.size());
 
       auto &d = domains_[di];
+      const Dim3 myIdx = indices_[di];
+      const int myRank = rank_;
+      const int myGPU = d.gpu();
+      const int logicalMyGPU = get_logical_gpu(myIdx);
+      assert(myRank == get_rank(myIdx));
+      assert(myGPU == gpus_[logicalMyGPU]);
 
       // consider face neighbor in dimension and direction
       for (const auto dim : {0, 1, 2}) { // dimensions (x,y,z)
         for (const auto dir : {-1, 1}) { // direction (neg, pos)
 
-          Dim3 myIdx = indices_[di];
           Dim3 nbrIdx = myIdx;
           nbrIdx[dim] += dir;
           nbrIdx = nbrIdx.wrap(rankDim_ * gpuDim_);
@@ -425,6 +430,30 @@ public:
           }
         }
       }
+
+      // xy faces
+      for (auto xDir : {-1, 1}) {
+        for (auto yDir : {-1, 1}) {
+          Dim3 nbrIdx = myIdx + Dim3(xDir, yDir, 0);
+          nbrIdx = nbrIdx.wrap(rankDim_ * gpuDim_);
+          const int logicalNbrGPU = get_logical_gpu(nbrIdx);
+          const int nbrRank = get_rank(nbrIdx);
+          const int nbrGPU = gpus_[logicalNbrGPU];
+
+          HaloSender *sender = nullptr;
+          HaloSender *recver = nullptr;
+#if 0
+          sender = EdgeSender<AnySender>(d, myRank, myGPU, nbrRank, nbrGPU,
+                                         0 /*x*/, 1 /*y*/, xDim > 0 /*xpos*/,
+                                         yDir > 0 /*ypos*/);
+#endif
+          recver = EdgeRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank, myGPU,
+                                         0 /*x*/, 1 /*y*/, xDim > 0 /*xpos*/,
+                                         yDir > 0 /*ypos*/);
+        }
+      }
+      // xz faces
+      // yz faces
     }
   }
 

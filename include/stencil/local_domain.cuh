@@ -205,6 +205,46 @@ public:
     return Dim3(-1, -1, -1);
   }
 
+
+  // return the position of the face relative to get_data()
+  // positive or negative
+  // x=0, y=1, z=2
+  Dim3 edge_pos(const size_t dim0, const size_t dim1, const bool dim0Pos, const bool dim1Pos) const {
+
+    Dim3 result(0,0,0);
+
+    assert(dim0 != dim1);
+    assert(dim0 < 3);
+    assert(dim1 < 3);
+
+    size_t dim0Sz = 0;
+    size_t dim1Sz = 0;
+    if (0 == dim0) {
+      dim0Sz = sz_.x + radius_;
+    } else if (1 == dim0) {
+      dim0Sz = sz_.y + radius_;
+    } else if (2 == dim0) {
+      dim0Sz = sz_.z + radius_;
+    } else {
+      assert(0);
+    }
+    if (0 == dim1) {
+      dim1Sz = sz_.x + radius_;
+    } else if (1 == dim1) {
+      dim1Sz = sz_.y + radius_;
+    } else if (2 == dim1) {
+      dim1Sz = sz_.z + radius_;
+    } else {
+      assert(0);
+    }
+
+    result[dim0] = dim0Sz;
+    result[dim1] = dim1Sz;
+
+    return result;
+  }
+
+
   // return the 3d size of the actual allocation for data idx, in terms of
   // elements
   Dim3 raw_size(size_t idx) const {
