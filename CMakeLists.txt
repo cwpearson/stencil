@@ -58,10 +58,10 @@ else()
 endif()
 
 if(CMAKE_CUDA_COMPILER)
-target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=1)
+target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=1)
 message(STATUS "CUDA found, compiling with STENCIL_USE_CUDA=1")
 else()
-target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=1)
+target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=0)
 message(STATUS "CUDA not found, compiling with STENCIL_USE_CUDA=0")
 endif()
 
