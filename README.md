@@ -56,6 +56,7 @@ test/test_all "[cuda]"
     * corner communication (Astaroth)
     * CPU stencil (HPCG)
   * future
+    * halo size (performance)
     * pitched arrays (performance)
     * optimized communication (performance)
       * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
