@@ -55,11 +55,15 @@ test/test_all "[cuda]"
     * edge communication (Astaroth)
     * corner communication (Astaroth)
     * CPU stencil (HPCG)
-  * future
-    * halo size (performance)
-    * pitched arrays (performance)
-    * optimized communication (performance)
+  * v2
+    * overlap MPI and CUDA
+    * direct GPU-GPU communication
       * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
       * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node
+  * future
+    * halo size (performance)
+      * fewer, larger messages
+      * less frequent barriers
+    * pitched arrays (performance)
+    * optimized communication (performance)
     * Stop decomposition early
-    * support larger halos for fewer, larger messages
