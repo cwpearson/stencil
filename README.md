@@ -56,6 +56,7 @@ test/test_all "[cuda]"
     * corner communication (Astaroth)
     * CPU stencil (HPCG)
   * v2
+    * data placement in heterogeneous environments
     * overlap MPI and CUDA
     * direct GPU-GPU communication
       * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
