@@ -88,6 +88,8 @@ target_include_directories(stencil INTERFACE
   $<INSTALL_INTERFACE:include>
 )
 
+target_link_libraries(stencil INTERFACE nvidia-ml)
+
 # "this command should be in the source directory root for CTest to find the test file"
 enable_testing() 
 add_subdirectory(test)
