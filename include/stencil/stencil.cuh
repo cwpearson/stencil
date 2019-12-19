@@ -13,6 +13,7 @@
 #include "cuda_runtime.hpp"
 
 #include "stencil/dim3.cuh"
+#include "stencil/gpu_topo.cuh"
 #include "stencil/local_domain.cuh"
 #include "stencil/nvml.hpp"
 #include "stencil/tx.cuh"
@@ -168,55 +169,7 @@ public:
       }
     }
 
-    using Mat2D = std::vector<std::vector<double>>;
-
-    int devCount;
-    CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
-    Mat2D dist(devCount, std::vector<double>(devCount));
-
-    // build a distance matrix for GPUs
-    for (int src = 0; src < devCount; ++src) {
-      for (int dst = 0; dst < devCount; ++dst) {
-        if (src == dst) {
-          dist[src][dst] = 0;
-        }
-        std::cerr << src << " " << dst;
-        nvmlDevice_t srcDev, dstDev;
-        NVML(nvmlDeviceGetHandleByIndex(src, &srcDev));
-        NVML(nvmlDeviceGetHandleByIndex(dst, &dstDev));
-        nvmlGpuTopologyLevel_t pathInfo;
-        NVML(nvmlDeviceGetTopologyCommonAncestor(srcDev, dstDev, &pathInfo));
-
-        switch (pathInfo) {
-        case NVML_TOPOLOGY_INTERNAL: {
-          dist[src][dst] = 1;
-          break;
-        }
-        case NVML_TOPOLOGY_SINGLE: {
-          dist[src][dst] = 2;
-          break;
-        }
-        case NVML_TOPOLOGY_MULTIPLE: {
-          dist[src][dst] = 3;
-          break;
-        }
-        case NVML_TOPOLOGY_HOSTBRIDGE: {
-          dist[src][dst] = 4;
-          break;
-        }
-        case NVML_TOPOLOGY_NODE: {
-          dist[src][dst] = 5;
-          break;
-        }
-        case NVML_TOPOLOGY_SYSTEM: {
-          dist[src][dst] = 6;
-          break;
-        }
-        default:
-          assert(0);
-        }
-      }
-    }
+    Mat2D dist = get_gpu_distance_matrix();
   }
 
   ~DistributedDomain(){
