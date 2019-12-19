@@ -5,6 +5,13 @@ if (CMAKE_CUDA_COMPILER)
     add_test(NAME test_cuda COMMAND test_cuda -a)
 endif()
 
+if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
+    add_executable(test_cuda_mpi test_cuda_mpi_main.cu )
+    target_include_directories(test_cuda_mpi SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
+    target_link_libraries(test_cuda_mpi stencil)
+    add_test(NAME test_cuda_mpi COMMAND mpirun -n 2 test_cuda_mpi -a)
+endif()
+
 
 add_executable(test_cpu test_cpu_main.cpp test_cpu_array.cpp)
 target_include_directories(test_cpu SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
