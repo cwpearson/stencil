@@ -4,7 +4,7 @@ A prototype MPI/CUDA stencil halo exchange library
 
 ## Quick Start
 
-Install MPI and CUDA, then
+Install MPI, CUDA, and CMake 3.13+, then
 
 ```
 git clone git@github.com:cwpearson/stencil.git
