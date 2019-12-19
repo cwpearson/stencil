@@ -25,15 +25,21 @@ inline double get_gpu_distance(const int src, const int dst) {
   NVML(nvmlDeviceGetHandleByIndex(dst, &dstDev));
 
   for (int link = 0; link < 6; ++link) {
-
     nvmlPciInfo_t pci;
     nvmlReturn_t ret = nvmlDeviceGetNvLinkRemotePciInfo(srcDev, link, &pci);
     if (NVML_SUCCESS == ret) {
       // use remote PCI to see if remote device is dst
       nvmlDevice_t remote;
-      NVML(nvmlDeviceGetHandleByPciBusId(pci.busId, &remote));
-      if (remote == dstDev) {
-        return NVLINK_DISTANCE;
+      nvmlReturn_t getRet = nvmlDeviceGetHandleByPciBusId(pci.busId, &remote);
+      if (NVML_SUCCESS == getRet) {
+        if (remote == dstDev) {
+          return NVLINK_DISTANCE;
+        }
+      } else if (NVML_ERROR_NOT_FOUND == getRet) {
+        // not attached to a GPU
+	continue; // try next link
+      } else {
+	NVML(getRet);
       }
 
     } else if (NVML_ERROR_INVALID_ARGUMENT == ret) {

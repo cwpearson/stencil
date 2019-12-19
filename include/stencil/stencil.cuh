@@ -170,7 +170,17 @@ public:
     }
 
     Mat2D dist = get_gpu_distance_matrix();
-  }
+    if (0 == rank_) {
+      for (auto &r : dist) {
+        for (auto &c : r) {
+          std::cerr << c << " ";
+        }
+        std::cerr << "\n";
+      }
+    }
+    
+    
+      }
 
   ~DistributedDomain(){
 #warning dtor is a no-op
