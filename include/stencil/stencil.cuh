@@ -13,7 +13,7 @@
 #include "cuda_runtime.hpp"
 
 #include "stencil/dim3.cuh"
-#include "stencil/gpu_topo.cuh"
+#include "stencil/gpu_topo.hpp"
 #include "stencil/local_domain.cuh"
 #include "stencil/nvml.hpp"
 #include "stencil/tx.cuh"
@@ -178,9 +178,7 @@ public:
         std::cerr << "\n";
       }
     }
-    
-    
-      }
+  }
 
   ~DistributedDomain(){
 #warning dtor is a no-op
