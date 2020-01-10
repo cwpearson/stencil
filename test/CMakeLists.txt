@@ -9,7 +9,7 @@ if (CMAKE_CUDA_COMPILER)
     )
     target_include_directories(test_cuda SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda stencil)
-    add_test(NAME test_cuda COMMAND test_cuda -a)
+    add_test(NAME test_cuda COMMAND cuda-memcheck test_cuda -a)
 endif()
 
 if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
