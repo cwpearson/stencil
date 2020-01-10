@@ -3,7 +3,7 @@
 #include <iostream>
 
 #include "stencil/cuda_runtime.hpp"
-#include "stencil/dim3.cuh"
+#include "stencil/dim3.hpp"
 
 class DistributedDomain;
 
@@ -300,7 +300,6 @@ public:
       size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
                           (sz_.z + 2 * radius_)) *
                          elemSz;
-      std::cerr << "Allocate " << elemBytes << "B on gpu " << dev_ << "\n";
       char *c = nullptr;
       char *n = nullptr;
       CUDA_RUNTIME(cudaSetDevice(dev_));
@@ -325,7 +324,6 @@ public:
       size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
                           (sz_.z + 2 * radius_)) *
                          elemSz;
-      std::cerr << "Allocate " << elemBytes << "B on gpu " << dev_ << "\n";
       char *c = nullptr;
       char *n = nullptr;
       CUDA_RUNTIME(cudaSetDevice(dev_));

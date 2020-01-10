@@ -12,11 +12,12 @@
 
 #include "cuda_runtime.hpp"
 
-#include "stencil/dim3.cuh"
+#include "stencil/dim3.hpp"
+#include "stencil/direction_map.hpp"
 #include "stencil/gpu_topo.hpp"
 #include "stencil/local_domain.cuh"
 #include "stencil/nvml.hpp"
-#include "stencil/tx.cuh"
+#include "stencil/tx.hpp"
 
 // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
 std::vector<size_t> prime_factors(size_t n) {
@@ -73,37 +74,19 @@ private:
   // the actual data associated with this rank
   std::vector<LocalDomain> domains_;
   // the index of the domain in the distributed domain
-  std::vector<Dim3> indices_;
+  std::vector<Dim3> domainIdx_;
 
-  // Senders / receivers for each face
-  std::vector<HaloSender *> pzSenders_; // how to send +z face
-  std::vector<HaloRecver *> pzRecvers_; // how to recv +z face
-  std::vector<HaloSender *> mzSenders_; // how to send -z face
-  std::vector<HaloRecver *> mzRecvers_;
-  std::vector<HaloSender *> pySenders_;
-  std::vector<HaloRecver *> pyRecvers_;
-  std::vector<HaloSender *> mySenders_;
-  std::vector<HaloRecver *> myRecvers_;
-  std::vector<HaloSender *> pxSenders_;
-  std::vector<HaloRecver *> pxRecvers_;
-  std::vector<HaloSender *> mxSenders_;
-  std::vector<HaloRecver *> mxRecvers_;
-
-  // All senders:
-  // x * y * z
-  // 0: not present
-  // 1: positive
-  // 2: negative
-  // a face has not-present in the other two dimensions
-  // an edge has not-present in one dimension
-  // a corner has all dimensions present
-  std::vector<HaloSender *> senders[3][3][3];
-  std::vector<HaloRecver *> recvers[3][3][3];
+  // senders/recvers for each direction in each domain
+  // domainDirSenders[domainIdx].at(dir)
+  // a sender/recver pair is associated with the send direction
+  std::vector<DirectionMap<HaloSender *>> domainDirSender_;
+  std::vector<DirectionMap<HaloRecver *>> domainDirRecver_;
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
 
-  std::set<int64_t> colocated_; //<! colocated MPI ranks
+  // MPI ranks co-located with me
+  std::set<int64_t> colocated_;
 
   std::vector<std::vector<bool>> peerAccess_; //<! which GPUs have peer access
 
@@ -169,6 +152,7 @@ public:
       }
     }
 
+    std::cerr << "gpu distance matrix: \n";
     Mat2D dist = get_gpu_distance_matrix();
     if (0 == rank_) {
       for (auto &r : dist) {
@@ -314,7 +298,7 @@ public:
       Dim3 idx = rankIdx * gpuDim_ + logicalGpuIdx;
       printf("rank,gpu=%d,%d(gpu actual idx=%d) => idx %ld %ld %ld\n", rank_, i,
              gpu, idx.x, idx.y, idx.z);
-      indices_.push_back(idx);
+      domainIdx_.push_back(idx);
     }
 
     // realize local domains
@@ -326,20 +310,42 @@ public:
       printf("DistributedDomain.realize(): finished creating LocalDomain\n");
     }
 
+    // initialize null senders and recvers for each domain
+    domainDirSender_.resize(gpus_.size());
+    domainDirRecver_.resize(gpus_.size());
+    for (size_t domainIdx = 0; domainIdx < domains_.size(); ++domainIdx) {
+      for (int z = 0; z < 3; ++z) {
+        for (int y = 0; y < 3; ++y) {
+          for (int x = 0; x < 3; ++x) {
+            domainDirSender_[domainIdx].at(x, y, z) = nullptr;
+            domainDirRecver_[domainIdx].at(x, y, z) = nullptr;
+          }
+        }
+      }
+    }
+
+    // build senders and recvers for each domain
     for (size_t di = 0; di < domains_.size(); ++di) {
-      assert(domains_.size() == indices_.size());
+      assert(domains_.size() == domainIdx_.size());
 
       auto &d = domains_[di];
-      const Dim3 myIdx = indices_[di];
+      const Dim3 myIdx = domainIdx_[di];
       const int myRank = rank_;
       const int myGPU = d.gpu();
       const int logicalMyGPU = get_logical_gpu(myIdx);
       assert(myRank == get_rank(myIdx));
       assert(myGPU == gpus_[logicalMyGPU]);
 
-      // consider face neighbor in dimension and direction
-      for (const auto dim : {0, 1, 2}) { // dimensions (x,y,z)
+      auto &dirSender = domainDirSender_[di];
+      auto &dirRecver = domainDirRecver_[di];
+
+      // send/recv pairs for faces
+      for (const auto dim : {0, 1, 2}) { // dimensions (x,y,z) {0,1,2}
         for (const auto dir : {-1, 1}) { // direction (neg, pos)
+
+          // construct direction vector of this send
+          Dim3 dirVec(0, 0, 0);
+          dirVec[dim] += dir;
 
           Dim3 nbrIdx = myIdx;
           nbrIdx[dim] += dir;
@@ -358,12 +364,14 @@ public:
                                              // same GPU layout
 
           std::cout << myIdx << " -> " << nbrIdx << " dim=" << dim
-                    << " dir=" << dir << " r" << myRank << ",g" << myGPU
-                    << " -> r" << nbrRank << ",g" << nbrGPU << "\n";
+                    << " dir=" << dir << " dirVec=" << dirVec << " r" << myRank
+                    << ",g" << myGPU << " -> r" << nbrRank << ",g" << nbrGPU
+                    << "\n";
 
           // determine how to send face in that direction
           HaloSender *sender = nullptr;
-          if (myRank == nbrRank) { // both domains onwned by this rank
+
+          if (myRank == nbrRank) { // both domains ownned by this rank
             printf(
                 "DistributedDomain.realize(): dim=%d dir=%d send same rank\n",
                 dim, dir);
@@ -371,7 +379,7 @@ public:
                                                nbrGPU, dim, dir > 0 /*pos*/);
           } else if (colocated_.count(nbrRank)) { // both domains on this node
             printf(
-                "DistributedDomain.realize(): dim=%d dir=%d  send colocated\n",
+                "DistributedDomain.realize(): dim=%d dir=%d send colocated\n",
                 dim, dir);
             sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
                                                nbrGPU, dim, dir > 0 /*pos*/);
@@ -380,10 +388,6 @@ public:
             sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
                                                nbrGPU, dim, dir > 0 /*pos*/);
           }
-
-          std::cout << myIdx << " <- " << nbrIdx << " dim=" << dim
-                    << " dir=" << dir << " r" << myRank << ",g" << myGPU
-                    << " <- r" << nbrRank << ",g" << nbrGPU << "\n";
 
           // determine how to receive a face from that direction
           HaloRecver *recver = nullptr;
@@ -407,47 +411,11 @@ public:
 
           assert(sender != nullptr);
           assert(recver != nullptr);
-          if (1 == dir) {
-            if (0 == dim) {
-              pxSenders_.push_back(sender);
-              pxSenders_.back()->allocate();
-              pxRecvers_.push_back(recver);
-              pxRecvers_.back()->allocate();
-            } else if (1 == dim) {
-              pySenders_.push_back(sender);
-              pySenders_.back()->allocate();
-              pyRecvers_.push_back(recver);
-              pyRecvers_.back()->allocate();
-            } else if (2 == dim) {
-              pzSenders_.push_back(sender);
-              pzSenders_.back()->allocate();
-              pzRecvers_.push_back(recver);
-              pzRecvers_.back()->allocate();
-            } else {
-              assert(0 && "only 3D supported");
-            }
-          } else if (-1 == dir) {
-            if (0 == dim) {
-              mxSenders_.push_back(sender);
-              mxSenders_.back()->allocate();
-              mxRecvers_.push_back(recver);
-              mxRecvers_.back()->allocate();
-            } else if (1 == dim) {
-              mySenders_.push_back(sender);
-              mySenders_.back()->allocate();
-              myRecvers_.push_back(recver);
-              myRecvers_.back()->allocate();
-            } else if (2 == dim) {
-              mzSenders_.push_back(sender);
-              mzSenders_.back()->allocate();
-              mzRecvers_.push_back(recver);
-              mzRecvers_.back()->allocate();
-            } else {
-              assert(0 && "only 3D supported");
-            }
-          } else {
-            assert(0 && "unexpected direction");
-          }
+
+          sender->allocate();
+          recver->allocate();
+          dirSender.at_dir(dirVec.x, dirVec.y, dirVec.z) = sender;
+          dirRecver.at_dir(dirVec.x, dirVec.y, dirVec.z) = recver;
         }
       }
 
@@ -466,10 +434,11 @@ public:
           sender = new EdgeSender<AnySender>(d, myRank, myGPU, nbrRank, nbrGPU,
                                          0 /*x*/, 1 /*y*/, xDim > 0 /*xpos*/,
                                          yDir > 0 /*ypos*/);
-#endif
+
           recver = new EdgeRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank, myGPU,
                                              0 /*x*/, 1 /*y*/, xDir > 0 /*pos*/,
                                              yDir > 0 /*pos*/);
+#endif
         }
       }
       // xz faces
@@ -481,58 +450,51 @@ public:
   do a halo exchange and return
   */
   void exchange() {
-    assert(pzSenders_.size() == domains_.size());
-    assert(pySenders_.size() == domains_.size());
-    assert(pxSenders_.size() == domains_.size());
-
-    assert(pzRecvers_.size() == domains_.size());
-    assert(pyRecvers_.size() == domains_.size());
-    assert(pxRecvers_.size() == domains_.size());
-
-    assert(mzSenders_.size() == domains_.size());
-    assert(mySenders_.size() == domains_.size());
-    assert(mxSenders_.size() == domains_.size());
-
-    assert(mzRecvers_.size() == domains_.size());
-    assert(myRecvers_.size() == domains_.size());
-    assert(mxRecvers_.size() == domains_.size());
-
-    // send +z
-
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      std::cout << "DistributedDomain::exchange(): r" << rank_ << ": recv mz["
-                << di << "]\n";
-      mzRecvers_[di]->recv();
-      std::cout << "DistributedDomain::exchange(): r" << rank_ << ": send pz["
-                << di << "]\n";
-      pzSenders_[di]->send();
+    // issue all sends
+    for (auto &dirSenders : domainDirSender_) {
+      for (int z = 0; z < 3; ++z) {
+        for (int y = 0; y < 3; ++y) {
+          for (int x = 0; x < 3; ++x) {
+            if (auto sender = dirSenders.at(x, y, z)) {
+              sender->send();
+            }
+          }
+        }
+      }
     }
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      mzRecvers_[di]->wait();
-      pzSenders_[di]->wait();
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
 
-    // send +y
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      myRecvers_[di]->recv();
-      pySenders_[di]->send();
+    // issue all recvs
+    for (auto &dirRecvers : domainDirRecver_) {
+      for (int z = 0; z < 3; ++z) {
+        for (int y = 0; y < 3; ++y) {
+          for (int x = 0; x < 3; ++x) {
+            if (auto recver = dirRecvers.at(x, y, z)) {
+              recver->recv();
+            }
+          }
+        }
+      }
     }
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      myRecvers_[di]->wait();
-      pySenders_[di]->wait();
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
 
-    // send +x
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      mxRecvers_[di]->recv();
-      pxSenders_[di]->send();
+    // wait for all sends and recvs
+    for (size_t domainIdx = 0; domainIdx < domains_.size(); ++domainIdx) {
+      auto &dirSender = domainDirSender_[domainIdx];
+      auto &dirRecver = domainDirRecver_[domainIdx];
+      for (int z = 0; z < 3; ++z) {
+        for (int y = 0; y < 3; ++y) {
+          for (int x = 0; x < 3; ++x) {
+            if (auto recver = dirRecver.at(x, y, z)) {
+              recver->wait();
+            }
+            if (auto sender = dirSender.at(x, y, z)) {
+              sender->wait();
+            }
+          }
+        }
+      }
     }
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      mxRecvers_[di]->wait();
-      pxSenders_[di]->wait();
-    }
+
+    // wait for all ranks to be done
     MPI_Barrier(MPI_COMM_WORLD);
   }
 };

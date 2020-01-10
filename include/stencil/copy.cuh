@@ -1,6 +1,6 @@
 #pragma once
 
-#include "dim3.cuh"
+#include "dim3.hpp"
 
 // pitch calculations
 // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html#group__CUDART__MEMORY_1g32bd7a39135594788a542ae72217775c

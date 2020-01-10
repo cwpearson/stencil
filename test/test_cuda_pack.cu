@@ -2,7 +2,7 @@
 
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
-#include "stencil/dim3.cuh"
+#include "stencil/dim3.hpp"
 
 TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
   Dim3 arrSz(3, 4, 5);

@@ -3,7 +3,7 @@
 #include <mpi.h>
 
 #include "stencil/cuda_runtime.hpp"
-#include "stencil/tx.cuh"
+#include "stencil/tx.hpp"
 
 TEMPLATE_TEST_CASE("any tx", "[mpi][cuda][template]", int32_t, int64_t) {
 
@@ -24,10 +24,17 @@ TEMPLATE_TEST_CASE("any tx", "[mpi][cuda][template]", int32_t, int64_t) {
   REQUIRE(buf1[0] != buf0[0]);
   REQUIRE(buf1[n - 1] != buf0[n - 1]);
 
-  INFO("tx ctors");
-  AnySender sender(0, 0, 0, 0);
-  AnyRecver recver(0, 0, 0, 0);
-  INFO("tx resize");
+  INFO("ctors");
+  int srcRank = 0;
+  int srcGPU = 0;
+  int dstRank = 0;
+  int dstGPU = 0;
+  size_t dataIdx = 0;
+  AnySender sender(srcRank, srcGPU, dstRank, dstGPU, dataIdx, Dim3(0,0,0));
+  AnyRecver recver(srcRank, srcGPU, dstRank, dstGPU, dataIdx, Dim3(0,0,0));
+
+  
+  INFO("resize");
   sender.resize(n * sizeof(TestType));
   recver.resize(n * sizeof(TestType));
 

@@ -1,4 +1,4 @@
-#include "stencil/stencil.cuh"
+#include "stencil/stencil.hpp"
 
 int main(int argc, char **argv) {
 
