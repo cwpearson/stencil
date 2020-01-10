@@ -2,6 +2,12 @@
 
 #include <ostream>
 
+#ifdef __CUDACC__
+#define CUDA_CALLABLE_MEMBER __host__ __device__
+#else
+#define CUDA_CALLABLE_MEMBER
+#endif
+
 class Dim3 {
 public:
   int64_t x;
@@ -9,15 +15,17 @@ public:
   int64_t z;
 
 public:
-  Dim3() {}
-  Dim3(int64_t x, int64_t y, int64_t z) : x(x), y(y), z(z) {}
+  CUDA_CALLABLE_MEMBER Dim3() {}
+  CUDA_CALLABLE_MEMBER Dim3(int64_t x, int64_t y, int64_t z)
+      : x(x), y(y), z(z) {}
   /* copy ctor*/
-  Dim3(const Dim3 &d) : x(d.x), y(d.y), z(d.z) {}
+  CUDA_CALLABLE_MEMBER Dim3(const Dim3 &d) : x(d.x), y(d.y), z(d.z) {}
   /* move ctor */
-  Dim3(Dim3 &&d) : x(std::move(d.x)), y(std::move(d.y)), z(std::move(d.z)) {}
+  CUDA_CALLABLE_MEMBER Dim3(Dim3 &&d)
+      : x(std::move(d.x)), y(std::move(d.y)), z(std::move(d.z)) {}
 
   /* copy assign */
-  Dim3 &operator=(const Dim3 &d) {
+  CUDA_CALLABLE_MEMBER Dim3 &operator=(const Dim3 &d) {
     x = d.x;
     y = d.y;
     z = d.z;
@@ -25,7 +33,7 @@ public:
   }
 
   /* move assign */
-  Dim3 &operator=(Dim3 &&d) {
+  CUDA_CALLABLE_MEMBER Dim3 &operator=(Dim3 &&d) {
     x = std::move(d.x);
     y = std::move(d.y);
     z = std::move(d.z);
@@ -38,7 +46,7 @@ public:
     std::swap(z, d.z);
   }
 
-  int64_t &operator[](const size_t idx) {
+  CUDA_CALLABLE_MEMBER int64_t &operator[](const size_t idx) {
     if (idx == 0)
       return x;
     else if (idx == 1)
@@ -48,7 +56,9 @@ public:
     assert(0 && "only 3 dimensions!");
     return x;
   }
-  const int64_t &operator[](const size_t idx) const { return operator[](idx); }
+  CUDA_CALLABLE_MEMBER const int64_t &operator[](const size_t idx) const {
+    return operator[](idx);
+  }
 
   /*! \brief elementwise max
    */
@@ -60,11 +70,11 @@ public:
     return result;
   }
 
-  bool any() const { return x != 0 || x != 0 || z != 0; }
+  CUDA_CALLABLE_MEMBER bool any() const { return x != 0 || x != 0 || z != 0; }
 
-  size_t flatten() const { return x * y * z; }
+  CUDA_CALLABLE_MEMBER size_t flatten() const { return x * y * z; }
 
-  Dim3 operator>(const Dim3 &rhs) const {
+  CUDA_CALLABLE_MEMBER Dim3 operator>(const Dim3 &rhs) const {
     Dim3 result;
     result.x = x > rhs.x;
     result.y = y > rhs.y;
@@ -72,80 +82,80 @@ public:
     return result;
   }
 
-  Dim3 &operator%=(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 &operator%=(const Dim3 &rhs) {
     x %= rhs.x;
     y %= rhs.y;
     z %= rhs.z;
     return *this;
   }
 
-  Dim3 operator%(const Dim3 &rhs) const {
+  CUDA_CALLABLE_MEMBER Dim3 operator%(const Dim3 &rhs) const {
     Dim3 result = *this;
     result %= rhs;
     return result;
   }
 
-  Dim3 &operator+=(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 &operator+=(const Dim3 &rhs) {
     x += rhs.x;
     y += rhs.y;
     z += rhs.z;
     return *this;
   }
 
-  Dim3 operator+(const Dim3 &rhs) const {
+  CUDA_CALLABLE_MEMBER Dim3 operator+(const Dim3 &rhs) const {
     Dim3 result = *this;
     result += rhs;
     return result;
   }
 
-  Dim3 &operator-=(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 &operator-=(const Dim3 &rhs) {
     x -= rhs.x;
     y -= rhs.y;
     z -= rhs.z;
     return *this;
   }
 
-  Dim3 operator-(const Dim3 &rhs) const {
+  CUDA_CALLABLE_MEMBER Dim3 operator-(const Dim3 &rhs) const {
     Dim3 result = *this;
     result -= rhs;
     return result;
   }
 
-  Dim3 &operator*=(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 &operator*=(const Dim3 &rhs) {
     x *= rhs.x;
     y *= rhs.y;
     z *= rhs.z;
     return *this;
   }
 
-  Dim3 operator*(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 operator*(const Dim3 &rhs) {
     Dim3 result = *this;
     result *= rhs;
     return result;
   }
 
-  Dim3 &operator/=(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 &operator/=(const Dim3 &rhs) {
     x /= rhs.x;
     y /= rhs.y;
     z /= rhs.z;
     return *this;
   }
 
-  Dim3 operator/(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 operator/(const Dim3 &rhs) {
     Dim3 result = *this;
     result /= rhs;
     return result;
   }
 
-  bool operator==(const Dim3 &rhs) const {
+  CUDA_CALLABLE_MEMBER bool operator==(const Dim3 &rhs) const {
     return x == rhs.x && y == rhs.y && z == rhs.z;
   }
 
-  bool operator!=(const Dim3 &rhs) const {
+  CUDA_CALLABLE_MEMBER bool operator!=(const Dim3 &rhs) const {
     return x != rhs.x || y != rhs.y || z == rhs.z;
   }
 
-  Dim3 wrap(const Dim3 &lims) {
+  CUDA_CALLABLE_MEMBER Dim3 wrap(const Dim3 &lims) {
     if (x >= lims.x) {
       x = x % lims.x;
     }
