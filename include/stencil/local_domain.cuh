@@ -276,9 +276,8 @@ public:
     return dataElemSize_[idx] * corner_extent().flatten();
   }
 
-  // return the 3d size of the actual allocation for data idx, in terms of
-  // elements
-  Dim3 raw_size(size_t idx) const {
+  // return the 3d size of the actual allocation, in terms of elements
+  Dim3 raw_size() const {
     return Dim3(sz_.x + 2 * radius_, sz_.y + 2 * radius_, sz_.z + 2 * radius_);
   }
 

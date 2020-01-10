@@ -225,8 +225,8 @@ public:
         domain_->face_pos(dim_, pos_, false /*compute region*/);
     const Dim3 faceExtent = domain_->face_extent(dim_);
 
+    const Dim3 rawSz = domain_->raw_size();
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
-      const Dim3 rawSz = domain_->raw_size(idx);
       const char *src = domain_->curr_data(idx);
       const size_t elemSize = domain_->elem_size(idx);
 
@@ -327,8 +327,9 @@ public:
     const Dim3 facePos = domain_->face_pos(dim_, pos_, true /*halo region*/);
     const Dim3 faceExtent = domain_->face_extent(dim_);
 
+    const Dim3 rawSz = domain_->raw_size();
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
-      const Dim3 rawSz = domain_->raw_size(dataIdx);
+
       char *dst = domain_->curr_data(dataIdx);
 
       // pack into buffer
@@ -419,8 +420,9 @@ public:
         domain_->edge_pos(dim0_, dim1_, dim0Pos_, dim1Pos_, true /*halo*/);
     const Dim3 edgeExtent = domain_->edge_extent(dim0_, dim1_);
 
+    const Dim3 rawSz = domain_->raw_size();
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
-      const Dim3 rawSz = domain_->raw_size(dataIdx);
+
       char *dst = domain_->curr_data(dataIdx);
 
       // pack into buffer
