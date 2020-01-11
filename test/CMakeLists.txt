@@ -3,9 +3,9 @@ if (CMAKE_CUDA_COMPILER)
     test_any_tx.cu
       test_cuda_array.cu 
       test_cuda_gpu_topo.cu 
+      test_cuda_local_domain.cu 
       test_cuda_pack.cu 
       test_cuda_rcstream.cu 
-      test_local_domain.cu 
     )
     target_include_directories(test_cuda SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda stencil)
