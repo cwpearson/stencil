@@ -143,14 +143,15 @@ __global__ void init_kernel(
   const size_t bdx = blockDim.x;
   const size_t tix = threadIdx.x;
 
-  #define _at(arr, _x, _y, _z) arr[_z * rawSz.y * rawSz.x + _y * rawSz.x + _x]
+#define _at(arr, _x, _y, _z) arr[_z * rawSz.y * rawSz.x + _y * rawSz.x + _x]
 
   // initialize the compute domain
   for (size_t z = biz * bdz + tiz; z < rawSz.z; z += gdz * bdz) {
     for (size_t y = biy * bdy + tiy; y < rawSz.y; y += gdy * bdy) {
       for (size_t x = bix * bdx + tix; x < rawSz.x; x += gdx * bdx) {
 
-        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius && y < rawSz.y - radius && x < rawSz.x - radius) {
+        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius &&
+            y < rawSz.y - radius && x < rawSz.x - radius) {
           _at(dst, x, y, z) = 1.0;
         } else {
           _at(dst, x, y, z) = 0.0;
@@ -159,8 +160,7 @@ __global__ void init_kernel(
     }
   }
 
-  #undef _at
-
+#undef _at
 }
 
 template <typename T>
@@ -242,7 +242,7 @@ TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int, double) {
                           cudaMemcpyDefault));
 
 #define at_host(_x, _y, _z) host[(_z + 1) * 12 * 12 + (_y + 1) * 12 + (_x + 1)]
-  REQUIRE(at_host(-1,-1,-1) == 0);
+  REQUIRE(at_host(-1, -1, -1) == 0);
   REQUIRE(at_host(0, 0, 0) == 1);
   REQUIRE(at_host(0, 0, 9) == 1);
   REQUIRE(at_host(0, 9, 0) == 1);
@@ -264,28 +264,25 @@ TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int, double) {
                           cudaMemcpyDefault));
 
 #define at_host(_x, _y, _z) host[(_z + 1) * 12 * 12 + (_y + 1) * 12 + (_x + 1)]
-// halo should be untouched
-REQUIRE(at_host(-1,-1,-1) == 0);
-REQUIRE(at_host(10,10,10) == 0);
-// corners have 8 nbrs
-REQUIRE(at_host(0, 0, 0) == 8);
-REQUIRE(at_host(0, 0, 9) == 8);
-REQUIRE(at_host(0, 9, 0) == 8);
-REQUIRE(at_host(0, 9, 9) == 8);
-REQUIRE(at_host(9, 0, 0) == 8);
-REQUIRE(at_host(9, 0, 9) == 8);
-REQUIRE(at_host(9, 9, 0) == 8);
-REQUIRE(at_host(9, 9, 9) == 8);
-// edges have 12 nbrs
-REQUIRE(at_host(0, 0, 4) == 12);
-// faces have 18 ones
-REQUIRE(at_host(0, 4, 4) == 18);
-// center has 27 ones
-REQUIRE(at_host(1,1,1) == 27);
+  // halo should be untouched
+  REQUIRE(at_host(-1, -1, -1) == 0);
+  REQUIRE(at_host(10, 10, 10) == 0);
+  // corners have 8 nbrs
+  REQUIRE(at_host(0, 0, 0) == 8);
+  REQUIRE(at_host(0, 0, 9) == 8);
+  REQUIRE(at_host(0, 9, 0) == 8);
+  REQUIRE(at_host(0, 9, 9) == 8);
+  REQUIRE(at_host(9, 0, 0) == 8);
+  REQUIRE(at_host(9, 0, 9) == 8);
+  REQUIRE(at_host(9, 9, 0) == 8);
+  REQUIRE(at_host(9, 9, 9) == 8);
+  // edges have 12 nbrs
+  REQUIRE(at_host(0, 0, 4) == 12);
+  // faces have 18 ones
+  REQUIRE(at_host(0, 4, 4) == 18);
+  // center has 27 ones
+  REQUIRE(at_host(1, 1, 1) == 27);
 #undef at_host
-
-#if 0
-#endif
 
   delete[] host;
 }

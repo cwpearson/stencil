@@ -5,19 +5,19 @@
 #include "stencil/dim3.cuh"
 #include "stencil/stencil.cuh"
 
-TEMPLATE_TEST_CASE("exchange", "[pack][template]", int) {
+TEST_CASE("exchange") {
 
 //Should Inialize MPI
 
 //Let us try to do multi GPU stencil
-DistributedDomain dd(1024, 1024, 512);
+DistributedDomain dd(10,10,10);
 
-dd.set_radius(3);
+dd.set_radius(1);
 
 auto a = dd.add_data<float>();
-dd.realize(/*useUnified=*/true);
+dd.realize();
 
-
+}
 
 
 
