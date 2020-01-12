@@ -2,31 +2,43 @@
 
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
-#include "stencil/dim3.cuh"
-#include "stencil/stencil.cuh"
+#include "stencil/dim3.hpp"
+#include "stencil/stencil.hpp"
 
 TEST_CASE("exchange") {
 
-//Should Inialize MPI
+  size_t radius = 1;
+  typedef float TestType1;
 
-//Let us try to do multi GPU stencil
-DistributedDomain dd(10,10,10);
+  // create a reference domain
+  INFO("reference domain");
+  LocalDomain ld(Dim3(10,10,10), 0);
+  ld.set_radius(radius);
+  auto lh1 = ld.add_data<TestType1>();
+  ld.realize();
 
-dd.set_radius(1);
+  // create a distributed domain
+  INFO("distributed domain");
+  DistributedDomain dd(10,10,10);
+  dd.set_radius(radius);
+  auto dh1 = dd.add_data<TestType1>();
+  dd.realize();
 
-auto a = dd.add_data<float>();
-dd.realize();
+  // initialize the local domain
 
+  // initialize the distributed domain
+
+  // compare local and distributed domain
+
+  // exchange distributed domain to repare for stencil
+  dd.exchange();
+
+  // apply stencil to local domain
+
+  // apply stencil to distributed domain
+
+  // comare domains
 }
-
-
-
-
-
-
-
-
-
 
 /*
 
@@ -147,4 +159,3 @@ dd.realize();
 
 
 
-}
