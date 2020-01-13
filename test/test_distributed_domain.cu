@@ -5,6 +5,28 @@
 #include "stencil/dim3.hpp"
 #include "stencil/stencil.hpp"
 
+
+__device__ int pack_dim3(int x, int y, int z) {
+  int ret = 0;
+  ret |= x & 0x3FF;
+  ret |= (y & 0x3FF) << 10;
+  ret |= (z & 0x3FF) << 20;
+  return ret;
+}
+
+int unpack_x(int a) {
+  return a & 0x3FF;
+}
+
+int unpack_y(int a) {
+  return (a >> 10) & 0x3FF;
+}
+
+int unpack_z(int a) {
+  return (a >> 20) & 0x3FF;
+}
+
+
 template <typename T>
 __global__ void init_kernel(
     T *dst, //<! [out] pointer to beginning of dst allocation
@@ -69,14 +91,12 @@ TEST_CASE("exchange") {
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
 
-  INFO("exchange before stencil");
+  INFO("exchange");
   dd.exchange();
 
-  // apply stencil to local domain
+  // test exchange
 
-  // apply stencil to distributed domain
 
-  // comare domains
 }
 
 /*
