@@ -121,6 +121,59 @@ public:
     return 0;
   }
 
+  // return the position of the halo relative to get_data() in direction `dir`
+  Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
+    Dim3 ret;
+
+    if (1 == dir.x) {
+      ret.x = sz_.x + (halo ? radius_ : 0);
+    } else if (-1 == dir.x) {
+      ret.x = halo ? 0 : radius_;
+    } else if (0 == dir.x) {
+      ret.x = radius_;
+    } else {
+      __builtin_unreachable();
+    }
+
+    if (1 == dir.y) {
+      ret.y = sz_.y + (halo ? radius_ : 0);
+    } else if (-1 == dir.y) {
+      ret.y = halo ? 0 : radius_;
+    } else if (0 == dir.y) {
+      ret.y = radius_;
+    } else {
+      __builtin_unreachable();
+    }
+
+    if (1 == dir.z) {
+      ret.z = sz_.z + (halo ? radius_ : 0);
+    } else if (-1 == dir.z) {
+      ret.z = halo ? 0 : radius_;
+    } else if (0 == dir.z) {
+      ret.z = radius_;
+    } else {
+      __builtin_unreachable();
+    }
+
+    return ret;
+  }
+
+  // return the extent of the halo in direction `dir`
+  Dim3 halo_extent(const Dim3 &dir) const noexcept {
+    Dim3 ret;
+
+    ret.x = (dir.x != 0) ? radius_ : sz_.x;
+    ret.y = (dir.y != 0) ? radius_ : sz_.y;
+    ret.z = (dir.z != 0) ? radius_ : sz_.z;
+
+    return ret;
+  }
+
+  // return the number of bytes of the halo in direction `dir`
+  size_t halo_bytes(const Dim3 &dir, const size_t idx) const noexcept {
+    return dataElemSize_[idx] * halo_extent(dir).flatten();
+  }
+
   // return the position of the face relative to get_data()
   // positive or negative
   // x=0, y=1, z=2
@@ -165,8 +218,8 @@ public:
     }
   }
 
-  // the sizes of the faces in bytes for each data along the requested dimension
-  // (x = 0, y = 1, etc) for data entry idx
+  // the sizes of the faces in bytes for each data along the requested
+  // dimension (x = 0, y = 1, etc) for data entry idx
   size_t face_bytes(const size_t dim, const size_t idx) const {
     assert(idx < dataElemSize_.size());
     return dataElemSize_[idx] * face_extent(dim).flatten();
@@ -247,8 +300,8 @@ public:
     }
   }
 
-  // the sizes of the edges in bytes for each data along the requested dimension
-  // x = 0, y = 1, etc
+  // the sizes of the edges in bytes for each data along the requested
+  // dimension x = 0, y = 1, etc
   size_t edge_bytes(const size_t dim0, const size_t dim1,
                     const size_t idx) const {
     assert(idx < dataElemSize_.size());
