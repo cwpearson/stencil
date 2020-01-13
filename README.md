@@ -61,7 +61,7 @@ test/test_all "[cuda]"
     * direct GPU-GPU communication
       * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
       * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node   
-    * N-Dimensional data with [cutensor](https://docs.nvidia.com/cuda/cutensor/index.html)
+    * N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
   * future
     * CPU stencil (HPCG)
     * halo size (performance)
