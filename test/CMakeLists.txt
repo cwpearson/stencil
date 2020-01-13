@@ -15,7 +15,7 @@ endif()
 
 if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
     add_executable(test_cuda_mpi test_cuda_mpi_main.cu
-      test_stencil_exchange.cu
+      test_distributed_domain.cu
     )
     target_include_directories(test_cuda_mpi SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda_mpi stencil)
