@@ -54,17 +54,35 @@ test/test_all "[cuda]"
     * user-defined stencil kernels (Astaroth)
     * edge communication (Astaroth)
     * corner communication (Astaroth)
-    * CPU stencil (HPCG)
+    * face communication (Astaroth)
+    * overlap MPI and CUDA
   * v2
     * data placement in heterogeneous environments
-    * overlap MPI and CUDA
     * direct GPU-GPU communication
       * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
-      * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node
+      * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node    
   * future
+    * CPU stencil (HPCG)
     * halo size (performance)
       * fewer, larger messages
       * less frequent barriers
     * pitched arrays (performance)
     * optimized communication (performance)
     * Stop decomposition early
+
+
+## Interesting Things
+
+### Reference-Counted Resource Manager for CUDA Streams
+
+`include/stencil/rcstream.hpp`
+
+A C++-style class representing a shared CUDA stream.
+The underlying stream is released when the reference count drops to zero.
+
+### GPU Distance Matrix
+
+`include/stencil/gpu_topo.hpp`
+
+The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
+This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
