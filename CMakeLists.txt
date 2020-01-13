@@ -47,6 +47,19 @@ endif()
 add_library(stencil INTERFACE)
 add_library(stencil::stencil ALIAS stencil)
 
+if (CMAKE_BUILD_TYPE MATCHES Debug)
+  target_compile_options(
+    stencil
+    INTERFACE
+    $<$<COMPILE_LANGUAGE:CUDA>:-G>
+  )
+elseif (CMAKE_BUILD_TYPE MATCHES Release)
+  target_compile_options(
+    stencil
+    INTERFACE
+    $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
+  )
+endif()
 
 if (NUMA_FOUND)
   target_link_libraries(stencil INTERFACE NUMA::NUMA)
