@@ -26,6 +26,13 @@ TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
     REQUIRE(Dim3(4, 44, 4) == d0.face_pos(1, true, isHalo)); // +y
     REQUIRE(Dim3(4, 4, 0) == d0.face_pos(2, false, isHalo)); // -z
     REQUIRE(Dim3(4, 4, 54) == d0.face_pos(2, true, isHalo)); // +z
+
+    REQUIRE(Dim3(0, 4, 4) == d0.halo_pos(Dim3(-1, 0, 0), isHalo)); // -x
+    REQUIRE(Dim3(34, 4, 4) == d0.halo_pos(Dim3(1, 0, 0), isHalo)); // +x
+    REQUIRE(Dim3(4, 0, 4) == d0.halo_pos(Dim3(0, -1, 0), isHalo)); // -y
+    REQUIRE(Dim3(4, 44, 4) == d0.halo_pos(Dim3(0, 1, 0), isHalo)); // +y
+    REQUIRE(Dim3(4, 4, 0) == d0.halo_pos(Dim3(0, 0, -1), isHalo)); // -z
+    REQUIRE(Dim3(4, 4, 54) == d0.halo_pos(Dim3(0, 0, 1), isHalo)); // +z
   }
 
   SECTION("face position in compute") {
@@ -36,12 +43,23 @@ TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
     REQUIRE(Dim3(4, 40, 4) == d0.face_pos(1, true, isHalo)); // +y
     REQUIRE(Dim3(4, 4, 4) == d0.face_pos(2, false, isHalo)); // -z
     REQUIRE(Dim3(4, 4, 50) == d0.face_pos(2, true, isHalo)); // +z
+
+    REQUIRE(Dim3(4, 4, 4) == d0.halo_pos(Dim3(-1, 0, 0), isHalo)); // -x
+    REQUIRE(Dim3(30, 4, 4) == d0.halo_pos(Dim3(1, 0, 0), isHalo)); // +x
+    REQUIRE(Dim3(4, 4, 4) == d0.halo_pos(Dim3(0, -1, 0), isHalo)); // -y
+    REQUIRE(Dim3(4, 40, 4) == d0.halo_pos(Dim3(0, 1, 0), isHalo)); // +y
+    REQUIRE(Dim3(4, 4, 4) == d0.halo_pos(Dim3(0, 0, -1), isHalo)); // -z
+    REQUIRE(Dim3(4, 4, 50) == d0.halo_pos(Dim3(0, 0, 1), isHalo)); // +z
   }
 
   SECTION("face extent") {
     REQUIRE(Dim3(4, 40, 50) == d0.face_extent(0));
     REQUIRE(Dim3(30, 4, 50) == d0.face_extent(1));
     REQUIRE(Dim3(30, 40, 4) == d0.face_extent(2));
+
+    REQUIRE(Dim3(4, 40, 50) == d0.halo_extent(Dim3(-1, 0, 0))); // x face
+    REQUIRE(Dim3(30, 4, 50) == d0.halo_extent(Dim3(0, -1, 0))); // y face
+    REQUIRE(Dim3(30, 40, 4) == d0.halo_extent(Dim3(0, 0, -1))); // z face
   }
 
   SECTION("edge position in halo") {
@@ -60,6 +78,21 @@ TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
     REQUIRE(Dim3(4, 44, 0) == d0.edge_pos(1, 2, true, false, isHalo)); // +y -z
     REQUIRE(Dim3(4, 0, 54) == d0.edge_pos(1, 2, false, true, isHalo)); // -y +z
     REQUIRE(Dim3(4, 44, 54) == d0.edge_pos(1, 2, true, true, isHalo)); // +y +z
+
+    REQUIRE(Dim3(0, 0, 4) == d0.halo_pos(Dim3(-1, -1, 0), isHalo)); // -x -y
+    REQUIRE(Dim3(34, 0, 4) == d0.halo_pos(Dim3(1, -1, 0), isHalo)); // +x -y
+    REQUIRE(Dim3(0, 44, 4) == d0.halo_pos(Dim3(-1, 1, 0), isHalo)); // -x +y
+    REQUIRE(Dim3(34, 44, 4) == d0.halo_pos(Dim3(1, 1, 0), isHalo)); // +x +y
+
+    REQUIRE(Dim3(0, 4, 0) == d0.halo_pos(Dim3(-1, 0, -1), isHalo)); // -x -z
+    REQUIRE(Dim3(34, 4, 0) == d0.halo_pos(Dim3(1, 0, -1), isHalo)); // +x -z
+    REQUIRE(Dim3(0, 4, 54) == d0.halo_pos(Dim3(-1, 0, 1), isHalo)); // -x +z
+    REQUIRE(Dim3(34, 4, 54) == d0.halo_pos(Dim3(1, 0, 1), isHalo)); // +x +z
+
+    REQUIRE(Dim3(4, 0, 0) == d0.halo_pos(Dim3(0, -1, -1), isHalo)); // -y -z
+    REQUIRE(Dim3(4, 44, 0) == d0.halo_pos(Dim3(0, 1, -1), isHalo)); // +y -z
+    REQUIRE(Dim3(4, 0, 54) == d0.halo_pos(Dim3(0, -1, 1), isHalo)); // -y +z
+    REQUIRE(Dim3(4, 44, 54) == d0.halo_pos(Dim3(0, 1, 1), isHalo)); // +y +z
   }
 
   SECTION("edge position in compute") {
@@ -78,6 +111,21 @@ TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
     REQUIRE(Dim3(4, 40, 4) == d0.edge_pos(1, 2, true, false, isHalo)); // +y -z
     REQUIRE(Dim3(4, 4, 50) == d0.edge_pos(1, 2, false, true, isHalo)); // -y +z
     REQUIRE(Dim3(4, 40, 50) == d0.edge_pos(1, 2, true, true, isHalo)); // +y +z
+
+    REQUIRE(Dim3(4, 4, 4) == d0.halo_pos(Dim3(-1, -1, 0), isHalo)); // -x -y
+    REQUIRE(Dim3(30, 4, 4) == d0.halo_pos(Dim3(1, -1, 0), isHalo)); // +x -y
+    REQUIRE(Dim3(4, 40, 4) == d0.halo_pos(Dim3(-1, 1, 0), isHalo)); // -x +y
+    REQUIRE(Dim3(30, 40, 4) == d0.halo_pos(Dim3(1, 1, 0), isHalo)); // +x +y
+
+    REQUIRE(Dim3(4, 4, 4) == d0.halo_pos(Dim3(-1, 0, -1), isHalo)); // -x -z
+    REQUIRE(Dim3(30, 4, 4) == d0.halo_pos(Dim3(1, 0, -1), isHalo)); // +x -z
+    REQUIRE(Dim3(4, 4, 50) == d0.halo_pos(Dim3(-1, 0, 1), isHalo)); // -x +z
+    REQUIRE(Dim3(30, 4, 50) == d0.halo_pos(Dim3(1, 0, 1), isHalo)); // +x +z
+
+    REQUIRE(Dim3(4, 4, 4) == d0.halo_pos(Dim3(0, -1, -1), isHalo)); // -y -z
+    REQUIRE(Dim3(4, 40, 4) == d0.halo_pos(Dim3(0, 1, -1), isHalo)); // +y -z
+    REQUIRE(Dim3(4, 4, 50) == d0.halo_pos(Dim3(0, -1, 1), isHalo)); // -y +z
+    REQUIRE(Dim3(4, 40, 50) == d0.halo_pos(Dim3(0, 1, 1), isHalo)); // +y +z
   }
 
   SECTION("edge extent") {
@@ -93,27 +141,43 @@ TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
   }
 
   SECTION("corner position in halo") {
-    bool isHalo = true;
-    REQUIRE(Dim3(0, 0, 0) == d0.corner_pos(0, 0, 0, isHalo));    // -x -y -z
-    REQUIRE(Dim3(34, 0, 0) == d0.corner_pos(1, 0, 0, isHalo));   // +x -y -z
-    REQUIRE(Dim3(0, 44, 0) == d0.corner_pos(0, 1, 0, isHalo));   // -x +y -z
-    REQUIRE(Dim3(34, 44, 0) == d0.corner_pos(1, 1, 0, isHalo));  // +x +y -z
-    REQUIRE(Dim3(0, 0, 54) == d0.corner_pos(0, 0, 1, isHalo));   // -x -y +z
-    REQUIRE(Dim3(34, 0, 54) == d0.corner_pos(1, 0, 1, isHalo));  // +x -y +z
-    REQUIRE(Dim3(0, 44, 54) == d0.corner_pos(0, 1, 1, isHalo));  // -x +y +z
-    REQUIRE(Dim3(34, 44, 54) == d0.corner_pos(1, 1, 1, isHalo)); // +x +y +z
+    REQUIRE(Dim3(0, 0, 0) == d0.corner_pos(0, 0, 0, true));    // -x -y -z
+    REQUIRE(Dim3(34, 0, 0) == d0.corner_pos(1, 0, 0, true));   // +x -y -z
+    REQUIRE(Dim3(0, 44, 0) == d0.corner_pos(0, 1, 0, true));   // -x +y -z
+    REQUIRE(Dim3(34, 44, 0) == d0.corner_pos(1, 1, 0, true));  // +x +y -z
+    REQUIRE(Dim3(0, 0, 54) == d0.corner_pos(0, 0, 1, true));   // -x -y +z
+    REQUIRE(Dim3(34, 0, 54) == d0.corner_pos(1, 0, 1, true));  // +x -y +z
+    REQUIRE(Dim3(0, 44, 54) == d0.corner_pos(0, 1, 1, true));  // -x +y +z
+    REQUIRE(Dim3(34, 44, 54) == d0.corner_pos(1, 1, 1, true)); // +x +y +z
+
+    REQUIRE(Dim3(0, 0, 0) == d0.halo_pos(Dim3(-1, -1, -1), true)); // -x -y -z
+    REQUIRE(Dim3(34, 0, 0) == d0.halo_pos(Dim3(1, -1, -1), true)); // +x -y -z
+    REQUIRE(Dim3(0, 44, 0) == d0.halo_pos(Dim3(-1, 1, -1), true)); // -x +y -z
+    REQUIRE(Dim3(34, 44, 0) == d0.halo_pos(Dim3(1, 1, -1), true)); // +x +y -z
+    REQUIRE(Dim3(0, 0, 54) == d0.halo_pos(Dim3(-1, -1, 1), true)); // -x -y +z
+    REQUIRE(Dim3(34, 0, 54) == d0.halo_pos(Dim3(1, -1, 1), true)); // +x -y +z
+    REQUIRE(Dim3(0, 44, 54) == d0.halo_pos(Dim3(-1, 1, 1), true)); // -x +y +z
+    REQUIRE(Dim3(34, 44, 54) == d0.halo_pos(Dim3(1, 1, 1), true)); // +x +y +z
   }
 
   SECTION("corner position in compute") {
-    bool isHalo = false;
-    REQUIRE(Dim3(4, 4, 4) == d0.corner_pos(0, 0, 0, isHalo));    // -x -y -z
-    REQUIRE(Dim3(30, 4, 4) == d0.corner_pos(1, 0, 0, isHalo));   // +x -y -z
-    REQUIRE(Dim3(4, 40, 4) == d0.corner_pos(0, 1, 0, isHalo));   // -x +y -z
-    REQUIRE(Dim3(30, 40, 4) == d0.corner_pos(1, 1, 0, isHalo));  // +x +y -z
-    REQUIRE(Dim3(4, 4, 50) == d0.corner_pos(0, 0, 1, isHalo));   // -x -y +z
-    REQUIRE(Dim3(30, 4, 50) == d0.corner_pos(1, 0, 1, isHalo));  // +x -y +z
-    REQUIRE(Dim3(4, 40, 50) == d0.corner_pos(0, 1, 1, isHalo));  // -x +y +z
-    REQUIRE(Dim3(30, 40, 50) == d0.corner_pos(1, 1, 1, isHalo)); // +x +y +z
+    REQUIRE(Dim3(4, 4, 4) == d0.corner_pos(0, 0, 0, false));    // -x -y -z
+    REQUIRE(Dim3(30, 4, 4) == d0.corner_pos(1, 0, 0, false));   // +x -y -z
+    REQUIRE(Dim3(4, 40, 4) == d0.corner_pos(0, 1, 0, false));   // -x +y -z
+    REQUIRE(Dim3(30, 40, 4) == d0.corner_pos(1, 1, 0, false));  // +x +y -z
+    REQUIRE(Dim3(4, 4, 50) == d0.corner_pos(0, 0, 1, false));   // -x -y +z
+    REQUIRE(Dim3(30, 4, 50) == d0.corner_pos(1, 0, 1, false));  // +x -y +z
+    REQUIRE(Dim3(4, 40, 50) == d0.corner_pos(0, 1, 1, false));  // -x +y +z
+    REQUIRE(Dim3(30, 40, 50) == d0.corner_pos(1, 1, 1, false)); // +x +y +z
+
+    REQUIRE(Dim3(4, 4, 4) == d0.halo_pos(Dim3(-1, -1, -1), false)); // -x -y -z
+    REQUIRE(Dim3(30, 4, 4) == d0.halo_pos(Dim3(1, -1, -1), false)); // +x -y -z
+    REQUIRE(Dim3(4, 40, 4) == d0.halo_pos(Dim3(-1, 1, -1), false)); // -x +y -z
+    REQUIRE(Dim3(30, 40, 4) == d0.halo_pos(Dim3(1, 1, -1), false)); // +x +y -z
+    REQUIRE(Dim3(4, 4, 50) == d0.halo_pos(Dim3(-1, -1, 1), false)); // -x -y +z
+    REQUIRE(Dim3(30, 4, 50) == d0.halo_pos(Dim3(1, -1, 1), false)); // +x -y +z
+    REQUIRE(Dim3(4, 40, 50) == d0.halo_pos(Dim3(-1, 1, 1), false)); // -x +y +z
+    REQUIRE(Dim3(30, 40, 50) == d0.halo_pos(Dim3(1, 1, 1), false)); // +x +y +z
   }
 
   SECTION("corner extent") { REQUIRE(Dim3(4, 4, 4) == d0.corner_extent()); }
