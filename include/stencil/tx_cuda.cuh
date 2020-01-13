@@ -5,6 +5,10 @@
 
 #include <mpi.h>
 
+// getpid()
+#include <sys/types.h>
+#include <unistd.h>
+
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/local_domain.cuh"
@@ -30,22 +34,26 @@ private:
   std::future<void> waiter;
 
   void sender(const void *data) {
+    assert(data);
     printf("AnySender::sender(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU);
     CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
     int tag = make_tag(dstGPU, dataIdx, dir);
-    printf("AnySender::sender(): r%d,g%d,d%lu: Isend %luB -> r%d,g%d,d%lu "
+    printf("[%d] AnySender::sender(): r%d,g%d,d%lu: Isend %luB -> r%d,g%d,d%lu "
            "(tag=%08x)\n",
-           srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU, dataIdx,
-           tag);
+           getpid(), srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU,
+           dataIdx, tag);
     MPI_Request req;
+    assert(hostBuf_.data());
     MPI_Isend(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, tag,
               MPI_COMM_WORLD, &req);
     MPI_Status stat;
-    printf("AnySender::wait(): r%d,g%d: wait on Isend\n", srcRank, srcGPU);
+    printf("[%d] AnySender::sender(): r%d,g%d: wait on Isend\n", getpid(),
+           srcRank, srcGPU);
     MPI_Wait(&req, &stat);
-    printf("AnySender::wait(): r%d,g%d: finished Isend\n", srcRank, srcGPU);
+    printf("[%d] AnySender::sender(): r%d,g%d: finished Isend\n", getpid(),
+           srcRank, srcGPU);
   }
 
 public:
@@ -96,6 +104,7 @@ private:
   std::future<void> waiter;
 
   void recver(void *data) {
+    assert(data && "recv into null ptr");
     MPI_Request req;
     MPI_Status stat;
     int tag = make_tag(dstGPU, dataIdx, dir);
@@ -103,9 +112,11 @@ private:
            "(tag=%08x)\n",
            dstRank, dstGPU, dataIdx, hostBuf_.size(), srcRank, srcGPU, dataIdx,
            tag);
+    assert(hostBuf_.size() && "internal buffer size 0");
     MPI_Irecv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, tag,
               MPI_COMM_WORLD, &req);
-    printf("AnyRecver::recver(): r%d,g%d: wait on Irecv\n", dstRank, dstGPU);
+    printf("[%d] AnyRecver::recver(): r%d,g%d: wait on Irecv\n", getpid(),
+           dstRank, dstGPU);
     MPI_Wait(&req, &stat);
     printf("AnyRecver::recver(): r%d,g%d: got Irecv. cudaMemcpyAsync\n",
            dstRank, dstGPU);

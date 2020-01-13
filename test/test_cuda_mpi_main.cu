@@ -1,5 +1,5 @@
 //#define CATCH_CONFIG_MAIN  // This tells Catch to provide a main() - only do
-//this in one cpp file #include "catch2/catch.hpp"
+// this in one cpp file #include "catch2/catch.hpp"
 
 // https://github.com/catchorg/Catch2/blob/master/docs/own-main.md#top
 #define CATCH_CONFIG_RUNNER
@@ -10,7 +10,11 @@
 int main(int argc, char *argv[]) {
   // global setup...
 
-  MPI_Init(&argc, &argv);
+  int provided;
+  MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
+  if (MPI_THREAD_MULTIPLE != provided) {
+    assert(0);
+  }
 
   int result = Catch::Session().run(argc, argv);
 

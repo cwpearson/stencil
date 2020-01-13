@@ -340,109 +340,80 @@ public:
       auto &dirRecver = domainDirRecver_[di];
 
       // send/recv pairs for faces
-      for (const auto dim : {0, 1, 2}) { // dimensions (x,y,z) {0,1,2}
-        for (const auto dir : {-1, 1}) { // direction (neg, pos)
+      for (const auto xDir : {-1, 0, 1}) {
+        for (const auto yDir : {-1, 0, 1}) {
+          for (const auto zDir : {-1, 0, 1}) {
+            Dim3 dirVec(xDir, yDir, zDir);
+            if (dirVec == Dim3(0, 0, 0)) {
+              continue; // don't send in no direction
+            }
+            Dim3 nbrIdx = (myIdx + dirVec).wrap(rankDim_ * gpuDim_);
 
-          // construct direction vector of this send
-          Dim3 dirVec(0, 0, 0);
-          dirVec[dim] += dir;
+            int myRank = rank_;
+            int myGPU = d.gpu();
 
-          Dim3 nbrIdx = myIdx;
-          nbrIdx[dim] += dir;
-          nbrIdx = nbrIdx.wrap(rankDim_ * gpuDim_);
+            int logicalMyGPU = get_logical_gpu(myIdx);
+            int logicalNbrGPU = get_logical_gpu(nbrIdx);
 
-          int myRank = rank_;
-          int myGPU = d.gpu();
+            assert(myRank == get_rank(myIdx));
+            assert(myGPU == gpus_[logicalMyGPU]);
+            int nbrRank = get_rank(nbrIdx);
+            int nbrGPU = gpus_[logicalNbrGPU]; // FIXME: assuming everyone has
+                                               // the same GPU layout
 
-          int logicalMyGPU = get_logical_gpu(myIdx);
-          int logicalNbrGPU = get_logical_gpu(nbrIdx);
+            std::cout << myIdx << " -> " << nbrIdx << " dirVec=" << dirVec
+                      << " r" << myRank << ",g" << myGPU << " -> r" << nbrRank
+                      << ",g" << nbrGPU << "\n";
 
-          assert(myRank == get_rank(myIdx));
-          assert(myGPU == gpus_[logicalMyGPU]);
-          int nbrRank = get_rank(nbrIdx);
-          int nbrGPU = gpus_[logicalNbrGPU]; // FIXME: assuming everyone has the
-                                             // same GPU layout
+            // determine how to send face in that direction
+            HaloSender *sender = nullptr;
 
-          std::cout << myIdx << " -> " << nbrIdx << " dim=" << dim
-                    << " dir=" << dir << " dirVec=" << dirVec << " r" << myRank
-                    << ",g" << myGPU << " -> r" << nbrRank << ",g" << nbrGPU
-                    << "\n";
+            if (myRank == nbrRank) { // both domains ownned by this rank
+              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                        << " send same rank\n";
+              sender = new RegionSender<AnySender>(d, myRank, myGPU, nbrRank,
+                                                   nbrGPU, dirVec);
+            } else if (colocated_.count(nbrRank)) { // both domains on this node
+              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                        << " send colocated\n";
+              sender = new RegionSender<AnySender>(d, myRank, myGPU, nbrRank,
+                                                   nbrGPU, dirVec);
+            } else { // domains on different nodes
+              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                        << " send diff nodes\n";
+              sender = new RegionSender<AnySender>(d, myRank, myGPU, nbrRank,
+                                                   nbrGPU, dirVec);
+            }
 
-          // determine how to send face in that direction
-          HaloSender *sender = nullptr;
+            // determine how to receive a face from that direction
+            HaloRecver *recver = nullptr;
+            if (myRank == nbrRank) { // both domains onwned by this rank
+              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                        << " recv same rank\n";
+              recver = new RegionRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
+                                                   myGPU, dirVec);
+            } else if (colocated_.count(nbrRank)) { // both domains on this node
+              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                        << " recv colocated\n";
+              recver = new RegionRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
+                                                   myGPU, dirVec);
+            } else { // domains on different nodes
+              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                        << " recv diff nodes\n";
+              recver = new RegionRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
+                                                   myGPU, dirVec);
+            }
 
-          if (myRank == nbrRank) { // both domains ownned by this rank
-            printf(
-                "DistributedDomain.realize(): dim=%d dir=%d send same rank\n",
-                dim, dir);
-            sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
-                                               nbrGPU, dim, dir > 0 /*pos*/);
-          } else if (colocated_.count(nbrRank)) { // both domains on this node
-            printf(
-                "DistributedDomain.realize(): dim=%d dir=%d send colocated\n",
-                dim, dir);
-            sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
-                                               nbrGPU, dim, dir > 0 /*pos*/);
-          } else { // domains on different nodes
-            printf("DistributedDomain.realize(): send different nodes\n");
-            sender = new FaceSender<AnySender>(d, myRank, myGPU, nbrRank,
-                                               nbrGPU, dim, dir > 0 /*pos*/);
+            assert(sender != nullptr);
+            assert(recver != nullptr);
+
+            sender->allocate();
+            recver->allocate();
+            dirSender.at_dir(dirVec.x, dirVec.y, dirVec.z) = sender;
+            dirRecver.at_dir(dirVec.x, dirVec.y, dirVec.z) = recver;
           }
-
-          // determine how to receive a face from that direction
-          HaloRecver *recver = nullptr;
-          if (myRank == nbrRank) { // both domains onwned by this rank
-            printf(
-                "DistributedDomain.realize(): dim=%d dir=%d recv same rank\n",
-                dim, dir);
-            recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
-                                               myGPU, dim, dir > 0 /*pos*/);
-          } else if (colocated_.count(nbrRank)) { // both domains on this node
-            printf(
-                "DistributedDomain.realize(): dim=%d dir=%d recv colocated\n",
-                dim, dir);
-            recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
-                                               myGPU, dim, dir > 0 /*pos*/);
-          } else { // domains on different nodes
-            printf("DistributedDomain.realize(): recv different nodes\n");
-            recver = new FaceRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank,
-                                               myGPU, dim, dir > 0 /*pos*/);
-          }
-
-          assert(sender != nullptr);
-          assert(recver != nullptr);
-
-          sender->allocate();
-          recver->allocate();
-          dirSender.at_dir(dirVec.x, dirVec.y, dirVec.z) = sender;
-          dirRecver.at_dir(dirVec.x, dirVec.y, dirVec.z) = recver;
         }
       }
-
-      // xy faces
-      for (auto xDir : {-1, 1}) {
-        for (auto yDir : {-1, 1}) {
-          Dim3 nbrIdx = myIdx + Dim3(xDir, yDir, 0);
-          nbrIdx = nbrIdx.wrap(rankDim_ * gpuDim_);
-          const int logicalNbrGPU = get_logical_gpu(nbrIdx);
-          const int nbrRank = get_rank(nbrIdx);
-          const int nbrGPU = gpus_[logicalNbrGPU];
-
-          HaloSender *sender = nullptr;
-          HaloRecver *recver = nullptr;
-#if 0
-          sender = new EdgeSender<AnySender>(d, myRank, myGPU, nbrRank, nbrGPU,
-                                         0 /*x*/, 1 /*y*/, xDim > 0 /*xpos*/,
-                                         yDir > 0 /*ypos*/);
-
-          recver = new EdgeRecver<AnyRecver>(d, nbrRank, nbrGPU, myRank, myGPU,
-                                             0 /*x*/, 1 /*y*/, xDir > 0 /*pos*/,
-                                             yDir > 0 /*pos*/);
-#endif
-        }
-      }
-      // xz faces
-      // yz faces
     }
   }
 
