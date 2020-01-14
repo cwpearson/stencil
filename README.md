@@ -4,7 +4,7 @@ A prototype MPI/CUDA stencil halo exchange library
 
 ## Quick Start
 
-Install MPI and CUDA, then
+Install MPI, CUDA, and CMake 3.13+, then
 
 ```
 git clone git@github.com:cwpearson/stencil.git
@@ -48,17 +48,52 @@ CUDA tests only
 test/test_all "[cuda]"
 ```
 
+## Profiling MPI
+
+```
+nvprof -o timeline_%p.nvvp --profile-child-processes mpirun ...
+```
+
 ## Design Goals
   * v1 (prototype)
     * joint stencils over multiple data types (Astaroth)
     * user-defined stencil kernels (Astaroth)
     * edge communication (Astaroth)
     * corner communication (Astaroth)
-    * CPU stencil (HPCG)
+    * face communication (Astaroth)
+    * overlap MPI and CUDA
+  * v2
+    * Remove requirement of CUDA
+    * data placement in heterogeneous environments
+    * direct GPU-GPU communication
+      * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
+      * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node   
+    * N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
   * future
+    * CPU stencil (HPCG)
+    * halo size (performance)
+      * fewer, larger messages
+      * less frequent barriers
     * pitched arrays (performance)
     * optimized communication (performance)
-      * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
-      * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node
     * Stop decomposition early
-    * support larger halos for fewer, larger messages
+
+
+## Interesting Things
+
+### Reference-Counted Resource Manager for CUDA Streams
+
+`include/stencil/rcstream.hpp`
+
+A C++-style class representing a shared CUDA stream.
+The underlying stream is released when the reference count drops to zero.
+
+### GPU Distance Matrix
+
+`include/stencil/gpu_topo.hpp`
+
+The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
+This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
+
+## Notes
+  * [CUDA-Aware OpenMPI](https://www.open-mpi.org/faq/?category=runcuda#mpi-cuda-support)

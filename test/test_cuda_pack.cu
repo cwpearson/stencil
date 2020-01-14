@@ -2,7 +2,7 @@
 
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
-#include "stencil/dim3.cuh"
+#include "stencil/dim3.hpp"
 
 TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
   Dim3 arrSz(3, 4, 5);
@@ -116,5 +116,32 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     REQUIRE(dst[1] == 4);
     REQUIRE(dst[11] == 41);
     REQUIRE(dst[14] == 53);
+  }
+}
+
+TEST_CASE("real cases", "[cuda]") {
+  SECTION("30x40x50, radius 4, +x face") {
+    size_t radius = 4;
+    Dim3 arrSz(30, 40, 50);
+    Dim3 rawSz(38, 48, 58);
+    size_t elemSize = 4;
+
+    char *buf;
+    char *dst;
+
+    CUDA_RUNTIME(
+        cudaMallocManaged(&dst, elemSize * rawSz.x * rawSz.y * rawSz.z));
+    CUDA_RUNTIME(
+        cudaMallocManaged(&buf, elemSize * radius * arrSz.y * arrSz.z));
+
+    dim3 dimGrid(20, 20, 20);
+    dim3 dimBlock(32, 4, 4);
+
+    Dim3 haloPos(34, 4, 4);
+    Dim3 haloExtent(4, 40, 50);
+
+    unpack<<<dimGrid, dimBlock>>>(dst, rawSz, 0 /*pitch*/, haloPos, haloExtent,
+                                  buf, elemSize);
+    CUDA_RUNTIME(cudaDeviceSynchronize());
   }
 }
