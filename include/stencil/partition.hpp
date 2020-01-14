@@ -5,12 +5,12 @@
 #include <cmath>
 #include <vector>
 
-#include "dim3.cuh"
+#include "dim3.hpp"
 
 class Partition {
 public:
   // get the MPI rank for a particular index in the rank space
-  virtual int get_rank(const Dim3 &idx) const = 0;
+  virtual int get_rank(const Dim3 &rankIdx) const = 0;
 
   // get the gpu for a particular index in the GPU space
   virtual int get_gpu(const Dim3 &idx) const = 0;
@@ -24,6 +24,10 @@ public:
   virtual Dim3 gpu_dim() const = 0;
   // the extent of the rank space
   virtual Dim3 rank_dim() const = 0;
+
+  // get the target size of the local domain in this partition
+  virtual Dim3 local_domain_size(const Dim3 &rankIdx,
+                                 const Dim3 &gpuIdx) const = 0;
 };
 
 /*! Prime-factor partitioner
@@ -35,7 +39,9 @@ private:
   Dim3 size_;
   Dim3 gpuDim_;
   Dim3 rankDim_;
+  Dim3 domSize_;
 
+public:
   int get_rank(const Dim3 &idx) const override {
     return idx.x + idx.y * rankDim_.x + idx.z * rankDim_.y * rankDim_.x;
   }
@@ -46,66 +52,96 @@ private:
 
   Dim3 gpu_idx(int gpu) const override {
     assert(gpu < gpus_);
-    Dim3 gpuIdx;
-    gpuIdx.x = gpu % gpuDim_.x;
+    Dim3 ret;
+    ret.x = gpu % gpuDim_.x;
     gpu /= gpuDim_.x;
-    gpuIdx.y = gpu % gpuDim_.y;
+    ret.y = gpu % gpuDim_.y;
     gpu /= gpuDim_.y;
-    gpuIdx.z = gpu;
+    ret.z = gpu;
+    return ret;
   }
   Dim3 rank_idx(int rank) const override {
     assert(rank < ranks_);
-    Dim3 rankIdx;
-    rankIdx.x = rank % rankDim_.x;
+    Dim3 ret;
+    ret.x = rank % rankDim_.x;
     rank /= rankDim_.x;
-    rankIdx.y = rank % rankDim_.y;
+    ret.y = rank % rankDim_.y;
     rank /= rankDim_.y;
-    rankIdx.z = rank;
-    return rankIdx;
+    ret.z = rank;
+    return ret;
   }
 
-  Dim3 gpu_dim() const override { return rankDim_; }
-  Dim3 rank_dim() const override { return gpuDim_; }
+  Dim3 gpu_dim() const override { return gpuDim_; }
+  Dim3 rank_dim() const override { return rankDim_; }
+
+  Dim3 local_domain_size(const Dim3 &rankIdx,
+                         const Dim3 &gpuIdx) const override {
+    return domSize_;
+  }
 
   PFP(const Dim3 &domSize, const int ranks, const int gpus)
       : size_(domSize), gpuDim_(1, 1, 1), rankDim_(1, 1, 1), ranks_(ranks),
         gpus_(gpus) {
-    auto rankFactors = prime_factors(ranks);
 
-    auto splitSize = size_;
+    domSize_ = size_;
+    auto rankFactors = prime_factors(ranks_);
 
+    // split repeatedly by prime factors of the number of MPI ranks to establish
+    // the 3D partition among ranks
     for (size_t amt : rankFactors) {
-      double curCubeness = cubeness(size_.x, size_.y, size_.z);
+      if (amt < 2) {
+        continue;
+      }
+      double curCubeness = cubeness(domSize_.x, domSize_.y, domSize_.z);
       double xSplitCubeness =
-          cubeness(div_ceil(splitSize.x, amt), splitSize.y, splitSize.z);
+          cubeness(div_ceil(domSize_.x, amt), domSize_.y, domSize_.z);
       double ySplitCubeness =
-          cubeness(splitSize.x, div_ceil(splitSize.y, amt), splitSize.z);
+          cubeness(domSize_.x, div_ceil(domSize_.y, amt), domSize_.z);
       double zSplitCubeness =
-          cubeness(splitSize.x, splitSize.y, div_ceil(splitSize.z, amt));
+          cubeness(domSize_.x, domSize_.y, div_ceil(domSize_.z, amt));
 
-      if (xSplitCubeness > max(ySplitCubeness, zSplitCubeness)) { // split in x
-        splitSize.x = div_ceil(splitSize.x, amt);
+      if (xSplitCubeness >=
+          std::max(ySplitCubeness, zSplitCubeness)) { // split in x
+        domSize_.x = div_ceil(domSize_.x, amt);
         rankDim_.x *= amt;
-      } else if (ySplitCubeness >
-                 max(xSplitCubeness, ySplitCubeness)) { // split in y
-        splitSize.y = div_ceil(splitSize.y, amt);
+      } else if (ySplitCubeness >=
+                 std::max(xSplitCubeness, ySplitCubeness)) { // split in y
+        domSize_.y = div_ceil(domSize_.y, amt);
         rankDim_.y *= amt;
       } else { // split in z
-        splitSize.z = div_ceil(splitSize.z, amt);
+        domSize_.z = div_ceil(domSize_.z, amt);
         rankDim_.z *= amt;
       }
     }
 
-    // split biggest dimension across GPUs
-    if (splitSize.x > max(splitSize.y, splitSize.z)) {
-      gpuDim_.x = gpus;
-      splitSize.x /= gpus;
-    } else if (splitSize.y > max(splitSize.x, splitSize.x)) {
-      gpuDim_.y = gpus;
-      splitSize.y /= gpus;
-    } else {
-      gpuDim_.z = gpus;
-      splitSize.z /= gpus;
+    // split again along GPUs
+    auto gpuFactors = prime_factors(gpus_);
+
+    for (size_t amt : gpuFactors) {
+      std::cerr << amt << "\n";
+      if (amt < 2) {
+        continue;
+      }
+      double curCubeness = cubeness(domSize_.x, domSize_.y, domSize_.z);
+      double xSplitCubeness =
+          cubeness(div_ceil(domSize_.x, amt), domSize_.y, domSize_.z);
+      double ySplitCubeness =
+          cubeness(domSize_.x, div_ceil(domSize_.y, amt), domSize_.z);
+      double zSplitCubeness =
+          cubeness(domSize_.x, domSize_.y, div_ceil(domSize_.z, amt));
+
+      if (xSplitCubeness >=
+          std::max(ySplitCubeness, zSplitCubeness)) { // split in x
+        domSize_.x = div_ceil(domSize_.x, amt);
+        gpuDim_.x *= amt;
+      } else if (ySplitCubeness >=
+                 std::max(xSplitCubeness, ySplitCubeness)) { // split in y
+        domSize_.y = div_ceil(domSize_.y, amt);
+        gpuDim_.y *= amt;
+      } else { // split in z
+        domSize_.z = div_ceil(domSize_.z, amt);
+        gpuDim_.z *= amt;
+      }
     }
   }
 
@@ -134,8 +170,8 @@ private:
   }
 
   static double cubeness(double x, double y, double z) {
-    double smallest = min(x, min(y, z));
-    double largest = max(x, max(y, z));
+    double smallest = std::min(x, std::min(y, z));
+    double largest = std::max(x, std::max(y, z));
     return smallest / largest;
   }
 

@@ -71,15 +71,18 @@ public:
   }
 
   CUDA_CALLABLE_MEMBER bool any() const { return x != 0 || x != 0 || z != 0; }
+  CUDA_CALLABLE_MEMBER bool all() const { return x != 0 && x != 0 && z != 0; }
 
   CUDA_CALLABLE_MEMBER size_t flatten() const { return x * y * z; }
 
-  CUDA_CALLABLE_MEMBER Dim3 operator>(const Dim3 &rhs) const {
-    Dim3 result;
-    result.x = x > rhs.x;
-    result.y = y > rhs.y;
-    result.z = z > rhs.z;
-    return result;
+  CUDA_CALLABLE_MEMBER bool operator>(const Dim3 &rhs) const {
+    return x > rhs.x && y > rhs.y && z > rhs.z;
+  }
+  CUDA_CALLABLE_MEMBER bool operator<(const Dim3 &rhs) const {
+    return x < rhs.x && y < rhs.y && z < rhs.z;
+  }
+  CUDA_CALLABLE_MEMBER bool operator>=(const int64_t rhs) const {
+    return x >= rhs && y >= rhs && z >= rhs;
   }
 
   CUDA_CALLABLE_MEMBER Dim3 &operator%=(const Dim3 &rhs) {
