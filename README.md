@@ -48,6 +48,12 @@ CUDA tests only
 test/test_all "[cuda]"
 ```
 
+## Profiling MPI
+
+```
+nvprof -o timeline_%p.nvvp --profile-child-processes mpirun ...
+```
+
 ## Design Goals
   * v1 (prototype)
     * joint stencils over multiple data types (Astaroth)
@@ -57,6 +63,7 @@ test/test_all "[cuda]"
     * face communication (Astaroth)
     * overlap MPI and CUDA
   * v2
+    * Remove requirement of CUDA
     * data placement in heterogeneous environments
     * direct GPU-GPU communication
       * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/

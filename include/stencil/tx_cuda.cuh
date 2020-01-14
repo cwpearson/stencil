@@ -5,6 +5,8 @@
 
 #include <mpi.h>
 
+#include <nvToolsExt.h>
+
 // getpid()
 #include <sys/types.h>
 #include <unistd.h>
@@ -16,8 +18,8 @@
 
 #include "tx_common.hpp"
 
-#define ANY_LOUD
-#define REGION_LOUD
+// #define ANY_LOUD
+// #define REGION_LOUD
 
 /*! A data sender that should work as long as MPI and CUDA are installed
 1) cudaMemcpy from srcGPU to srcRank
@@ -36,30 +38,6 @@ private:
   std::vector<char> hostBuf_;
   std::future<void> waiter;
 
-  void sender_impl(const void *data) {
-    assert(data);
-#ifdef ANY_LOUD
-    printf("AnySender::send_impl(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU);
-#endif
-    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(),
-                                 cudaMemcpyDefault, stream_));
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
-    int tag = make_tag(dstGPU, dataIdx, dir);
-#ifdef ANY_LOUD
-    printf("[%d] AnySender::send_impl(): r%d,g%d,d%lu: Send %luB -> r%d,g%d,d%lu "
-           "(tag=%08x)\n",
-           getpid(), srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU,
-           dataIdx, tag);
-#endif
-    assert(hostBuf_.data());
-    MPI_Send(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, tag,
-              MPI_COMM_WORLD);
-#ifdef ANY_LOUD
-    fprintf(stderr, "[%d] AnySender::send_impl(): r%d,g%d: finished Send\n", getpid(),
-           srcRank, srcGPU);
-#endif
-  }
-
 public:
   AnySender(int srcRank, int srcGPU, int dstRank, int dstGPU, size_t dataIdx,
             Dim3 dir)
@@ -77,16 +55,52 @@ public:
 
   void resize(const size_t n) override { hostBuf_.resize(n); }
 
-  void send(const void *data) override {
-    waiter = std::async(&AnySender::sender_impl, this, data);
+  /*! blocking send of data
+   */
+  void send_sync(const void *data) {
+    nvtxRangePush("AnySender::send_impl");
+    assert(data);
+    assert(hostBuf_.data());
+    assert(hostBuf_.size());
+#ifdef ANY_LOUD
+    printf("AnySender::send_impl(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU);
+#endif
+    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(),
+                                 cudaMemcpyDefault, stream_));
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    int tag = make_tag(dstGPU, dataIdx, dir);
+#ifdef ANY_LOUD
+    printf(
+        "[%d] AnySender::send_impl(): r%d,g%d,d%lu: Send %luB -> r%d,g%d,d%lu "
+        "(tag=%08x)\n",
+        getpid(), srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU,
+        dataIdx, tag);
+#endif
+    MPI_Send(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, tag,
+             MPI_COMM_WORLD);
+
+#ifdef ANY_LOUD
+    fprintf(stderr, "[%d] AnySender::send_impl(): r%d,g%d: finished Send\n",
+            getpid(), srcRank, srcGPU);
+#endif
+    nvtxRangePop();
   }
 
+  /*! async send of data
+   */
+  void send(const void *data) override {
+    assert(data);
+    waiter = std::async(std::launch::async, &AnySender::send_sync, this, data);
+  }
+
+  /*! wait for send()
+   */
   void wait() override {
     if (waiter.valid()) {
       waiter.wait();
 #ifdef ANY_LOUD
-    printf("[%d] AnySender::wait(): r%d,g%d: done\n", getpid(),
-           srcRank, srcGPU);
+      printf("[%d] AnySender::wait(): r%d,g%d: done\n", getpid(), srcRank,
+             srcGPU);
 #endif
     } else {
       assert(0 && "wait called before send?");
@@ -115,22 +129,23 @@ private:
     assert(data && "recv into null ptr");
     int tag = make_tag(dstGPU, dataIdx, dir);
 #ifdef ANY_LOUD
-    fprintf(stderr, "[%d] AnyRecver::recver(): r%d,g%d,d%lu Recv %luB from r%d,g%d,d%lu "
-           "(tag=%08x)\n", getpid(),
-           dstRank, dstGPU, dataIdx, hostBuf_.size(), srcRank, srcGPU, dataIdx,
-           tag);
+    fprintf(
+        stderr,
+        "[%d] AnyRecver::recver(): r%d,g%d,d%lu Recv %luB from r%d,g%d,d%lu "
+        "(tag=%08x)\n",
+        getpid(), dstRank, dstGPU, dataIdx, hostBuf_.size(), srcRank, srcGPU,
+        dataIdx, tag);
 #endif
     assert(hostBuf_.size() && "internal buffer size 0");
     MPI_Recv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, tag,
-              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
 #ifdef ANY_LOUD
     fprintf(stderr, "[%d] AnyRecver::recver(): r%d,g%d: cudaMemcpyAsync\n",
-           getpid(), dstRank, dstGPU);
+            getpid(), dstRank, dstGPU);
 #endif
     CUDA_RUNTIME(cudaMemcpyAsync(data, hostBuf_.data(), hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
-
 #ifdef ANY_LOUD
     fprintf(stderr, "AnyRecver::recver(): wait for cuda sync\n");
 #endif
@@ -159,7 +174,7 @@ public:
 
   void recv(void *data) override {
     assert(data);
-    waiter = std::async(&AnyRecver::recver, this, data);
+    waiter = std::async(std::launch::async, &AnyRecver::recver, this, data);
   }
 
   void wait() override {
@@ -243,6 +258,7 @@ public:
   }
 
   void send_impl() {
+    nvtxRangePush("RegionSender::send_impl");
     assert(bufs_.size() == senders_.size() && "was allocate called?");
     const Dim3 haloPos = domain_->halo_pos(dir_, false /*compute region*/);
     const Dim3 haloExtent = domain_->halo_extent(dir_);
@@ -276,6 +292,8 @@ public:
     for (auto &s : senders_) {
       s.wait();
     }
+
+    nvtxRangePop();
   }
 
   void send() override { fut_ = std::async(&RegionSender::send_impl, this); }

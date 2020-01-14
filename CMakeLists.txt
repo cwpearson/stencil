@@ -71,11 +71,23 @@ else()
 endif()
 
 if(CMAKE_CUDA_COMPILER)
-target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=1)
-message(STATUS "CUDA found, compiling with STENCIL_USE_CUDA=1")
+  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=1)
+  message(STATUS "CUDA found, compiling with STENCIL_USE_CUDA=1")
+
+  set(CUDA_TOOLKIT_ROOT_DIR "${CMAKE_CUDA_COMPILER}")
+  get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDA_TOOLKIT_ROOT_DIR}" DIRECTORY)
+  get_filename_component(CUDA_TOOLKIT_ROOT_DIR "${CUDA_TOOLKIT_ROOT_DIR}" DIRECTORY)
+  find_library(NVTOOLSEXT_LIB nvToolsExt
+              HINTS
+              "${CUDA_TOOLKIT_ROOT_DIR}/lib64"
+              "${CUDA_TOOLKIT_ROOT_DIR}/lib"
+              "${CUDA_TOOLKIT_ROOT_DIR}"
+              )
+  message(STATUS "nvToolsExt found: ${NVTOOLSEXT_LIB}")
+
 else()
-target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=0)
-message(STATUS "CUDA not found, compiling with STENCIL_USE_CUDA=0")
+  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=0)
+  message(STATUS "CUDA not found, compiling with STENCIL_USE_CUDA=0")
 endif()
 
 ## just using target_link_libraries(pangolin INTERFACE MPI::MPI_CXX)
@@ -102,6 +114,7 @@ target_include_directories(stencil INTERFACE
 )
 
 target_link_libraries(stencil INTERFACE nvidia-ml)
+target_link_libraries(stencil INTERFACE ${NVTOOLSEXT_LIB})
 
 # "this command should be in the source directory root for CTest to find the test file"
 enable_testing() 

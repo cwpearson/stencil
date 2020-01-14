@@ -8,6 +8,7 @@
 
 #include <mpi.h>
 
+#include <nvToolsExt.h>
 #include <nvml.h>
 
 #include "cuda_runtime.hpp"
@@ -134,6 +135,7 @@ public:
            rank_, colocated_.size() - 1);
 
     // Try to enable peer access between all GPUs
+    nvtxRangePush("peer_en");
     peerAccess_ = std::vector<std::vector<bool>>(
         gpus_.size(), std::vector<bool>(gpus_.size(), false));
 
@@ -151,7 +153,9 @@ public:
         }
       }
     }
+    nvtxRangePop();
 
+    nvtxRangePush("gpu_topo");
     std::cerr << "gpu distance matrix: \n";
     Mat2D dist = get_gpu_distance_matrix();
     if (0 == rank_) {
@@ -162,6 +166,7 @@ public:
         std::cerr << "\n";
       }
     }
+    nvtxRangePop();
   }
 
   ~DistributedDomain(){
@@ -330,19 +335,18 @@ public:
 
       auto &d = domains_[di];
       const Dim3 myIdx = domainIdx_[di];
-      const int myRank = rank_;
       const int myGPU = d.gpu();
       const int logicalMyGPU = get_logical_gpu(myIdx);
-      assert(myRank == get_rank(myIdx));
+      assert(rank_ == get_rank(myIdx));
       assert(myGPU == gpus_[logicalMyGPU]);
 
       auto &dirSender = domainDirSender_[di];
       auto &dirRecver = domainDirRecver_[di];
 
       // send/recv pairs for faces
-      for (const auto xDir : {-1,0,1}) {
-        for (const auto yDir : {-1,0,1}) {
-          for (const auto zDir : {-1,0,1}) {
+      for (const auto xDir : {-1, 0, 1}) {
+        for (const auto yDir : {-1, 0, 1}) {
+          for (const auto zDir : {-1, 0, 1}) {
             Dim3 dirVec(xDir, yDir, zDir);
             if (dirVec == Dim3(0, 0, 0)) {
               continue; // don't send in no direction
@@ -354,64 +358,61 @@ public:
             // who is sending to me for this dirVec
             Dim3 srcIdx = (myIdx - dirVec).wrap(rankDim_ * gpuDim_);
 
-            int myRank = rank_;
             int myGPU = d.gpu();
 
             int logicalMyGPU = get_logical_gpu(myIdx);
             int logicalSrcGPU = get_logical_gpu(srcIdx);
             int logicalDstGPU = get_logical_gpu(dstIdx);
 
-            assert(myRank == get_rank(myIdx));
-            assert(myGPU == gpus_[logicalMyGPU]);
             int srcRank = get_rank(srcIdx);
             int srcGPU = gpus_[logicalSrcGPU];
             int dstRank = get_rank(dstIdx);
             int dstGPU = gpus_[logicalDstGPU];
 
             std::cerr << myIdx << " -> " << dstIdx << " dirVec=" << dirVec
-                      << " r" << myRank << ",g" << myGPU << " -> r" << dstRank
+                      << " r" << rank_ << ",g" << myGPU << " -> r" << dstRank
                       << ",g" << dstGPU << "\n";
 
             // determine how to send face in that direction
             HaloSender *sender = nullptr;
 
-            if (myRank == dstRank) { // both domains ownned by this rank
+            if (rank_ == dstRank) { // both domains ownned by this rank
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send same rank\n";
-              sender = new RegionSender<AnySender>(d, myRank, myGPU, dstRank,
+              sender = new RegionSender<AnySender>(d, rank_, myGPU, dstRank,
                                                    dstGPU, dirVec);
             } else if (colocated_.count(dstRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send colocated\n";
-              sender = new RegionSender<AnySender>(d, myRank, myGPU, dstRank,
+              sender = new RegionSender<AnySender>(d, rank_, myGPU, dstRank,
                                                    dstGPU, dirVec);
             } else { // domains on different nodes
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send diff nodes\n";
-              sender = new RegionSender<AnySender>(d, myRank, myGPU, dstRank,
+              sender = new RegionSender<AnySender>(d, rank_, myGPU, dstRank,
                                                    dstGPU, dirVec);
             }
 
             std::cerr << myIdx << " <- " << srcIdx << " dirVec=" << dirVec
-                      << " r" << myRank << ",g" << myGPU << " <- r" << srcRank
+                      << " r" << rank_ << ",g" << myGPU << " <- r" << srcRank
                       << ",g" << srcGPU << "\n";
 
             // determine how to receive a face from that direction
             HaloRecver *recver = nullptr;
-            if (myRank == srcRank) { // both domains onwned by this rank
+            if (rank_ == srcRank) { // both domains onwned by this rank
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv same rank\n";
-              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, myRank,
+              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, rank_,
                                                    myGPU, dirVec);
             } else if (colocated_.count(srcRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv colocated\n";
-              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, myRank,
+              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, rank_,
                                                    myGPU, dirVec);
             } else { // domains on different nodes
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv diff nodes\n";
-              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, myRank,
+              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, rank_,
                                                    myGPU, dirVec);
             }
 
