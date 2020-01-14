@@ -20,6 +20,7 @@
 #include "stencil/nvml.hpp"
 #include "stencil/tx.hpp"
 
+
 // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
 std::vector<size_t> prime_factors(size_t n) {
   std::vector<size_t> result;
@@ -282,7 +283,7 @@ public:
       auto gpu = gpus_[i];
 
       Dim3 rankIdx;
-      Dim3 logicalGpuIdx;
+      Dim3 gpuIdx;
 
       auto rank = rank_;
       rankIdx.x = rank % rankDim_.x;
@@ -291,11 +292,11 @@ public:
       rank /= rankDim_.y;
       rankIdx.z = rank;
 
-      logicalGpuIdx.x = i % gpuDim_.x;
+      gpuIdx.x = i % gpuDim_.x;
       i /= gpuDim_.x;
-      logicalGpuIdx.y = i % gpuDim_.y;
+      gpuIdx.y = i % gpuDim_.y;
       i /= gpuDim_.y;
-      logicalGpuIdx.z = i;
+      gpuIdx.z = i;
 
       LocalDomain ld(splitSize, gpu);
       ld.radius_ = radius_;
@@ -304,9 +305,11 @@ public:
       }
 
       domains_.push_back(ld);
-      Dim3 idx = rankIdx * gpuDim_ + logicalGpuIdx;
-      printf("rank,gpu=%d,%d(gpu actual idx=%d) => idx %ld %ld %ld\n", rank_, i,
-             gpu, idx.x, idx.y, idx.z);
+      Dim3 idx = rankIdx * gpuDim_ + gpuIdx;
+      
+      std::cerr << "rank=" << rank_ << " gpui=" << i << " (actual gpu=" << gpu << ") =>"
+	        << " rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " domIdx" << idx << "\n";
+
       domainIdx_.push_back(idx);
     }
 
@@ -348,18 +351,18 @@ public:
       auto &dirRecver = domainDirRecver_[di];
 
       // send/recv pairs for faces
-      for (const auto xDir : {-1, 0, 1}) {
-        for (const auto yDir : {-1, 0, 1}) {
-          for (const auto zDir : {-1, 0, 1}) {
+      for (const auto xDir : {0}) {
+        for (const auto yDir : {0}) {
+          for (const auto zDir : {1}) {
             Dim3 dirVec(xDir, yDir, zDir);
             if (dirVec == Dim3(0, 0, 0)) {
               continue; // don't send in no direction
             }
 
-            // who i am sending to for this dirVec
+            // which compute domain do I send to for this direction
             Dim3 dstIdx = (myIdx + dirVec).wrap(rankDim_ * gpuDim_);
 
-            // who is sending to me for this dirVec
+            // which compute domain do I recv from for this direction
             Dim3 srcIdx = (myIdx - dirVec).wrap(rankDim_ * gpuDim_);
 
             int myGPU = d.gpu();
