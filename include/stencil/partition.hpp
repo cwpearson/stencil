@@ -10,14 +10,18 @@
 class Partition {
 public:
   // get the MPI rank for a particular index in the rank space
+  // the opposite of rank_idx()
   virtual int get_rank(const Dim3 &rankIdx) const = 0;
 
   // get the gpu for a particular index in the GPU space
-  virtual int get_gpu(const Dim3 &idx) const = 0;
+  // the opposite of gpu_idx()
+  virtual int get_gpu(const Dim3 &gpuIdx) const = 0;
 
   // the index of a GPU in the GPU space
+  // the opposite of get_gpu()
   virtual Dim3 gpu_idx(int gpu) const = 0;
   // the index of the rank in the rank space
+  // the opposite of get_rank()
   virtual Dim3 rank_idx(int rank) const = 0;
 
   // the extent of the gpu space

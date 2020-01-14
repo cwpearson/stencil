@@ -22,11 +22,13 @@ TEST_CASE("partition") {
     for (int i = 0; i < ranks; ++i) {
       REQUIRE(part->rank_idx(i) < part->rank_dim());
       REQUIRE(part->rank_idx(i) >= 0);
+      REQUIRE(part->get_rank(part->rank_idx(i)) == i);
     }
 
     for (int i = 0; i < gpus; ++i) {
       REQUIRE(part->gpu_idx(i) < part->gpu_dim());
       REQUIRE(part->gpu_idx(i) >= 0);
+      REQUIRE(part->get_gpu(part->gpu_idx(i)) == i);
     }
 
     delete part;
