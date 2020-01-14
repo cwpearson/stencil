@@ -16,6 +16,9 @@
 
 #include "tx_common.hpp"
 
+#define ANY_LOUD
+#define REGION_LOUD
+
 /*! A data sender that should work as long as MPI and CUDA are installed
 1) cudaMemcpy from srcGPU to srcRank
 2) MPI_Send from srcRank to dstRank, tagged with dstGPU
@@ -33,27 +36,28 @@ private:
   std::vector<char> hostBuf_;
   std::future<void> waiter;
 
-  void sender(const void *data) {
+  void sender_impl(const void *data) {
     assert(data);
-    printf("AnySender::sender(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU);
+#ifdef ANY_LOUD
+    printf("AnySender::send_impl(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU);
+#endif
     CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
     int tag = make_tag(dstGPU, dataIdx, dir);
-    printf("[%d] AnySender::sender(): r%d,g%d,d%lu: Isend %luB -> r%d,g%d,d%lu "
+#ifdef ANY_LOUD
+    printf("[%d] AnySender::send_impl(): r%d,g%d,d%lu: Send %luB -> r%d,g%d,d%lu "
            "(tag=%08x)\n",
            getpid(), srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU,
            dataIdx, tag);
-    MPI_Request req;
+#endif
     assert(hostBuf_.data());
-    MPI_Isend(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, tag,
-              MPI_COMM_WORLD, &req);
-    MPI_Status stat;
-    printf("[%d] AnySender::sender(): r%d,g%d: wait on Isend\n", getpid(),
+    MPI_Send(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, tag,
+              MPI_COMM_WORLD);
+#ifdef ANY_LOUD
+    fprintf(stderr, "[%d] AnySender::send_impl(): r%d,g%d: finished Send\n", getpid(),
            srcRank, srcGPU);
-    MPI_Wait(&req, &stat);
-    printf("[%d] AnySender::sender(): r%d,g%d: finished Isend\n", getpid(),
-           srcRank, srcGPU);
+#endif
   }
 
 public:
@@ -74,12 +78,16 @@ public:
   void resize(const size_t n) override { hostBuf_.resize(n); }
 
   void send(const void *data) override {
-    waiter = std::async(&AnySender::sender, this, data);
+    waiter = std::async(&AnySender::sender_impl, this, data);
   }
 
   void wait() override {
     if (waiter.valid()) {
       waiter.wait();
+#ifdef ANY_LOUD
+    printf("[%d] AnySender::wait(): r%d,g%d: done\n", getpid(),
+           srcRank, srcGPU);
+#endif
     } else {
       assert(0 && "wait called before send?");
     }
@@ -105,26 +113,31 @@ private:
 
   void recver(void *data) {
     assert(data && "recv into null ptr");
-    MPI_Request req;
-    MPI_Status stat;
     int tag = make_tag(dstGPU, dataIdx, dir);
-    printf("AnyRecver::recver(): r%d,g%d,d%lu Irecv %luB from r%d,g%d,d%lu "
-           "(tag=%08x)\n",
+#ifdef ANY_LOUD
+    fprintf(stderr, "[%d] AnyRecver::recver(): r%d,g%d,d%lu Recv %luB from r%d,g%d,d%lu "
+           "(tag=%08x)\n", getpid(),
            dstRank, dstGPU, dataIdx, hostBuf_.size(), srcRank, srcGPU, dataIdx,
            tag);
+#endif
     assert(hostBuf_.size() && "internal buffer size 0");
-    MPI_Irecv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, tag,
-              MPI_COMM_WORLD, &req);
-    printf("[%d] AnyRecver::recver(): r%d,g%d: wait on Irecv\n", getpid(),
-           dstRank, dstGPU);
-    MPI_Wait(&req, &stat);
-    printf("[%d] AnyRecver::recver(): r%d,g%d: got Irecv. cudaMemcpyAsync\n", getpid(),
-           dstRank, dstGPU);
+    MPI_Recv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, tag,
+              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+#ifdef ANY_LOUD
+    fprintf(stderr, "[%d] AnyRecver::recver(): r%d,g%d: cudaMemcpyAsync\n",
+           getpid(), dstRank, dstGPU);
+#endif
     CUDA_RUNTIME(cudaMemcpyAsync(data, hostBuf_.data(), hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
-    printf("AnyRecver::recver(): wait for cuda sync\n");
+
+#ifdef ANY_LOUD
+    fprintf(stderr, "AnyRecver::recver(): wait for cuda sync\n");
+#endif
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+#ifdef ANY_LOUD
     std::cerr << "AnyRecver::recver(): done cuda sync\n";
+#endif
   }
 
 public:
@@ -184,98 +197,6 @@ public:
 
   // wait for send to be complete
   virtual void wait() = 0;
-};
-
-
-/*! \brief Receive a LocalDomain edge using Recver
- */
-template <typename Recver> class EdgeRecver : public HaloRecver {
-private:
-  const LocalDomain *domain_; // the domain we are receiving into
-  size_t dim0_, dim1_;        // the two dimensions the edge shares
-  bool dim0Pos_;              // postive dimension 0
-  bool dim1Pos_;              // positive dimension 1
-
-  std::future<void> fut_;
-
-  // one receiver per domain data
-  std::vector<Recver> recvers_;
-  // one device buffer per domain data
-  std::vector<char *> bufs_;
-
-public:
-  EdgeRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
-             size_t dstRank, size_t dstGPU, size_t dim0, size_t dim1,
-             bool dim0Pos, bool dim1Pos)
-      : domain_(&domain), dim0_(dim0), dim0Pos_(dim0Pos) {
-
-    Dim3 dir(0, 0, 0);
-    dir[dim0] += (dim0Pos > 0 ? 1 : -1);
-    dir[dim1] += (dim1Pos > 0 ? 1 : -1);
-
-    for (size_t di = 0; di < domain.num_data(); ++di) {
-      recvers_.push_back(Recver(srcRank, srcGPU, dstRank, dstGPU, di, dir));
-    }
-  }
-
-  virtual void allocate() override {
-    // allocate space for each transfer
-    const int gpu = domain_->gpu();
-    CUDA_RUNTIME(cudaSetDevice(gpu));
-
-    for (size_t i = 0; i < domain_->num_data(); ++i) {
-      size_t numBytes = domain_->edge_bytes(dim0_, dim1_, i);
-      char *buf = nullptr;
-      CUDA_RUNTIME(cudaMalloc(&buf, numBytes));
-      bufs_.push_back(buf);
-      recvers_[i].resize(numBytes);
-    }
-  }
-
-  void recv_impl() {
-    assert(bufs_.size() == recvers_.size());
-
-    // receive all data into flat buffers
-    for (size_t dataIdx = 0; dataIdx < bufs_.size(); ++dataIdx) {
-      recvers_[dataIdx].recv(bufs_[dataIdx]);
-    }
-
-    // wait for all data
-    for (auto &r : recvers_) {
-      r.wait();
-    }
-
-    // unpack all data into halo region
-    const Dim3 edgePos =
-        domain_->edge_pos(dim0_, dim1_, dim0Pos_, dim1Pos_, true /*halo*/);
-    const Dim3 edgeExtent = domain_->edge_extent(dim0_, dim1_);
-
-    const Dim3 rawSz = domain_->raw_size();
-    for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
-
-      char *dst = domain_->curr_data(dataIdx);
-      // pack into buffer
-      dim3 dimGrid(20, 20, 20);
-      dim3 dimBlock(32, 4, 4);
-      size_t elemSize = domain_->elem_size(dataIdx);
-      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-      unpack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
-          dst, rawSz, 0 /*pitch*/, edgePos, edgeExtent, bufs_[dataIdx],
-          elemSize);
-      CUDA_RUNTIME(cudaStreamSynchronize(domain_->stream()));
-    }
-  }
-
-  void recv() override { fut_ = std::async(&EdgeRecver::recv_impl, this); }
-
-  // wait for send to be complete
-  virtual void wait() override {
-    if (fut_.valid()) {
-      fut_.wait();
-    } else {
-      assert(0 && "wait called before recv");
-    }
-  }
 };
 
 /*! Send a LocalDomain region using Sender
@@ -342,14 +263,16 @@ public:
     // wait for packs
     CUDA_RUNTIME(cudaStreamSynchronize(domain_->stream()));
 
+    assert(senders_.size() == domain_->num_data());
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
       // copy to dst rank
-      printf("RegionSender::send_impl(): send data %lu\n", dataIdx);
       senders_[dataIdx].send(bufs_[dataIdx]);
     }
 
-    // wait for sends
-    std::cerr << "RegionSender::wait() for senders\n";
+// wait for sends
+#ifdef REGION_LOUD
+    std::cerr << "RegionSender:send_impl(): " << dir_ << " wait for senders\n";
+#endif
     for (auto &s : senders_) {
       s.wait();
     }
@@ -360,9 +283,10 @@ public:
   // wait for send to be complete
   void wait() override {
     if (fut_.valid()) {
-      std::cout << "RegionSender::wait() for fut_\n";
       fut_.wait();
-      std::cout << "RegionSender::wait() done\n";
+#ifdef REGION_LOUD
+      std::cerr << "RegionSender::wait(): " << dir_ << " done\n";
+#endif
     } else {
       assert(0 && "wait called before send()");
     }
@@ -404,7 +328,6 @@ public:
 
     for (size_t i = 0; i < domain_->num_data(); ++i) {
       size_t numBytes = domain_->halo_bytes(dir_, i);
-      std::cerr << "allocate " << numBytes << "\n";
       char *buf = nullptr;
       CUDA_RUNTIME(cudaMalloc(&buf, numBytes));
       bufs_.push_back(buf);
@@ -420,7 +343,10 @@ public:
       recvers_[dataIdx].recv(bufs_[dataIdx]);
     }
 
-    // wait for all data
+// wait for all data
+#ifdef REGION_LOUD
+    std::cerr << "RegionRecver::recv_impl(): " << dir_ << " wait for recvers\n";
+#endif
     for (auto &r : recvers_) {
       r.wait();
     }
@@ -453,11 +379,15 @@ public:
   // wait for send to be complete
   virtual void wait() override {
     if (fut_.valid()) {
-      std::cerr << "RegionRecver::wait() for fut_\n";
       fut_.wait();
-      std::cerr << "RegionRecver::wait() done\n";
+#ifdef REGION_LOUD
+      std::cerr << "RegionRecver::wait(): " << dir_ << " done\n";
+#endif
     } else {
       assert(0 && "wait called before recv");
     }
   }
 };
+
+#undef ANY_LOUD
+#undef REGION_LOUD
