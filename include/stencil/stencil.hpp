@@ -340,9 +340,9 @@ public:
       auto &dirRecver = domainDirRecver_[di];
 
       // send/recv pairs for faces
-      for (const auto xDir : {-1}) {
-        for (const auto yDir : {1}) {
-          for (const auto zDir : {1}) {
+      for (const auto xDir : {-1,0,1}) {
+        for (const auto yDir : {-1,0,1}) {
+          for (const auto zDir : {-1,0,1}) {
             Dim3 dirVec(xDir, yDir, zDir);
             if (dirVec == Dim3(0, 0, 0)) {
               continue; // don't send in no direction
