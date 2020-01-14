@@ -13,7 +13,7 @@ int main(int argc, char *argv[]) {
   int provided;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
   if (MPI_THREAD_MULTIPLE != provided) {
-    assert(0);
+    assert(0 && "require MPI_THREAD_MULTIPLE");
   }
 
   int result = Catch::Session().run(argc, argv);

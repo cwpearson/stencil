@@ -74,6 +74,8 @@ TEST_CASE("exchange") {
   auto dh1 = dd.add_data<TestType1>();
   dd.realize();
 
+  MPI_Barrier(MPI_COMM_WORLD);
+
   INFO("init");
   dim3 dimGrid(2, 2, 2);
   dim3 dimBlock(8, 8, 8);
@@ -82,6 +84,8 @@ TEST_CASE("exchange") {
     init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), d.raw_size());
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
+
+  MPI_Barrier(MPI_COMM_WORLD);
 
   INFO("exchange");
   dd.exchange();
