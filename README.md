@@ -87,3 +87,6 @@ The underlying stream is released when the reference count drops to zero.
 
 The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
 This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
+
+## Notes
+  * [CUDA-Aware OpenMPI](https://www.open-mpi.org/faq/?category=runcuda#mpi-cuda-support)
