@@ -67,9 +67,11 @@ public:
 #ifdef ANY_LOUD
     printf("AnySender::send_impl(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU_);
 #endif
+    nvtxRangePush("memcpy");
     CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    nvtxRangePop();
     int tag = make_tag(dstGPU, dataIdx, dir);
 #ifdef ANY_LOUD
     printf(
@@ -78,8 +80,10 @@ public:
         getpid(), srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU,
         dataIdx, tag);
 #endif
+    nvtxRangePush("send");
     MPI_Send(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, tag,
              MPI_COMM_WORLD);
+    nvtxRangePop();
 
 #ifdef ANY_LOUD
     fprintf(stderr, "[%d] AnySender::send_impl(): r%d,g%d: finished Send\n",
@@ -139,19 +143,22 @@ private:
         dataIdx, tag);
 #endif
     assert(hostBuf_.size() && "internal buffer size 0");
+    nvtxRangePush("recv");
     MPI_Recv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank, tag,
              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-
+    nvtxRangePop();
 #ifdef ANY_LOUD
     fprintf(stderr, "[%d] AnyRecver::recver(): r%d,g%d: cudaMemcpyAsync\n",
             getpid(), dstRank, dstGPU);
 #endif
+    nvtxRangePush("memcpy");
     CUDA_RUNTIME(cudaMemcpyAsync(data, hostBuf_.data(), hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
 #ifdef ANY_LOUD
     fprintf(stderr, "AnyRecver::recver(): wait for cuda sync\n");
 #endif
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    nvtxRangePop();
 #ifdef ANY_LOUD
     std::cerr << "AnyRecver::recver(): done cuda sync\n";
 #endif
@@ -271,7 +278,8 @@ public:
     const Dim3 haloPos = domain_->halo_pos(dir_, false /*compute region*/);
     const Dim3 haloExtent = domain_->halo_extent(dir_);
 
-    // insert all packs into streams
+    // insert all packs into streams and start sends
+    assert(senders_.size() == domain_->num_data());
     const Dim3 rawSz = domain_->raw_size();
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
       const char *src = domain_->curr_data(idx);
@@ -286,13 +294,7 @@ public:
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
       pack<<<dimGrid, dimBlock, 0, stream>>>(
           bufs_[idx], src, rawSz, 0 /*pitch*/, haloPos, haloExtent, elemSize);
-    }
-
-    // insert all sends into streams
-    assert(senders_.size() == domain_->num_data());
-    for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
-      // copy to dst rank
-      senders_[dataIdx].send(bufs_[dataIdx]);
+      senders_[idx].send(bufs_[idx]);
     }
 
 // wait for sends
