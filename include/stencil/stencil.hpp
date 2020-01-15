@@ -96,21 +96,26 @@ public:
       colocated_.insert(r);
     }
     assert(colocated_.count(rank_) == 1 && "should be colocated with self");
-    printf("DistributedDomain::ctor(): rank %d colocated with %lu ranks\n",
-           rank_, colocated_.size() - 1);
+    printf(
+        "DistributedDomain::ctor(): rank %d colocated with %lu other ranks\n",
+        rank_, colocated_.size() - 1);
 
     // Try to enable peer access between all GPUs
     nvtxRangePush("peer_en");
-    peerAccess_ = std::vector<std::vector<bool>>(
-        gpus_.size(), std::vector<bool>(gpus_.size(), false));
 
-    for (auto &src : gpus_) {
-      for (auto &dst : gpus_) {
+    // can't use gpus_.size() because we don't own all the GPUs
+    int count;
+    CUDA_RUNTIME(cudaGetDeviceCount(&count));
+    peerAccess_ =
+        std::vector<std::vector<bool>>(count, std::vector<bool>(count, false));
+
+    for (int src = 0; src < count; ++src) {
+      for (int dst = 0; dst < count; ++dst) {
         CUDA_RUNTIME(cudaSetDevice(src))
         cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
         if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
           peerAccess_[src][dst] = true;
-          std::cout << src << " -> " << dst << "peer access\n";
+          std::cout << src << " -> " << dst << " peer access\n";
         } else if (cudaErrorInvalidDevice) {
           peerAccess_[src][dst] = false;
         } else {
@@ -135,16 +140,11 @@ public:
 
     // determine decomposition information
     partition_ = new PFP(size_, worldSize_, gpus_.size());
-
   }
 
-  ~DistributedDomain(){
-    delete partition_;
-  }
+  ~DistributedDomain() { delete partition_; }
 
-  std::vector<LocalDomain> &domains() {
-    return domains_;
-  }
+  std::vector<LocalDomain> &domains() { return domains_; }
 
   void set_radius(size_t r) { radius_ = r; }
 
@@ -160,7 +160,6 @@ public:
 
       Dim3 idx = partition_->dom_idx(rank_, i);
       Dim3 ldSize = partition_->local_domain_size(idx);
-      
 
       LocalDomain ld(ldSize, gpus_[i]);
       ld.radius_ = radius_;
@@ -214,9 +213,9 @@ public:
       auto &dirRecver = domainDirRecver_[di];
 
       // send/recv pairs for faces
-      for (const auto xDir : {-1, 0, 1}) {
-        for (const auto yDir : {-1, 0, 1}) {
-          for (const auto zDir : {-1, 0, 1}) {
+      for (const auto xDir : {0}) {
+        for (const auto yDir : {0}) {
+          for (const auto zDir : {1}) {
             Dim3 dirVec(xDir, yDir, zDir);
             if (dirVec == Dim3(0, 0, 0)) {
               continue; // don't send in no direction

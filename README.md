@@ -58,6 +58,12 @@ test/test_cpu "<case name>" -c "<section name>"
 ```
 nvprof -o timeline_%p.nvvp --profile-child-processes mpirun ...
 ```
+## MCA Parameters
+
+```
+mpirun --mca mpi_show_handle_leaks 1 -np 4 a.out
+```
+
 
 ## Design Goals
   * v1 (prototype)
