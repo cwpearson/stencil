@@ -56,8 +56,14 @@ test/test_cpu "<case name>" -c "<section name>"
 ## Profiling MPI
 
 ```
-nvprof -o timeline_%p.nvvp --profile-child-processes mpirun ...
+mpirun -n <int> nvprof -o timeline_%p.nvvp ...
 ```
+
+To mount a remote directory (where there are nvprof files to load):
+```
+sshfs -o IdentityFile=/path/to/id_rsa user@host:/path /mount/location
+```
+
 ## MCA Parameters
 
 ```
