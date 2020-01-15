@@ -228,6 +228,8 @@ private:
   // one flattened device buffer per domain data
   std::vector<char *> bufs_;
 
+  RcStream stream_; // a stream for pack and copy operations
+
 public:
   RegionSender(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
                size_t dstRank, size_t dstGPU, Dim3 dir)
@@ -273,11 +275,11 @@ public:
       dim3 dimBlock(32, 4, 4);
 
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-      pack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
+      pack<<<dimGrid, dimBlock, 0, stream_>>>(
           bufs_[idx], src, rawSz, 0 /*pitch*/, haloPos, haloExtent, elemSize);
     }
     // wait for packs
-    CUDA_RUNTIME(cudaStreamSynchronize(domain_->stream()));
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 
     assert(senders_.size() == domain_->num_data());
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
@@ -324,6 +326,8 @@ private:
   std::vector<Recver> recvers_;
   // one device buffer per domain data
   std::vector<char *> bufs_;
+
+  RcStream stream_; // a stream for copies and unpacks
 
 public:
   RegionRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
@@ -384,11 +388,11 @@ public:
       size_t elemSize = domain_->elem_size(dataIdx);
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-      unpack<<<dimGrid, dimBlock, 0, domain_->stream()>>>(
+      unpack<<<dimGrid, dimBlock, 0, stream_>>>(
           dst, rawSz, 0 /*pitch*/, haloPos, haloExtent, bufs_[dataIdx],
           elemSize);
 
-      CUDA_RUNTIME(cudaStreamSynchronize(domain_->stream()));
+      CUDA_RUNTIME(cudaStreamSynchronize(stream_));
     }
   }
 
