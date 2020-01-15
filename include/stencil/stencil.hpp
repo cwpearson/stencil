@@ -126,9 +126,10 @@ public:
     nvtxRangePop();
 
     nvtxRangePush("gpu_topo");
-    std::cerr << "gpu distance matrix: \n";
     Mat2D dist = get_gpu_distance_matrix();
+    nvtxRangePop();
     if (0 == rank_) {
+      std::cerr << "gpu distance matrix: \n";
       for (auto &r : dist) {
         for (auto &c : r) {
           std::cerr << c << " ";
@@ -136,10 +137,16 @@ public:
         std::cerr << "\n";
       }
     }
-    nvtxRangePop();
 
     // determine decomposition information
+    nvtxRangePush("partition");
     partition_ = new PFP(size_, worldSize_, gpus_.size());
+    nvtxRangePop();
+
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (0 == rank_) {
+	std::cerr << "split " << size_ << " into " << partition_->rank_dim() << "x" << partition_->gpu_dim() << "\n";
+    }
   }
 
   ~DistributedDomain() { delete partition_; }
@@ -213,9 +220,9 @@ public:
       auto &dirRecver = domainDirRecver_[di];
 
       // send/recv pairs for faces
-      for (const auto xDir : {0}) {
-        for (const auto yDir : {0}) {
-          for (const auto zDir : {1}) {
+      for (const auto xDir : {-1,0,1}) {
+        for (const auto yDir : {-1,0,1}) {
+          for (const auto zDir : {-1,0,1}) {
             Dim3 dirVec(xDir, yDir, zDir);
             if (dirVec == Dim3(0, 0, 0)) {
               continue; // don't send in no direction
