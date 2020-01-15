@@ -328,8 +328,8 @@ private:
   const LocalDomain *domain_; // the domain we are receiving into
   Dim3 dir_;                  // the direction of the send we are recving
 
-  std::future<void> fut_;
-
+  // one future per domain data
+  std::vector<std::future<void>> futs_;
   // one receiver per domain data
   std::vector<Recver> recvers_;
   // one device buffer per domain data
@@ -345,6 +345,8 @@ public:
     assert(dir_.x >= -1 && dir.x <= 1);
     assert(dir_.y >= -1 && dir.y <= 1);
     assert(dir_.z >= -1 && dir.z <= 1);
+
+    futs_.resize(domain.num_data());
 
     // associate domain data array with a receiver and a stream
     for (size_t di = 0; di < domain.num_data(); ++di) {
@@ -368,30 +370,15 @@ public:
     }
   }
 
-  void recv_impl() {
-    assert(bufs_.size() == recvers_.size());
+  void recv_impl(size_t dataIdx) {
+    auto &recver = recvers_[dataIdx];
+    recver.recv(bufs_[dataIdx]);
+    recver.wait();
 
-    // receive all data into flat buffers
-    for (size_t dataIdx = 0; dataIdx < bufs_.size(); ++dataIdx) {
-      recvers_[dataIdx].recv(bufs_[dataIdx]);
-    }
-
-    // have to call recver.wait() to ensure memcpy is inserted into stream
-    // FIXME: here we wait for all recvers before doing any unpack.
-    // FIXME: we only need to wait for the corresponding recvr
-#ifdef REGION_LOUD
-    std::cerr << "RegionRecver::recv_impl(): " << dir_ << " wait for recvers\n";
-#endif
-    for (auto &r : recvers_) {
-      r.wait();
-    }
-
-    // insert unpacks into streams
     const Dim3 haloPos = domain_->halo_pos(dir_, true /*halo region*/);
     const Dim3 haloExtent = domain_->halo_extent(dir_);
 
     const Dim3 rawSz = domain_->raw_size();
-    for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
 
       char *dst = domain_->curr_data(dataIdx);
       RcStream stream = streams_[dataIdx];
@@ -405,27 +392,31 @@ public:
           dst, rawSz, 0 /*pitch*/, haloPos, haloExtent, bufs_[dataIdx],
           elemSize);
 
-    }
 
-    // wait for unpacks
-    for (auto &stream : streams_) {
-      CUDA_RUNTIME(cudaStreamSynchronize(stream));
-    }
-
+    // wait for unpack
+    CUDA_RUNTIME(cudaStreamSynchronize(stream));
   }
 
-  void recv() override { fut_ = std::async(&RegionRecver::recv_impl, this); }
+  void recv() override { 
+    for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
+      futs_[dataIdx] = std::async(&RegionRecver::recv_impl, this, dataIdx); 
+    }
+  }
 
   // wait for send to be complete
   virtual void wait() override {
-    if (fut_.valid()) {
-      fut_.wait();
+
+    for (auto &fut : futs_) {
+
+    if (fut.valid()) {
+      fut.wait();
 #ifdef REGION_LOUD
       std::cerr << "RegionRecver::wait(): " << dir_ << " done\n";
 #endif
     } else {
       assert(0 && "wait called before recv");
     }
+  }
   }
 };
 
