@@ -28,7 +28,7 @@
 class AnySender : public Sender {
 private:
   int srcRank;
-  int srcGPU;
+  int srcGPU_;
   int dstRank;
   int dstGPU;
   Dim3 dir;       // direction vector
@@ -40,9 +40,11 @@ private:
 
 public:
   AnySender(int srcRank, int srcGPU, int dstRank, int dstGPU, size_t dataIdx,
-            Dim3 dir)
-      : srcRank(srcRank), srcGPU(srcGPU), dstRank(dstRank), dstGPU(dstGPU),
-        dir(dir), dataIdx(dataIdx), stream_(srcGPU) {}
+            Dim3 dir, RcStream stream)
+      : srcRank(srcRank), srcGPU_(srcGPU), dstRank(dstRank), dstGPU(dstGPU),
+        dir(dir), dataIdx(dataIdx), stream_(stream) {}
+  AnySender(int srcRank, int srcGPU, int dstRank, int dstGPU, size_t dataIdx,
+            Dim3 dir) : AnySender(srcRank, srcGPU, dstRank, dstGPU, dataIdx, dir, RcStream(srcGPU)) {}
 
   // copy ctor
   AnySender(const AnySender &other) = default;
@@ -63,7 +65,7 @@ public:
     assert(hostBuf_.data());
     assert(hostBuf_.size());
 #ifdef ANY_LOUD
-    printf("AnySender::send_impl(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU);
+    printf("AnySender::send_impl(): r%d,g%d: cudaMemcpy\n", srcRank, srcGPU_);
 #endif
     CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), data, hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
@@ -157,9 +159,11 @@ private:
 
 public:
   AnyRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, size_t dataIdx,
-            Dim3 dir)
+            Dim3 dir, RcStream stream)
       : srcRank(srcRank), srcGPU(srcGPU), dstRank(dstRank), dstGPU(dstGPU),
-        dataIdx(dataIdx), dir(dir), stream_(dstGPU) {}
+        dataIdx(dataIdx), dir(dir), stream_(stream) {}
+  AnyRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, size_t dataIdx,
+            Dim3 dir) : AnyRecver(srcRank, srcGPU, dstRank, dstGPU, dataIdx, dir, RcStream(dstGPU)) {}
 
   // copy ctor
   AnyRecver(const AnyRecver &other) = default;
@@ -227,8 +231,8 @@ private:
   std::vector<Sender> senders_;
   // one flattened device buffer per domain data
   std::vector<char *> bufs_;
-
-  RcStream stream_; // a stream for pack and copy operations
+  // one stream per domain data
+  std::vector<RcStream> streams_; 
 
 public:
   RegionSender(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
@@ -240,7 +244,9 @@ public:
     assert(dir_.z >= -1 && dir.z <= 1);
 
     for (size_t di = 0; di < domain.num_data(); ++di) {
-      senders_.push_back(Sender(srcRank, srcGPU, dstRank, dstGPU, di, dir_));
+      RcStream stream(domain_->gpu()); // associate stream with correct GPU
+      senders_.push_back(Sender(srcRank, srcGPU, dstRank, dstGPU, di, dir_, stream));
+      streams_.push_back(stream);
     }
   }
 
@@ -265,22 +271,24 @@ public:
     const Dim3 haloPos = domain_->halo_pos(dir_, false /*compute region*/);
     const Dim3 haloExtent = domain_->halo_extent(dir_);
 
+    // insert all packs into streams
     const Dim3 rawSz = domain_->raw_size();
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
       const char *src = domain_->curr_data(idx);
       const size_t elemSize = domain_->elem_size(idx);
+      RcStream stream = streams_[idx];
 
       // pack into buffer
       dim3 dimGrid(20, 20, 20);
       dim3 dimBlock(32, 4, 4);
 
+      assert(stream.device() == domain_->gpu());
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-      pack<<<dimGrid, dimBlock, 0, stream_>>>(
+      pack<<<dimGrid, dimBlock, 0, stream>>>(
           bufs_[idx], src, rawSz, 0 /*pitch*/, haloPos, haloExtent, elemSize);
     }
-    // wait for packs
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
 
+    // insert all sends into streams
     assert(senders_.size() == domain_->num_data());
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
       // copy to dst rank
@@ -326,8 +334,8 @@ private:
   std::vector<Recver> recvers_;
   // one device buffer per domain data
   std::vector<char *> bufs_;
-
-  RcStream stream_; // a stream for copies and unpacks
+  // one stream per domain data
+  std::vector<RcStream> streams_;
 
 public:
   RegionRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
@@ -338,8 +346,11 @@ public:
     assert(dir_.y >= -1 && dir.y <= 1);
     assert(dir_.z >= -1 && dir.z <= 1);
 
+    // associate domain data array with a receiver and a stream
     for (size_t di = 0; di < domain.num_data(); ++di) {
-      recvers_.push_back(Recver(srcRank, srcGPU, dstRank, dstGPU, di, dir_));
+      RcStream stream(domain_->gpu()); // associate stream with the cuda id
+      recvers_.push_back(Recver(srcRank, srcGPU, dstRank, dstGPU, di, dir_, stream));
+      streams_.push_back(stream);
     }
   }
 
@@ -365,7 +376,9 @@ public:
       recvers_[dataIdx].recv(bufs_[dataIdx]);
     }
 
-// wait for all data
+    // have to call recver.wait() to ensure memcpy is inserted into stream
+    // FIXME: here we wait for all recvers before doing any unpack.
+    // FIXME: we only need to wait for the corresponding recvr
 #ifdef REGION_LOUD
     std::cerr << "RegionRecver::recv_impl(): " << dir_ << " wait for recvers\n";
 #endif
@@ -373,7 +386,7 @@ public:
       r.wait();
     }
 
-    // unpack all data into domain's halo
+    // insert unpacks into streams
     const Dim3 haloPos = domain_->halo_pos(dir_, true /*halo region*/);
     const Dim3 haloExtent = domain_->halo_extent(dir_);
 
@@ -381,19 +394,24 @@ public:
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
 
       char *dst = domain_->curr_data(dataIdx);
+      RcStream stream = streams_[dataIdx];
 
       // unpack from buffer into halo
       dim3 dimGrid(20, 20, 20);
       dim3 dimBlock(32, 4, 4);
       size_t elemSize = domain_->elem_size(dataIdx);
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-
-      unpack<<<dimGrid, dimBlock, 0, stream_>>>(
+      unpack<<<dimGrid, dimBlock, 0, stream>>>(
           dst, rawSz, 0 /*pitch*/, haloPos, haloExtent, bufs_[dataIdx],
           elemSize);
 
-      CUDA_RUNTIME(cudaStreamSynchronize(stream_));
     }
+
+    // wait for unpacks
+    for (auto &stream : streams_) {
+      CUDA_RUNTIME(cudaStreamSynchronize(stream));
+    }
+
   }
 
   void recv() override { fut_ = std::async(&RegionRecver::recv_impl, this); }
