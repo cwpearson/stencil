@@ -1,15 +1,12 @@
 #include <chrono>
 #include <thread>
+#include <cmath>
 
 #include <nvToolsExt.h>
 
 #include "stencil/stencil.hpp"
 
 int main(int argc, char **argv) {
-
-
-
-
 
   int provided;
   MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
@@ -18,12 +15,18 @@ int main(int argc, char **argv) {
   int size;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-  size_t x = 64 * size;
-  size_t y = 64;
-  size_t z = 64;
-  size_t radius = 3;
+  /*
+  Table 5
+  512^3 on Pascal 34.1ms
+  512^3 on Volta  20.1ms
+  */
 
-  size_t kernelMillis = 500;
+  size_t x = 512 * pow(size, 0.333);
+  size_t y = 512 * pow(size, 0.333);
+  size_t z = 512 * pow(size, 0.333);
+  size_t kernelMillis = 34;
+
+  size_t radius = 3;
 
   DistributedDomain dd(x, y, z);
 
@@ -38,15 +41,15 @@ int main(int argc, char **argv) {
 
   MPI_Barrier(MPI_COMM_WORLD);
 
+  for (size_t iter = 0; iter < 3; ++iter) {
   nvtxRangePush("exchange");
   dd.exchange();
   nvtxRangePop();
 
   nvtxRangePush("kernels");
-  for (auto &d : dd.domains()) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(kernelMillis));
-  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(kernelMillis));
   nvtxRangePop();
+  }
 
   MPI_Finalize();
 
