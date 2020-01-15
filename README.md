@@ -48,6 +48,11 @@ CUDA tests only
 test/test_all "[cuda]"
 ```
 
+To run specific tests
+```
+test/test_cpu "<case name>" -c "<section name>"
+```
+
 ## Profiling MPI
 
 ```

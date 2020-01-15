@@ -18,41 +18,8 @@
 #include "stencil/gpu_topo.hpp"
 #include "stencil/local_domain.cuh"
 #include "stencil/nvml.hpp"
+#include "stencil/partition.hpp"
 #include "stencil/tx.hpp"
-
-// https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
-std::vector<size_t> prime_factors(size_t n) {
-  std::vector<size_t> result;
-
-  while (n % 2 == 0) {
-    result.push_back(2);
-    n = n / 2;
-  }
-  for (int i = 3; i <= sqrt(n); i = i + 2) {
-    // While i divides n, print i and divide n
-    while (n % i == 0) {
-      result.push_back(i);
-      n = n / i;
-    }
-  }
-  if (n > 2)
-    result.push_back(n);
-
-  return result;
-}
-
-/*!
-  min element / max element
-*/
-double cubeness(double x, double y, double z) {
-  double smallest = min(x, min(y, z));
-  double largest = max(x, max(y, z));
-  return smallest / largest;
-}
-
-/*! \brief ceil(n/d)
- */
-size_t div_ceil(size_t n, size_t d) { return (n + d - 1) / d; }
 
 class DistributedDomain {
 private:
@@ -67,15 +34,14 @@ private:
   // the stencil radius
   size_t radius_;
 
-  // the dimension of the domain in MPI ranks and GPUs
-  Dim3 rankDim_;
-  Dim3 gpuDim_;
-
   // typically one per GPU
   // the actual data associated with this rank
   std::vector<LocalDomain> domains_;
   // the index of the domain in the distributed domain
   std::vector<Dim3> domainIdx_;
+
+  // information about mapping of computation domain to workers
+  Partition *partition_;
 
   // senders/recvers for each direction in each domain
   // domainDirSenders[domainIdx].at(dir)
@@ -92,8 +58,7 @@ private:
   std::vector<std::vector<bool>> peerAccess_; //<! which GPUs have peer access
 
 public:
-  DistributedDomain(size_t x, size_t y, size_t z)
-      : size_(x, y, z), rankDim_(1, 1, 1), gpuDim_(1, 1, 1) {
+  DistributedDomain(size_t x, size_t y, size_t z) : size_(x, y, z) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
     int deviceCount;
@@ -167,10 +132,14 @@ public:
       }
     }
     nvtxRangePop();
+
+    // determine decomposition information
+    partition_ = new PFP(size_, worldSize_, gpus_.size());
+
   }
 
   ~DistributedDomain(){
-#warning dtor is a no-op
+    delete partition_;
   }
 
   std::vector<LocalDomain> &domains() {
@@ -184,125 +153,25 @@ public:
     return DataHandle<T>(dataElemSize_.size() - 1);
   }
 
-  size_t get_rank(const Dim3 idx) {
-    assert(idx.x >= 0);
-    assert(idx.y >= 0);
-    assert(idx.z >= 0);
-    assert(idx.x < rankDim_.x * gpuDim_.x);
-    return (idx.x / gpuDim_.x) + (idx.y / gpuDim_.y) * rankDim_.x +
-           (idx.z / gpuDim_.z) * rankDim_.y * rankDim_.x;
-  }
-
-  size_t get_logical_gpu(const Dim3 idx) {
-    assert(idx.x >= 0);
-    assert(idx.y >= 0);
-    assert(idx.z >= 0);
-    return (idx.x % gpuDim_.x) + (idx.y % gpuDim_.y) * gpuDim_.x +
-           (idx.z % gpuDim_.z) * gpuDim_.y * gpuDim_.x;
-  }
-
-  Dim3 get_idx(size_t rank, size_t gpu) {
-    assert(0);
-#warning get_idx unimplemented
-    return Dim3();
-  }
-
   void realize(bool useUnified = false) {
-
-    // recursively split region among MPI ranks to make it ~cubical
-    Dim3 splitSize = size_;
-    auto factors = prime_factors(worldSize_);
-    std::sort(factors.begin(), factors.end(),
-              [](size_t a, size_t b) { return b < a; });
-    for (size_t amt : factors) {
-
-      if (rank_ == 0) {
-        printf("split by %lu\n", amt);
-      }
-
-      double curCubeness = cubeness(size_.x, size_.y, size_.z);
-      double xSplitCubeness =
-          cubeness(div_ceil(splitSize.x, amt), splitSize.y, splitSize.z);
-      double ySplitCubeness =
-          cubeness(splitSize.x, div_ceil(splitSize.y, amt), splitSize.z);
-      double zSplitCubeness =
-          cubeness(splitSize.x, splitSize.y, div_ceil(splitSize.z, amt));
-
-      if (rank_ == 0) {
-        printf("%lu %lu %lu %f\n", size_.x, size_.y, size_.z, curCubeness);
-      }
-
-      if (xSplitCubeness > max(ySplitCubeness, zSplitCubeness)) { // split in x
-        if (rank_ == 0) {
-          printf("x split: %f\n", xSplitCubeness);
-        }
-        splitSize.x = div_ceil(splitSize.x, amt);
-        rankDim_.x *= amt;
-      } else if (ySplitCubeness >
-                 max(xSplitCubeness, ySplitCubeness)) { // split in y
-        if (rank_ == 0) {
-          printf("y split: %f\n", ySplitCubeness);
-        }
-        splitSize.y = div_ceil(splitSize.y, amt);
-        rankDim_.y *= amt;
-      } else { // split in z
-        if (rank_ == 0) {
-          printf("z split: %f\n", zSplitCubeness);
-        }
-        splitSize.z = div_ceil(splitSize.z, amt);
-        rankDim_.z *= amt;
-      }
-    }
-
-    // split biggest dimension across GPUs
-    if (splitSize.x > max(splitSize.y, splitSize.z)) {
-      gpuDim_.x = gpus_.size();
-      splitSize.x /= gpus_.size();
-    } else if (splitSize.y > max(splitSize.x, splitSize.x)) {
-      gpuDim_.y = gpus_.size();
-      splitSize.y /= gpus_.size();
-    } else {
-      gpuDim_.z = gpus_.size();
-      splitSize.z /= gpus_.size();
-    }
-
-    if (rank_ == 0) {
-      printf("%lux%lux%lu of %lux%lux%lux (gpus %lux%lux%lu)\n", splitSize.x,
-             splitSize.y, splitSize.z, rankDim_.x, rankDim_.y, rankDim_.z,
-             gpuDim_.x, gpuDim_.y, gpuDim_.z);
-    }
 
     // create local domains
     for (int i = 0; i < gpus_.size(); i++) {
 
-      auto gpu = gpus_[i];
+      Dim3 idx = partition_->dom_idx(rank_, i);
+      Dim3 ldSize = partition_->local_domain_size(idx);
+      
 
-      Dim3 rankIdx;
-      Dim3 logicalGpuIdx;
-
-      auto rank = rank_;
-      rankIdx.x = rank % rankDim_.x;
-      rank /= rankDim_.x;
-      rankIdx.y = rank % rankDim_.y;
-      rank /= rankDim_.y;
-      rankIdx.z = rank;
-
-      logicalGpuIdx.x = i % gpuDim_.x;
-      i /= gpuDim_.x;
-      logicalGpuIdx.y = i % gpuDim_.y;
-      i /= gpuDim_.y;
-      logicalGpuIdx.z = i;
-
-      LocalDomain ld(splitSize, gpu);
+      LocalDomain ld(ldSize, gpus_[i]);
       ld.radius_ = radius_;
       for (size_t dataIdx = 0; dataIdx < dataElemSize_.size(); ++dataIdx) {
         ld.add_data(dataElemSize_[dataIdx]);
       }
 
       domains_.push_back(ld);
-      Dim3 idx = rankIdx * gpuDim_ + logicalGpuIdx;
-      printf("rank,gpu=%d,%d(gpu actual idx=%d) => idx %ld %ld %ld\n", rank_, i,
-             gpu, idx.x, idx.y, idx.z);
+
+      printf("rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, i,
+             gpus_[i], idx.x, idx.y, idx.z);
       domainIdx_.push_back(idx);
     }
 
@@ -329,16 +198,17 @@ public:
       }
     }
 
+    const Dim3 gpuDim = partition_->gpu_dim();
+    const Dim3 rankDim = partition_->rank_dim();
+
     // build senders and recvers for each domain
     for (size_t di = 0; di < domains_.size(); ++di) {
       assert(domains_.size() == domainIdx_.size());
 
       auto &d = domains_[di];
       const Dim3 myIdx = domainIdx_[di];
-      const int myGPU = d.gpu();
-      const int logicalMyGPU = get_logical_gpu(myIdx);
-      assert(rank_ == get_rank(myIdx));
-      assert(myGPU == gpus_[logicalMyGPU]);
+      const int myGPU = di; // logical GPU number, not device ID
+      assert(rank_ == partition_->get_rank(myIdx));
 
       auto &dirSender = domainDirSender_[di];
       auto &dirRecver = domainDirRecver_[di];
@@ -353,23 +223,18 @@ public:
             }
 
             // who i am sending to for this dirVec
-            Dim3 dstIdx = (myIdx + dirVec).wrap(rankDim_ * gpuDim_);
+            Dim3 dstIdx = (myIdx + dirVec).wrap(rankDim * gpuDim);
 
             // who is sending to me for this dirVec
-            Dim3 srcIdx = (myIdx - dirVec).wrap(rankDim_ * gpuDim_);
+            Dim3 srcIdx = (myIdx - dirVec).wrap(rankDim * gpuDim);
 
-            int myGPU = d.gpu();
+            // logical GPU number, not device ID
+            int srcGPU = partition_->get_gpu(srcIdx);
+            int dstGPU = partition_->get_gpu(dstIdx);
+            int srcRank = partition_->get_rank(srcIdx);
+            int dstRank = partition_->get_rank(dstIdx);
 
-            int logicalMyGPU = get_logical_gpu(myIdx);
-            int logicalSrcGPU = get_logical_gpu(srcIdx);
-            int logicalDstGPU = get_logical_gpu(dstIdx);
-
-            int srcRank = get_rank(srcIdx);
-            int srcGPU = gpus_[logicalSrcGPU];
-            int dstRank = get_rank(dstIdx);
-            int dstGPU = gpus_[logicalDstGPU];
-
-            std::cerr << myIdx << " -> " << dstIdx << " dirVec=" << dirVec
+            std::cout << myIdx << " -> " << dstIdx << " dirVec=" << dirVec
                       << " r" << rank_ << ",g" << myGPU << " -> r" << dstRank
                       << ",g" << dstGPU << "\n";
 
@@ -393,7 +258,7 @@ public:
                                                    dstGPU, dirVec);
             }
 
-            std::cerr << myIdx << " <- " << srcIdx << " dirVec=" << dirVec
+            std::cout << myIdx << " <- " << srcIdx << " dirVec=" << dirVec
                       << " r" << rank_ << ",g" << myGPU << " <- r" << srcRank
                       << ",g" << srcGPU << "\n";
 

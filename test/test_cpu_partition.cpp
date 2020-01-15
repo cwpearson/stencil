@@ -30,7 +30,7 @@ TEST_CASE("partition") {
       REQUIRE(part->get_gpu(part->gpu_idx(i)) == i);
     }
 
-    REQUIRE(Dim3(5, 5, 5) == part->local_domain_size(Dim3(0,0,0), Dim3(0,0,0)));
+    REQUIRE(Dim3(5, 5, 5) == part->local_domain_size(Dim3(0,0,0)));
 
     delete part;
   }
@@ -43,10 +43,9 @@ TEST_CASE("partition") {
 
     Partition *part = new PFP(sz, ranks, gpus);
 
-    std::cerr << "here\n";
-    REQUIRE(Dim3(4, 5, 5) == part->local_domain_size(Dim3(0,0,0), Dim3(0,0,0)));
-    REQUIRE(Dim3(4, 5, 5) == part->local_domain_size(Dim3(1,0,0), Dim3(0,0,0)));
-    REQUIRE(Dim3(3, 5, 5) == part->local_domain_size(Dim3(2,0,0), Dim3(0,0,0)));
+    REQUIRE(Dim3(4, 5, 5) == part->local_domain_size(Dim3(0,0,0)));
+    REQUIRE(Dim3(3, 5, 5) == part->local_domain_size(Dim3(1,0,0)));
+    REQUIRE(Dim3(3, 5, 5) == part->local_domain_size(Dim3(2,0,0)));
 
     delete part;
   }
@@ -59,11 +58,40 @@ TEST_CASE("partition") {
 
     Partition *part = new PFP(sz, ranks, gpus);
 
-    std::cerr << "here\n";
-    REQUIRE(Dim3(4, 7, 7) == part->local_domain_size(Dim3(0,0,0), Dim3(0,0,0)));
-    REQUIRE(Dim3(3, 7, 7) == part->local_domain_size(Dim3(1,0,0), Dim3(0,0,0)));
-    REQUIRE(Dim3(3, 7, 7) == part->local_domain_size(Dim3(2,0,0), Dim3(0,0,0)));
-    REQUIRE(Dim3(3, 7, 7) == part->local_domain_size(Dim3(3,0,0), Dim3(0,0,0)));
+    REQUIRE(Dim3(4, 7, 7) == part->local_domain_size(Dim3(0,0,0)));
+    REQUIRE(Dim3(3, 7, 7) == part->local_domain_size(Dim3(1,0,0)));
+    REQUIRE(Dim3(3, 7, 7) == part->local_domain_size(Dim3(2,0,0)));
+    REQUIRE(Dim3(3, 7, 7) == part->local_domain_size(Dim3(3,0,0)));
+
+    delete part;
+  }
+
+  SECTION("17x7x7 into 3x2") {
+
+/* first split is X into 6 and 5 (ranks)
+   then y into 4 and 3 (gpus)
+*/
+/*  X->
+   Y  6x4x7  6x4x7 5x4x7
+   |
+   v  6x3x7  6x3x7 5x3x7
+*/
+
+    Dim3 sz(17, 7, 7);
+    int ranks = 3;
+    int gpus = 2;
+
+    Partition *part = new PFP(sz, ranks, gpus);
+
+    REQUIRE(Dim3(3,1,1) == part->rank_dim());
+    REQUIRE(Dim3(1,2,1) == part->gpu_dim());
+
+    REQUIRE(Dim3(6, 4, 7) == part->local_domain_size(Dim3(0,0,0)));
+    REQUIRE(Dim3(6, 4, 7) == part->local_domain_size(Dim3(1,0,0)));
+    REQUIRE(Dim3(5, 4, 7) == part->local_domain_size(Dim3(2,0,0)));
+    REQUIRE(Dim3(6, 3, 7) == part->local_domain_size(Dim3(0,1,0)));
+    REQUIRE(Dim3(6, 3, 7) == part->local_domain_size(Dim3(1,1,0)));
+    REQUIRE(Dim3(5, 3, 7) == part->local_domain_size(Dim3(2,1,0)));
 
     delete part;
   }

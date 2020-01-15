@@ -9,29 +9,32 @@
 
 class Partition {
 public:
-  // get the MPI rank for a particular index in the rank space
-  // the opposite of rank_idx()
-  virtual int get_rank(const Dim3 &rankIdx) const = 0;
+  // get the MPI rank for a domain
+  virtual int get_rank(const Dim3 &idx) const = 0;
 
-  // get the gpu for a particular index in the GPU space
-  // the opposite of gpu_idx()
-  virtual int get_gpu(const Dim3 &gpuIdx) const = 0;
+  // get the gpu for a domain
+  virtual int get_gpu(const Dim3 &idx) const = 0;
 
   // the index of a GPU in the GPU space
-  // the opposite of get_gpu()
   virtual Dim3 gpu_idx(int gpu) const = 0;
+
   // the index of the rank in the rank space
-  // the opposite of get_rank()
   virtual Dim3 rank_idx(int rank) const = 0;
+
+  // the domain for rank and gpu
+  // opposite of get_rank and get_gpu
+  Dim3 dom_idx(int rank, int gpu) const {
+    return rank_idx(rank) * gpu_dim() + gpu_idx(gpu);
+  }
 
   // the extent of the gpu space
   virtual Dim3 gpu_dim() const = 0;
+
   // the extent of the rank space
   virtual Dim3 rank_dim() const = 0;
 
-  // get the target size of the local domain in this partition
-  virtual Dim3 local_domain_size(const Dim3 &rankIdx,
-                                 const Dim3 &gpuIdx) const = 0;
+  // get the size of a local domain
+  virtual Dim3 local_domain_size(const Dim3 &idx) const = 0;
 };
 
 /*! Prime-factor partitioner
@@ -47,11 +50,13 @@ private:
 
 public:
   int get_rank(const Dim3 &idx) const override {
-    return idx.x + idx.y * rankDim_.x + idx.z * rankDim_.y * rankDim_.x;
+    Dim3 rankIdx = idx / gpuDim_;
+    return rankIdx.x + rankIdx.y * rankDim_.x + rankIdx.z * rankDim_.y * rankDim_.x;
   }
 
   int get_gpu(const Dim3 &idx) const override {
-    return idx.x + idx.y * gpuDim_.x + idx.z * gpuDim_.y * gpuDim_.x;
+    Dim3 gpuIdx = idx % gpuDim_;
+    return gpuIdx.x + gpuIdx.y * gpuDim_.x + gpuIdx.z * gpuDim_.y * gpuDim_.x;
   }
 
   Dim3 gpu_idx(int gpu) const override {
@@ -78,12 +83,10 @@ public:
   Dim3 gpu_dim() const override { return gpuDim_; }
   Dim3 rank_dim() const override { return rankDim_; }
 
-  Dim3 local_domain_size(const Dim3 &rankIdx,
-                         const Dim3 &gpuIdx) const override {
+  Dim3 local_domain_size(const Dim3 &idx) const override {
 
     Dim3 ret = domSize_;
-    Dim3 idx = rankIdx * gpuDim_ + gpuIdx;
-    Dim3 rem = size_ % domSize_;
+    Dim3 rem = size_ % (rankDim_ * gpuDim_);
 
     if (rem.x != 0 && idx.x >= rem.x) {
       ret.x -= 1;
@@ -137,7 +140,6 @@ public:
     auto gpuFactors = prime_factors(gpus_);
 
     for (size_t amt : gpuFactors) {
-      std::cerr << amt << "\n";
       if (amt < 2) {
         continue;
       }
@@ -193,5 +195,7 @@ public:
     return smallest / largest;
   }
 
+  /*! \brief ceil(n/d)
+  */
   static size_t div_ceil(size_t n, size_t d) { return (n + d - 1) / d; }
 };
