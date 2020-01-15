@@ -31,7 +31,7 @@ private:
   std::vector<char *> nextDataPtrs_;
   std::vector<size_t> dataElemSize_;
 
-  int dev_;             // CUDA device
+  int dev_; // CUDA device
 
 public:
   LocalDomain(Dim3 sz, int dev) : sz_(sz), dev_(dev) {}
@@ -46,7 +46,6 @@ public:
     for (auto p : nextDataPtrs_) {
       CUDA_RUNTIME(cudaFree(p));
     }
-
   }
 
   /*
@@ -109,12 +108,6 @@ public:
   char *next_data(size_t idx) const {
     assert(idx < nextDataPtrs_.size());
     return nextDataPtrs_[idx];
-  }
-
-  size_t pitch() const {
-#warning pitch is unimplemented
-    assert(0);
-    return 0;
   }
 
   // return the position of the halo relative to get_data() in direction `dir`
