@@ -32,10 +32,9 @@ private:
   std::vector<size_t> dataElemSize_;
 
   int dev_;             // CUDA device
-  cudaStream_t stream_; // CUDA stream
 
 public:
-  LocalDomain(Dim3 sz, int dev) : sz_(sz), dev_(dev), stream_(0) {}
+  LocalDomain(Dim3 sz, int dev) : sz_(sz), dev_(dev) {}
 
   ~LocalDomain() {
 
@@ -48,9 +47,6 @@ public:
       CUDA_RUNTIME(cudaFree(p));
     }
 
-    if (stream_ != 0) {
-      CUDA_RUNTIME(cudaStreamDestroy(stream_));
-    }
   }
 
   /*
@@ -336,9 +332,6 @@ public:
 
   // the GPU this domain is on
   int gpu() const { return dev_; }
-
-  // a stream associated with this domain
-  cudaStream_t stream() const { return stream_; }
 
   void realize() {
 
