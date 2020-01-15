@@ -80,7 +80,22 @@ public:
 
   Dim3 local_domain_size(const Dim3 &rankIdx,
                          const Dim3 &gpuIdx) const override {
-    return domSize_;
+
+    Dim3 ret = domSize_;
+    Dim3 idx = rankIdx * gpuDim_ + gpuIdx;
+    Dim3 rem = size_ % domSize_;
+
+    if (rem.x != 0 && idx.x >= rem.x) {
+      ret.x -= 1;
+    }
+    if (rem.y != 0 && idx.y >= rem.y) {
+      ret.y -= 1;
+    }
+    if (rem.z != 0 && idx.z >= rem.z) {
+      ret.z -= 1;
+    }
+
+    return ret;
   }
 
   PFP(const Dim3 &domSize, const int ranks, const int gpus)
@@ -158,7 +173,6 @@ public:
       n = n / 2;
     }
     for (int i = 3; i <= sqrt(n); i = i + 2) {
-      // While i divides n, print i and divide n
       while (n % i == 0) {
         result.push_back(i);
         n = n / i;

@@ -131,7 +131,7 @@ public:
     return *this;
   }
 
-  CUDA_CALLABLE_MEMBER Dim3 operator*(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 operator*(const Dim3 &rhs) const {
     Dim3 result = *this;
     result *= rhs;
     return result;
@@ -144,7 +144,7 @@ public:
     return *this;
   }
 
-  CUDA_CALLABLE_MEMBER Dim3 operator/(const Dim3 &rhs) {
+  CUDA_CALLABLE_MEMBER Dim3 operator/(const Dim3 &rhs) const {
     Dim3 result = *this;
     result /= rhs;
     return result;
