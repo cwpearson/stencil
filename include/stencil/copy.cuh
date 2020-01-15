@@ -5,7 +5,8 @@
 // pitch calculations
 // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html#group__CUDART__MEMORY_1g32bd7a39135594788a542ae72217775c
 
-static __global__ void pack(void *dst, const void *src, const Dim3 srcSize,
+static __global__ void pack(void *__restrict__ dst,
+                            const void *__restrict__ src, const Dim3 srcSize,
                             const size_t srcPitch, const Dim3 srcPos,
                             const Dim3 srcExtent, const size_t elemSize) {
   char *cDst = reinterpret_cast<char *>(dst);
@@ -32,9 +33,10 @@ static __global__ void pack(void *dst, const void *src, const Dim3 srcSize,
   }
 }
 
-static __global__ void unpack(void *dst, const Dim3 dstSize,
+static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
                               const size_t dstPitch, const Dim3 dstPos,
-                              const Dim3 dstExtent, const void *src,
+                              const Dim3 dstExtent,
+                              const void *__restrict__ src,
                               const size_t elemSize) {
 
   char *cDst = reinterpret_cast<char *>(dst);
@@ -56,6 +58,47 @@ static __global__ void unpack(void *dst, const Dim3 dstSize,
         // xo,
         //        yo, zo, oi);
         memcpy(&cDst[oi * elemSize], &cSrc[ii * elemSize], elemSize);
+      }
+    }
+  }
+}
+
+// take the 3D region src[srcPos...srcPos+extent] and translate it to the 3D
+// region dst[dstPos...dstPos+extent]
+static __global__ void
+translate(void *__restrict__ dst, const Dim3 dstPos,
+          const void *__restrict__ src, const Dim3 srcPos,
+          const Dim3 size,   // the size of the src/dst allocation
+          const Dim3 extent, // the extent of the region to be copied
+          const size_t elemSize) {
+
+  char *cDst = reinterpret_cast<char *>(dst);
+  const char *cSrc = reinterpret_cast<const char *>(src);
+
+  const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
+  const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
+  const size_t tx = blockDim.x * blockIdx.x + threadIdx.x;
+
+  const Dim3 dstStop = dstPos + extent;
+
+  for (size_t z = tz; z < extent.z; z += blockDim.z * gridDim.z) {
+    for (size_t y = ty; y < extent.y; y += blockDim.y * gridDim.y) {
+      for (size_t x = tx; x < extent.x; x += blockDim.x * gridDim.x) {
+        // input coorindates
+        size_t zi = z + srcPos.z;
+        size_t yi = y + srcPos.y;
+        size_t xi = x + srcPos.x;
+        // output coordinates
+        size_t zo = z + dstPos.z;
+        size_t yo = y + dstPos.y;
+        size_t xo = x + dstPos.x;
+        // linearized
+        size_t lo = zo * size.y * size.x + yo * size.x + xo;
+        size_t li = zi * size.y * size.x + yi * size.x + xi;
+        // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
+        // xo,
+        //        yo, zo, oi);
+        memcpy(&cDst[lo * elemSize], &cSrc[li * elemSize], elemSize);
       }
     }
   }
