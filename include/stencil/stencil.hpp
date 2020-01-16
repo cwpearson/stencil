@@ -49,6 +49,9 @@ private:
   std::vector<DirectionMap<HaloSender *>> domainDirSender_;
   std::vector<DirectionMap<HaloRecver *>> domainDirRecver_;
 
+  // copiers for each direction in each domain
+  std::vector<DirectionMap<HaloCopier *>> domainDirCopier_;
+
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
 
@@ -145,7 +148,8 @@ public:
 
     MPI_Barrier(MPI_COMM_WORLD);
     if (0 == rank_) {
-	std::cerr << "split " << size_ << " into " << partition_->rank_dim() << "x" << partition_->gpu_dim() << "\n";
+      std::cerr << "split " << size_ << " into " << partition_->rank_dim()
+                << "x" << partition_->gpu_dim() << "\n";
     }
   }
 
@@ -220,9 +224,9 @@ public:
       auto &dirRecver = domainDirRecver_[di];
 
       // send/recv pairs for faces
-      for (const auto xDir : {-1,0,1}) {
-        for (const auto yDir : {-1,0,1}) {
-          for (const auto zDir : {-1,0,1}) {
+      for (const auto xDir : {-1, 0, 1}) {
+        for (const auto yDir : {-1, 0, 1}) {
+          for (const auto zDir : {-1, 0, 1}) {
             Dim3 dirVec(xDir, yDir, zDir);
             if (dirVec == Dim3(0, 0, 0)) {
               continue; // don't send in no direction

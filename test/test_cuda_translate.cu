@@ -34,29 +34,33 @@ TEMPLATE_TEST_CASE("translate", "[cuda]", int) {
   dim3 dimBlock(2, 2, 2);
 
   SECTION("0,0,0 -> 2,3,4") {
-    translate<<<dimGrid, dimBlock>>>(dst, Dim3(0, 0, 0), src, Dim3(0, 0, 0),
-                                     arrSz, Dim3(1, 1, 1), sizeof(TestType));
+    translate<<<dimGrid, dimBlock>>>(dst, Dim3(0, 0, 0), arrSz, src,
+                                     Dim3(0, 0, 0), arrSz, Dim3(1, 1, 1),
+                                     sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
     REQUIRE(dst[0] == 0);
   }
 
   SECTION("0,0,0 -> 2,3,4") {
-    translate<<<dimGrid, dimBlock>>>(dst, Dim3(2, 3, 4), src, Dim3(0, 0, 0),
-                                     arrSz, Dim3(1, 1, 1), sizeof(TestType));
+    translate<<<dimGrid, dimBlock>>>(dst, Dim3(2, 3, 4), arrSz, src,
+                                     Dim3(0, 0, 0), arrSz, Dim3(1, 1, 1),
+                                     sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
     REQUIRE(dst[59] == 0);
   }
 
   SECTION("2,3,4 -> 1,1,1") {
-    translate<<<dimGrid, dimBlock>>>(dst, Dim3(1, 1, 1), src, Dim3(2, 3, 4),
-                                     arrSz, Dim3(1, 1, 1), sizeof(TestType));
+    translate<<<dimGrid, dimBlock>>>(dst, Dim3(1, 1, 1), arrSz, src,
+                                     Dim3(2, 3, 4), arrSz, Dim3(1, 1, 1),
+                                     sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
     REQUIRE(dst[1 * (4 * 3) + 1 * (3) + 1] == 59);
   }
 
   SECTION("1,2,3 [2x2x2] -> 1,1,1") {
-    translate<<<dimGrid, dimBlock>>>(dst, Dim3(1, 1, 1), src, Dim3(1, 2, 3),
-                                     arrSz, Dim3(2, 2, 2), sizeof(TestType));
+    translate<<<dimGrid, dimBlock>>>(dst, Dim3(1, 1, 1), arrSz, src,
+                                     Dim3(1, 2, 3), arrSz, Dim3(2, 2, 2),
+                                     sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 #define _at(x, y, z) dst[z * (4 * 3) + y * (3) + x]
 #define _val(x, y, z) (z * (4 * 3) + y * (3) + x)

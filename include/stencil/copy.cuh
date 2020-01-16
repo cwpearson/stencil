@@ -65,10 +65,10 @@ static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
 
 // take the 3D region src[srcPos...srcPos+extent] and translate it to the 3D
 // region dst[dstPos...dstPos+extent]
+// srcSize and dstSize may not be the same
 static __global__ void
-translate(void *__restrict__ dst, const Dim3 dstPos,
-          const void *__restrict__ src, const Dim3 srcPos,
-          const Dim3 size,   // the size of the src/dst allocation
+translate(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
+          const void *__restrict__ src, const Dim3 srcPos, const Dim3 srcSize,
           const Dim3 extent, // the extent of the region to be copied
           const size_t elemSize) {
 
@@ -93,8 +93,8 @@ translate(void *__restrict__ dst, const Dim3 dstPos,
         size_t yo = y + dstPos.y;
         size_t xo = x + dstPos.x;
         // linearized
-        size_t lo = zo * size.y * size.x + yo * size.x + xo;
-        size_t li = zi * size.y * size.x + yi * size.x + xi;
+        size_t lo = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
+        size_t li = zi * srcSize.y * srcSize.x + yi * srcSize.x + xi;
         // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
         // xo,
         //        yo, zo, oi);
