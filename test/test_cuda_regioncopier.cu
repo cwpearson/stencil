@@ -3,8 +3,7 @@
 #include "stencil/local_domain.cuh"
 #include "stencil/tx_cuda.cuh"
 
-TEMPLATE_TEST_CASE("region copier", "[cuda][template]", int,
-                   double) {
+TEMPLATE_TEST_CASE("region copier", "[cuda][template]", int, double) {
 
   const Dim3 sz(30, 40, 50);
   const int gpu = 0;
@@ -26,7 +25,7 @@ TEMPLATE_TEST_CASE("region copier", "[cuda][template]", int,
 
     RegionCopier copier(d1, d0, dir);
     copier.allocate();
-    copier.copy();
+    copier.send();
     copier.wait();
   }
 
@@ -35,7 +34,7 @@ TEMPLATE_TEST_CASE("region copier", "[cuda][template]", int,
 
     RegionCopier copier(d1, d0, dir);
     copier.allocate();
-    copier.copy();
+    copier.send();
     copier.wait();
   }
 
@@ -44,7 +43,7 @@ TEMPLATE_TEST_CASE("region copier", "[cuda][template]", int,
 
     RegionCopier copier(d1, d0, dir);
     copier.allocate();
-    copier.copy();
+    copier.send();
     copier.wait();
   }
 }
