@@ -111,15 +111,20 @@ public:
 
     for (int src = 0; src < count; ++src) {
       for (int dst = 0; dst < count; ++dst) {
-        CUDA_RUNTIME(cudaSetDevice(src))
-        cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
-        if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+        if (src == dst) {
           peerAccess_[src][dst] = true;
           std::cout << src << " -> " << dst << " peer access\n";
-        } else if (cudaErrorInvalidDevice) {
-          peerAccess_[src][dst] = false;
         } else {
-          assert(0);
+          CUDA_RUNTIME(cudaSetDevice(src))
+          cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
+          if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+            peerAccess_[src][dst] = true;
+            std::cout << src << " -> " << dst << " peer access\n";
+          } else if (cudaErrorInvalidDevice) {
+            peerAccess_[src][dst] = false;
+          } else {
+            assert(0);
+          }
         }
       }
     }
