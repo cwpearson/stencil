@@ -83,3 +83,20 @@ public:
 
   virtual ~Recver() {}
 };
+
+class Copier {
+public:
+  /*! prepare to copy n bytes
+   */
+  virtual void resize(const size_t n) = 0;
+
+  /* copy from src to dst
+   */
+  virtual void copy(void *dst, const void *src) = 0;
+
+  /*! block until copy is complete
+   */
+  virtual void wait() = 0;
+
+  virtual ~Copier() {}
+};
