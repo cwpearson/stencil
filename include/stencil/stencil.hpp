@@ -244,8 +244,6 @@ public:
             // logical GPU number, not device ID
             int srcGPU = partition_->get_gpu(srcIdx);
             int dstGPU = partition_->get_gpu(dstIdx);
-            int srcCudaId = gpus_[srcGPU];
-            int dstCudaId = gpus_[dstGPU];
             int srcRank = partition_->get_rank(srcIdx);
             int dstRank = partition_->get_rank(dstIdx);
 
@@ -256,16 +254,19 @@ public:
             // determine how to send face in that direction
             HaloSender *sender = nullptr;
 
-            if (rank_ == dstRank && peerAccess_[srcCudaId][dstCudaId]) {
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " send same rank and peer access\n";
-              LocalDomain &dstDomain = domains_[dstGPU];
-              sender = new RegionCopier(myDomain, dstDomain, dirVec);
-            } else if (rank_ == dstRank) {
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " send same rank, no peer access\n";
-              sender = new RegionSender<AnySender>(myDomain, rank_, myGPU,
-                                                   dstRank, dstGPU, dirVec);
+            if (rank_ == dstRank) {
+	      int myCudaId = myDomain.gpu();
+              int dstCudaId = domains_[dstGPU].gpu();
+	      if (peerAccess_[myCudaId][dstCudaId]) {
+                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                          << " send same rank and peer access\n";
+                sender = new RegionCopier(myDomain, domains_[dstGPU], dirVec);
+	      } else {
+                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                          << " send same rank\n";
+                sender = new RegionSender<AnySender>(myDomain, rank_, myGPU,
+                                                     dstRank, dstGPU, dirVec);
+	      }
             } else if (colocated_.count(dstRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send colocated\n";
@@ -284,11 +285,21 @@ public:
 
             // determine how to receive a face from that direction
             HaloRecver *recver = nullptr;
-            if (rank_ == srcRank && peerAccess_[srcCudaId][dstCudaId]) {
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " recv same rank\n";
-              // no reciever, copier is on send side
-            } else if (rank_ == dstRank) {
+            if (rank_ == srcRank ) {
+              int srcCudaId = domains_[srcGPU].gpu();
+	      int myCudaId = myDomain.gpu();
+	      if (peerAccess_[srcCudaId][myCudaId]) {
+                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                          << " recv same rank and peer access\n";
+                recver = nullptr; // no recver needed
+	      } else {
+                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
+                          << " recv same rank\n";
+              recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
+                                                   rank_, myGPU, dirVec);
+	      }
+            
+	    } else if (rank_ == dstRank) {
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv same rank, no peer access\n";
               recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
