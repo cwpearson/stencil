@@ -269,20 +269,6 @@ public:
   virtual void wait() = 0;
 };
 
-/*! Interface for copying part of a halo anywhere
- */
-class HaloCopier {
-public:
-  // prepare to send the appropriate number of bytes
-  virtual void allocate() = 0;
-
-  // recv the halo data
-  virtual void copy() = 0;
-
-  // wait for send to be complete
-  virtual void wait() = 0;
-};
-
 /*! Send a LocalDomain region using Sender
  */
 template <typename Sender> class RegionSender : public HaloSender {

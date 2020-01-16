@@ -49,9 +49,6 @@ private:
   std::vector<DirectionMap<HaloSender *>> domainDirSender_;
   std::vector<DirectionMap<HaloRecver *>> domainDirRecver_;
 
-  // copiers for each direction in each domain
-  std::vector<DirectionMap<HaloCopier *>> domainDirCopier_;
-
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
 
@@ -194,17 +191,15 @@ public:
       printf("DistributedDomain.realize(): finished creating LocalDomain\n");
     }
 
-    // initialize null senders, recievers, and copiers for each domain
+    // initialize null senders recvers for each domain
     domainDirSender_.resize(gpus_.size());
     domainDirRecver_.resize(gpus_.size());
-    domainDirCopier_.resize(gpus_.size());
     for (size_t domainIdx = 0; domainIdx < domains_.size(); ++domainIdx) {
       for (int z = 0; z < 3; ++z) {
         for (int y = 0; y < 3; ++y) {
           for (int x = 0; x < 3; ++x) {
             domainDirSender_[domainIdx].at(x, y, z) = nullptr;
             domainDirRecver_[domainIdx].at(x, y, z) = nullptr;
-            domainDirCopier_[domainIdx].at(x, y, z) = nullptr;
           }
         }
       }
