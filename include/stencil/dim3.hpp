@@ -16,6 +16,13 @@ public:
 
 public:
   CUDA_CALLABLE_MEMBER Dim3() {}
+
+#ifdef __CUDACC__
+  /* cuda dim3 ctor */
+  CUDA_CALLABLE_MEMBER Dim3(const dim3 other)
+      : x(other.x), y(other.y), z(other.z) {}
+#endif
+
   CUDA_CALLABLE_MEMBER Dim3(int64_t x, int64_t y, int64_t z)
       : x(x), y(y), z(z) {}
   /* copy ctor*/
@@ -124,6 +131,14 @@ public:
     return result;
   }
 
+  CUDA_CALLABLE_MEMBER Dim3 operator-(int64_t rhs) const {
+    Dim3 result = *this;
+    result.x -= rhs;
+    result.y -= rhs;
+    result.z -= rhs;
+    return result;
+  }
+
   CUDA_CALLABLE_MEMBER Dim3 &operator*=(const Dim3 &rhs) {
     x *= rhs.x;
     y *= rhs.y;
@@ -165,6 +180,11 @@ public:
   CUDA_CALLABLE_MEMBER bool operator!=(const Dim3 &rhs) const {
     return x != rhs.x || y != rhs.y || z == rhs.z;
   }
+
+#ifdef __CUDACC__
+  /* convertible to CUDA dim3 */
+  CUDA_CALLABLE_MEMBER operator dim3() const { return dim3(x, y, z); }
+#endif
 
   CUDA_CALLABLE_MEMBER Dim3 wrap(const Dim3 &lims) {
     if (x >= lims.x) {

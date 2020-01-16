@@ -500,8 +500,8 @@ private:
     assert(elemSize == dstDomain_->elem_size(dataIdx));
 
     // translate halo region to other
-    dim3 dimGrid(20, 20, 20);
-    dim3 dimBlock(32, 4, 4);
+    const dim3 dimBlock(32, 4, 4);
+    const dim3 dimGrid = (extent + (Dim3(dimBlock) - 1)) / Dim3(dimBlock);
 
     CUDA_RUNTIME(cudaSetDevice(srcDomain_->gpu()));
     translate<<<dimGrid, dimBlock, 0, stream>>>(
