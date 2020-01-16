@@ -53,6 +53,12 @@ To run specific tests
 test/test_cpu "<case name>" -c "<section name>"
 ```
 
+## Running the Astaroth-sim
+
+```
+mpirun -n 4 src/astaroth-sim
+```
+
 ## Profiling MPI
 
 ```
@@ -66,8 +72,14 @@ sshfs -o IdentityFile=/path/to/id_rsa user@host:/path /mount/location
 
 ## MCA Parameters
 
+Setting an MCA param
 ```
 mpirun --mca mpi_show_handle_leaks 1 -np 4 a.out
+```
+
+Checking for CUDA-Aware MPI support:
+```
+ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ```
 
 
