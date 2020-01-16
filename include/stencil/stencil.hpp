@@ -194,15 +194,17 @@ public:
       printf("DistributedDomain.realize(): finished creating LocalDomain\n");
     }
 
-    // initialize null senders and recvers for each domain
+    // initialize null senders, recievers, and copiers for each domain
     domainDirSender_.resize(gpus_.size());
     domainDirRecver_.resize(gpus_.size());
+    domainDirCopier_.resize(gpus_.size());
     for (size_t domainIdx = 0; domainIdx < domains_.size(); ++domainIdx) {
       for (int z = 0; z < 3; ++z) {
         for (int y = 0; y < 3; ++y) {
           for (int x = 0; x < 3; ++x) {
             domainDirSender_[domainIdx].at(x, y, z) = nullptr;
             domainDirRecver_[domainIdx].at(x, y, z) = nullptr;
+            domainDirCopier_[domainIdx].at(x, y, z) = nullptr;
           }
         }
       }
@@ -211,11 +213,12 @@ public:
     const Dim3 gpuDim = partition_->gpu_dim();
     const Dim3 rankDim = partition_->rank_dim();
 
-    // build senders and recvers for each domain
+    // create communication plan
+    nvtxRangePush("comm plan");
     for (size_t di = 0; di < domains_.size(); ++di) {
       assert(domains_.size() == domainIdx_.size());
 
-      auto &d = domains_[di];
+      auto &myDomain = domains_[di];
       const Dim3 myIdx = domainIdx_[di];
       const int myGPU = di; // logical GPU number, not device ID
       assert(rank_ == partition_->get_rank(myIdx));
@@ -251,21 +254,21 @@ public:
             // determine how to send face in that direction
             HaloSender *sender = nullptr;
 
-            if (rank_ == dstRank) { // both domains ownned by this rank
+            if (rank_ == dstRank) { // both domains owned by this rank
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send same rank\n";
-              sender = new RegionSender<AnySender>(d, rank_, myGPU, dstRank,
-                                                   dstGPU, dirVec);
+              LocalDomain &dstDomain = domains_[dstGPU];
+              sender = new RegionCopier(myDomain, dstDomain, dirVec);
             } else if (colocated_.count(dstRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send colocated\n";
-              sender = new RegionSender<AnySender>(d, rank_, myGPU, dstRank,
-                                                   dstGPU, dirVec);
+              sender = new RegionSender<AnySender>(myDomain, rank_, myGPU,
+                                                   dstRank, dstGPU, dirVec);
             } else { // domains on different nodes
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send diff nodes\n";
-              sender = new RegionSender<AnySender>(d, rank_, myGPU, dstRank,
-                                                   dstGPU, dirVec);
+              sender = new RegionSender<AnySender>(myDomain, rank_, myGPU,
+                                                   dstRank, dstGPU, dirVec);
             }
 
             std::cout << myIdx << " <- " << srcIdx << " dirVec=" << dirVec
@@ -277,31 +280,32 @@ public:
             if (rank_ == srcRank) { // both domains onwned by this rank
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv same rank\n";
-              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, rank_,
-                                                   myGPU, dirVec);
+              // no reciever, copier is on send side
             } else if (colocated_.count(srcRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv colocated\n";
-              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, rank_,
-                                                   myGPU, dirVec);
+              recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
+                                                   rank_, myGPU, dirVec);
             } else { // domains on different nodes
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv diff nodes\n";
-              recver = new RegionRecver<AnyRecver>(d, srcRank, srcGPU, rank_,
-                                                   myGPU, dirVec);
+              recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
+                                                   rank_, myGPU, dirVec);
             }
 
-            assert(sender != nullptr);
-            assert(recver != nullptr);
-
-            sender->allocate();
-            recver->allocate();
+            if (sender) {
+              sender->allocate();
+            }
+            if (recver) {
+              recver->allocate();
+            }
             dirSender.at_dir(dirVec.x, dirVec.y, dirVec.z) = sender;
             dirRecver.at_dir(dirVec.x, dirVec.y, dirVec.z) = recver;
           }
         }
       }
     }
+    nvtxRangePop(); // comm plan
   }
 
   /*!
