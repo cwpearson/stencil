@@ -137,6 +137,14 @@ public:
     return result;
   }
 
+  CUDA_CALLABLE_MEMBER Dim3 operator*(int64_t rhs) const {
+    Dim3 result = *this;
+    result.x *= rhs;
+    result.y *= rhs;
+    result.z *= rhs;
+    return result;
+  }
+
   CUDA_CALLABLE_MEMBER Dim3 &operator/=(const Dim3 &rhs) {
     x /= rhs.x;
     y /= rhs.y;
