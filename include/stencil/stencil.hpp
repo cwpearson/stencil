@@ -124,6 +124,7 @@ public:
             peerAccess_[src][dst] = false;
           } else {
             assert(0);
+            peerAccess_[src][dst] = false;
           }
         }
       }
@@ -326,6 +327,7 @@ public:
   */
   void exchange() {
     // issue all sends
+    nvtxRangePush("issue sends");
     for (auto &dirSenders : domainDirSender_) {
       for (int z = 0; z < 3; ++z) {
         for (int y = 0; y < 3; ++y) {
@@ -337,8 +339,10 @@ public:
         }
       }
     }
+    nvtxRangePop(); // issue sends
 
     // issue all recvs
+    nvtxRangePush("issue recvs");
     for (auto &dirRecvers : domainDirRecver_) {
       for (int z = 0; z < 3; ++z) {
         for (int y = 0; y < 3; ++y) {
@@ -350,8 +354,10 @@ public:
         }
       }
     }
+    nvtxRangePop();
 
     // wait for all sends and recvs
+    nvtxRangePush("wait");
     for (size_t domainIdx = 0; domainIdx < domains_.size(); ++domainIdx) {
       auto &dirSender = domainDirSender_[domainIdx];
       auto &dirRecver = domainDirRecver_[domainIdx];
@@ -368,6 +374,7 @@ public:
         }
       }
     }
+    nvtxRangePop(); // wait
 
     // wait for all ranks to be done
     MPI_Barrier(MPI_COMM_WORLD);
