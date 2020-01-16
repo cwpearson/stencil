@@ -482,7 +482,7 @@ public:
 
 /*! \brief Copy a LocalDomain region using using Copier
  */
-class RegionCopier : public HaloCopier {
+class RegionCopier : public HaloSender {
 private:
   const LocalDomain *srcDomain_, *dstDomain_;
 
@@ -541,14 +541,14 @@ public:
 
   /* async copy
    */
-  void copy() override {
+  void send() override {
     // insert copies into streams
     for (size_t i = 0; i < srcDomain_->num_data(); ++i) {
       copy_data(i);
     }
   }
 
-  // wait for copy()
+  // wait for send()
   virtual void wait() override {
     for (auto &s : streams_) {
       CUDA_RUNTIME(cudaStreamSynchronize(s))
