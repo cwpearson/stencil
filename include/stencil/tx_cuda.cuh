@@ -353,7 +353,9 @@ public:
     nvtxRangePop();
   }
 
-  void send() override { fut_ = std::async(&RegionSender::send_impl, this); }
+  void send() override {
+    fut_ = std::async(std::launch::async, &RegionSender::send_impl, this);
+  }
 
   // wait for send to be complete
   void wait() override {
@@ -445,7 +447,8 @@ public:
 
   void recv() override {
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
-      futs_[dataIdx] = std::async(&RegionRecver::recv_impl, this, dataIdx);
+      futs_[dataIdx] = std::async(std::launch::async, &RegionRecver::recv_impl,
+                                  this, dataIdx);
     }
   }
 
@@ -538,6 +541,130 @@ public:
   virtual void wait() override {
     for (auto &s : streams_) {
       CUDA_RUNTIME(cudaStreamSynchronize(s))
+    }
+  }
+};
+
+/*! \brief Copy a LocalDomain region using pack/memcpy/unpack
+
+For GPUs owned by the same process without peer access
+ */
+class PackMemcpyCopier : public HaloSender {
+private:
+  const LocalDomain *srcDomain_, *dstDomain_;
+
+  Dim3 dir_;
+
+  // one stream per domain data
+  std::vector<RcStream> srcStreams_;
+  std::vector<RcStream> dstStreams_;
+
+  // one buffer on each src and dst GPU
+  std::vector<void *> dstBufs_;
+  std::vector<void *> srcBufs_;
+
+  // one event per domain data to sync src and dst GPU
+  std::vector<cudaEvent_t> events_;
+
+  /* async copy data field dataIdx
+   */
+  void copy_data(size_t dataIdx) {
+
+    const Dim3 srcPos = srcDomain_->halo_pos(dir_, false /*compute region*/);
+    const Dim3 dstPos = dstDomain_->halo_pos(dir_, true /*halo region*/);
+
+    const Dim3 srcSize = srcDomain_->raw_size();
+    const Dim3 dstSize = dstDomain_->raw_size();
+
+    const Dim3 extent = srcDomain_->halo_extent(dir_);
+    assert(extent == dstDomain_->halo_extent(dir_ * -1));
+
+    assert(srcDomain_->num_data() == dstDomain_->num_data());
+
+    char *dst = dstDomain_->curr_data(dataIdx);
+    char *src = srcDomain_->curr_data(dataIdx);
+
+    size_t elemSize = srcDomain_->elem_size(dataIdx);
+    assert(elemSize == dstDomain_->elem_size(dataIdx));
+
+    const dim3 dimBlock(32, 4, 4);
+    const dim3 dimGrid = (extent + (Dim3(dimBlock) - 1)) / Dim3(dimBlock);
+
+    // pack on source
+    CUDA_RUNTIME(cudaSetDevice(srcDomain_->gpu()));
+    pack<<<dimGrid, dimBlock, 0, srcStreams_[dataIdx]>>>(
+        srcBufs_[dataIdx], srcDomain_->curr_data(dataIdx), srcSize, 0 /*pitch*/,
+        srcPos, extent, elemSize);
+
+    // copy to dst
+    size_t numBytes = srcDomain_->halo_bytes(dir_, dataIdx);
+    CUDA_RUNTIME(cudaMemcpyAsync(dstBufs_[dataIdx], srcBufs_[dataIdx], numBytes,
+                                 cudaMemcpyDefault, srcStreams_[dataIdx]));
+
+    // record event in src stream
+    CUDA_RUNTIME(cudaEventRecord(events_[dataIdx], srcStreams_[dataIdx]));
+
+    // cause dst stream to wait on src event
+    CUDA_RUNTIME(cudaStreamWaitEvent(dstStreams_[dataIdx], events_[dataIdx],
+                                     0 /*flags*/));
+
+    // unpack on dst
+    CUDA_RUNTIME(cudaSetDevice(dstDomain_->gpu()));
+    unpack<<<dimGrid, dimBlock, 0, dstStreams_[dataIdx]>>>(
+        dstDomain_->curr_data(dataIdx), dstSize, 0 /*pitch*/, dstPos, extent,
+        dstBufs_[dataIdx], elemSize);
+  }
+
+public:
+  PackMemcpyCopier(const LocalDomain &dstDomain, const LocalDomain &srcDomain,
+                   const Dim3 &dir)
+      : srcDomain_(&srcDomain), dstDomain_(&dstDomain), dir_(dir) {
+
+    assert(dstDomain.num_data() == srcDomain.num_data());
+
+    // associate domain data array a src stream, a dst stream, and an event
+    for (size_t di = 0; di < srcDomain.num_data(); ++di) {
+      int srcGpu = srcDomain_->gpu();
+      CUDA_RUNTIME(cudaSetDevice(srcGpu));
+      srcStreams_.push_back(RcStream(srcGpu));
+      cudaEvent_t event;
+      CUDA_RUNTIME(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+      events_.push_back(event);
+
+      int dstGpu = dstDomain_->gpu();
+      CUDA_RUNTIME(cudaSetDevice(dstGpu));
+      dstStreams_.push_back(RcStream(dstGpu));
+    }
+  }
+
+  virtual void allocate() override {
+    assert(0 && "unimplemented");
+    for (size_t dataIdx = 0; dataIdx < srcDomain_->num_data(); ++dataIdx) {
+      size_t numBytes = srcDomain_->halo_bytes(dir_, dataIdx);
+      void *p = nullptr;
+      CUDA_RUNTIME(cudaSetDevice(srcDomain_->gpu()));
+      CUDA_RUNTIME(cudaMalloc(&p, numBytes));
+      srcBufs_.push_back(p);
+      p = nullptr;
+      CUDA_RUNTIME(cudaSetDevice(dstDomain_->gpu()));
+      CUDA_RUNTIME(cudaMalloc(&p, numBytes));
+      dstBufs_.push_back(p);
+    }
+  }
+
+  /* async copy
+   */
+  void send() override {
+    // insert copies into streams
+    for (size_t i = 0; i < srcDomain_->num_data(); ++i) {
+      copy_data(i);
+    }
+  }
+
+  // wait for send()
+  virtual void wait() override {
+    for (auto &s : dstStreams_) {
+      CUDA_RUNTIME(cudaStreamSynchronize(s));
     }
   }
 };
