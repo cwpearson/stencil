@@ -256,18 +256,18 @@ public:
             HaloSender *sender = nullptr;
 
             if (rank_ == dstRank) {
-	      int myCudaId = myDomain.gpu();
+              int myCudaId = myDomain.gpu();
               int dstCudaId = domains_[dstGPU].gpu();
-	      if (peerAccess_[myCudaId][dstCudaId]) {
+              if (peerAccess_[myCudaId][dstCudaId]) {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " send same rank and peer access\n";
                 sender = new RegionCopier(myDomain, domains_[dstGPU], dirVec);
-	      } else {
+              } else {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " send same rank\n";
                 sender = new RegionSender<AnySender>(myDomain, rank_, myGPU,
                                                      dstRank, dstGPU, dirVec);
-	      }
+              }
             } else if (colocated_.count(dstRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " send colocated\n";
@@ -286,21 +286,21 @@ public:
 
             // determine how to receive a face from that direction
             HaloRecver *recver = nullptr;
-            if (rank_ == srcRank ) {
+            if (rank_ == srcRank) {
               int srcCudaId = domains_[srcGPU].gpu();
-	      int myCudaId = myDomain.gpu();
-	      if (peerAccess_[srcCudaId][myCudaId]) {
+              int myCudaId = myDomain.gpu();
+              if (peerAccess_[srcCudaId][myCudaId]) {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " recv same rank and peer access\n";
                 recver = nullptr; // no recver needed
-	      } else {
+              } else {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " recv same rank\n";
-              recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
-                                                   rank_, myGPU, dirVec);
-	      }
-            
-	    } else if (rank_ == dstRank) {
+                recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
+                                                     rank_, myGPU, dirVec);
+              }
+
+            } else if (rank_ == dstRank) {
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv same rank, no peer access\n";
               recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
@@ -333,39 +333,65 @@ public:
     nvtxRangePop(); // comm plan
   }
 
+  /* issue async sends for a domain
+   */
+  void send(const size_t domainIdx) {
+    assert(domainIdx < domainDirSender_.size());
+    auto &dirSenders = domainDirSender_[domainIdx];
+    for (int z = 0; z < 3; ++z) {
+      for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+          if (auto sender = dirSenders.at(x, y, z)) {
+            sender->send();
+          }
+        }
+      }
+    }
+  }
+
+  /* issue async recvs for a domain
+   */
+  void recv(const size_t domainIdx) {
+    assert(domainIdx < domainDirRecver_.size());
+    auto &dirRecvers = domainDirRecver_[domainIdx];
+    for (int z = 0; z < 3; ++z) {
+      for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 3; ++x) {
+          if (auto recver = dirRecvers.at(x, y, z)) {
+            recver->recv();
+          }
+        }
+      }
+    }
+  }
+
   /*!
   do a halo exchange and return
   */
   void exchange() {
+
+    std::vector<std::future<void>> sends(domains_.size());
+
     // issue all sends
-    nvtxRangePush("issue sends");
-    for (auto &dirSenders : domainDirSender_) {
-      for (int z = 0; z < 3; ++z) {
-        for (int y = 0; y < 3; ++y) {
-          for (int x = 0; x < 3; ++x) {
-            if (auto sender = dirSenders.at(x, y, z)) {
-              sender->send();
-            }
-          }
-        }
-      }
+    for (size_t domainIdx = 0; domainIdx < domainDirSender_.size();
+         ++domainIdx) {
+      nvtxRangePush("issue sends");
+      send(domainIdx);
+      nvtxRangePop(); // issue sends
     }
-    nvtxRangePop(); // issue sends
 
     // issue all recvs
-    nvtxRangePush("issue recvs");
-    for (auto &dirRecvers : domainDirRecver_) {
-      for (int z = 0; z < 3; ++z) {
-        for (int y = 0; y < 3; ++y) {
-          for (int x = 0; x < 3; ++x) {
-            if (auto recver = dirRecvers.at(x, y, z)) {
-              recver->recv();
-            }
-          }
-        }
-      }
+    for (size_t domainIdx = 0; domainIdx < domainDirSender_.size();
+         ++domainIdx) {
+      nvtxRangePush("issue recv");
+      recv(domainIdx);
+      nvtxRangePop(); // issue sends
     }
-    nvtxRangePop();
+
+    // wait for all sends and recvs to be issued
+    for (size_t domainIdx = 0; domainIdx < domainDirSender_.size();
+         ++domainIdx) {
+    }
 
     // wait for all sends and recvs
     nvtxRangePush("wait");
