@@ -6,6 +6,7 @@ if (CMAKE_CUDA_COMPILER)
       test_cuda_gpu_topo.cu 
       test_cuda_local_domain.cu 
       test_cuda_pack.cu 
+      test_cuda_packmemcpycopier.cu
       test_cuda_rcstream.cu
       test_cuda_regioncopier.cu
       test_cuda_regiontx.cu

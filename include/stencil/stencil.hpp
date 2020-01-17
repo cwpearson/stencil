@@ -261,12 +261,12 @@ public:
               if (peerAccess_[myCudaId][dstCudaId]) {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " send same rank and peer access\n";
-                sender = new RegionCopier(myDomain, domains_[dstGPU], dirVec);
+                sender = new RegionCopier(domains_[dstGPU], myDomain, dirVec);
               } else {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " send same rank\n";
-                sender = new RegionSender<AnySender>(myDomain, rank_, myGPU,
-                                                     dstRank, dstGPU, dirVec);
+                sender =
+                    new PackMemcpyCopier(domains_[dstGPU], myDomain, dirVec);
               }
             } else if (colocated_.count(dstRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
@@ -292,12 +292,11 @@ public:
               if (peerAccess_[srcCudaId][myCudaId]) {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " recv same rank and peer access\n";
-                recver = nullptr; // no recver needed
+                recver = nullptr; // no recver needed for RegionCopier
               } else {
                 std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                           << " recv same rank\n";
-                recver = new RegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
-                                                     rank_, myGPU, dirVec);
+                recver = nullptr; // no recver needed for PackMemcpyCopier
               }
 
             } else if (rank_ == dstRank) {
