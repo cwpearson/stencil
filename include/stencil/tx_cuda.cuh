@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <future>
+#include <sstream>
 
 #include <mpi.h>
 
@@ -501,6 +502,11 @@ public:
     assert(dir_.x >= -1 && dir.x <= 1);
     assert(dir_.y >= -1 && dir.y <= 1);
     assert(dir_.z >= -1 && dir.z <= 1);
+
+    // std::stringstream ss;
+    // ss << "RegionSender" << dir_;
+    // nvtxNameCudaStreamA(stream_, ss.str().c_str());
+
   }
 
   virtual void allocate() override {
@@ -514,6 +520,11 @@ public:
   }
 
   void send_impl() {
+
+    std::stringstream ss;
+    ss << "RegionSender" << dir_;
+    nvtxNameOsThread(pthread_self(), ss.str().c_str());
+
     nvtxRangePush("RegionSender::send_impl");
 
     assert(devBuf_ && "not allocated");
