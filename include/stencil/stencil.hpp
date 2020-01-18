@@ -369,27 +369,30 @@ public:
   */
   void exchange() {
 
+    // the sends and recvs for each domain issued async
     std::vector<std::future<void>> sends(domains_.size());
+    std::vector<std::future<void>> recvs(domains_.size());
 
     // issue all sends
-    for (size_t domainIdx = 0; domainIdx < domainDirSender_.size();
-         ++domainIdx) {
-      nvtxRangePush("issue sends");
-      send(domainIdx);
-      nvtxRangePop(); // issue sends
+    nvtxRangePush("issue sends");
+    for (size_t idx = 0; idx < domainDirSender_.size(); ++idx) {
+      sends[idx] =
+          std::async(std::launch::async, &DistributedDomain::send, this, idx);
     }
+    nvtxRangePop(); // issue sends
 
     // issue all recvs
-    for (size_t domainIdx = 0; domainIdx < domainDirSender_.size();
-         ++domainIdx) {
-      nvtxRangePush("issue recv");
-      recv(domainIdx);
-      nvtxRangePop(); // issue sends
+    nvtxRangePush("issue recvs");
+    for (size_t idx = 0; idx < domainDirSender_.size(); ++idx) {
+      recvs[idx] =
+          std::async(std::launch::async, &DistributedDomain::recv, this, idx);
     }
+    nvtxRangePop(); // issue recvs
 
     // wait for all sends and recvs to be issued
-    for (size_t domainIdx = 0; domainIdx < domainDirSender_.size();
-         ++domainIdx) {
+    for (size_t idx = 0; idx < domainDirSender_.size(); ++idx) {
+      sends[idx].wait();
+      recvs[idx].wait();
     }
 
     // wait for all sends and recvs
