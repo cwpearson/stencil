@@ -21,9 +21,9 @@ int main(int argc, char **argv) {
   512^3 on Volta  20.1ms
   */
 
-  size_t x = 64 * pow(size, 0.333);
-  size_t y = 64 * pow(size, 0.333);
-  size_t z = 64 * pow(size, 0.333);
+  size_t x = 512 * pow(size, 0.333);
+  size_t y = 512 * pow(size, 0.333);
+  size_t z = 512 * pow(size, 0.333);
   size_t kernelMillis = 34;
 
   size_t radius = 3;
