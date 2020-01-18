@@ -3,7 +3,7 @@
 #include "stencil/local_domain.cuh"
 #include "stencil/tx_cuda.cuh"
 
-TEMPLATE_TEST_CASE("region sender recver", "[cuda][mpi][template]", int,
+TEMPLATE_TEST_CASE("RegionSender RegionRecver", "[cuda][mpi][template]", int,
                    double) {
 
   const Dim3 sz(30, 40, 50);
@@ -30,8 +30,8 @@ TEMPLATE_TEST_CASE("region sender recver", "[cuda][mpi][template]", int,
     std::cerr << "start +x +y +z corner test\n";
     Dim3 dir(1, 1, 1);
 
-    RegionSender<AnySender> sender(d0, srcRank, srcGPU, dstRank, dstGPU, dir);
-    RegionRecver<AnyRecver> recver(d1, srcRank, srcGPU, dstRank, dstGPU, dir);
+    RegionSender sender(d0, srcRank, srcGPU, dstRank, dstGPU, dir);
+    RegionRecver recver(d1, srcRank, srcGPU, dstRank, dstGPU, dir);
 
     sender.allocate();
     recver.allocate();
@@ -45,8 +45,8 @@ TEMPLATE_TEST_CASE("region sender recver", "[cuda][mpi][template]", int,
     std::cerr << "start +x +y edge test\n";
     Dim3 dir(1, 1, 0);
 
-    RegionSender<AnySender> sender(d0, srcRank, srcGPU, dstRank, dstGPU, dir);
-    RegionRecver<AnyRecver> recver(d1, srcRank, srcGPU, dstRank, dstGPU, dir);
+    RegionSender sender(d0, srcRank, srcGPU, dstRank, dstGPU, dir);
+    RegionRecver recver(d1, srcRank, srcGPU, dstRank, dstGPU, dir);
 
     sender.allocate();
     recver.allocate();
@@ -60,8 +60,8 @@ TEMPLATE_TEST_CASE("region sender recver", "[cuda][mpi][template]", int,
     std::cerr << "start +x face test\n";
     Dim3 dir(1, 0, 0);
 
-    RegionSender<AnySender> sender(d0, srcRank, srcGPU, dstRank, dstGPU, dir);
-    RegionRecver<AnyRecver> recver(d1, srcRank, srcGPU, dstRank, dstGPU, dir);
+    RegionSender sender(d0, srcRank, srcGPU, dstRank, dstGPU, dir);
+    RegionRecver recver(d1, srcRank, srcGPU, dstRank, dstGPU, dir);
 
     sender.allocate();
     recver.allocate();

@@ -271,7 +271,7 @@ public:
 
 /*! Send a LocalDomain region using Sender
  */
-template <typename Sender> class RegionSender : public HaloSender {
+template <typename Sender> class MTRegionSender : public HaloSender {
 private:
   const LocalDomain *domain_; // the domain we are sending from
   Dim3 dir_;                  // the direction vector of the send
@@ -286,8 +286,8 @@ private:
   std::vector<RcStream> streams_;
 
 public:
-  RegionSender(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
-               size_t dstRank, size_t dstGPU, Dim3 dir)
+  MTRegionSender(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
+                 size_t dstRank, size_t dstGPU, Dim3 dir)
       : domain_(&domain), dir_(dir) {
 
     assert(dir_.x >= -1 && dir.x <= 1);
@@ -318,7 +318,7 @@ public:
   }
 
   void send_impl() {
-    nvtxRangePush("RegionSender::send_impl");
+    nvtxRangePush("MTRegionSender::send_impl");
     assert(bufs_.size() == senders_.size() && "was allocate called?");
     const Dim3 haloPos = domain_->halo_pos(dir_, false /*compute region*/);
     const Dim3 haloExtent = domain_->halo_extent(dir_);
@@ -344,7 +344,8 @@ public:
 
 // wait for sends
 #ifdef REGION_LOUD
-    std::cerr << "RegionSender:send_impl(): " << dir_ << " wait for senders\n";
+    std::cerr << "MTRegionSender:send_impl(): " << dir_
+              << " wait for senders\n";
 #endif
     for (auto &s : senders_) {
       s.wait();
@@ -354,7 +355,7 @@ public:
   }
 
   void send() override {
-    fut_ = std::async(std::launch::async, &RegionSender::send_impl, this);
+    fut_ = std::async(std::launch::async, &MTRegionSender::send_impl, this);
   }
 
   // wait for send to be complete
@@ -362,7 +363,7 @@ public:
     if (fut_.valid()) {
       fut_.wait();
 #ifdef REGION_LOUD
-      std::cerr << "RegionSender::wait(): " << dir_ << " done\n";
+      std::cerr << "MTRegionSender::wait(): " << dir_ << " done\n";
 #endif
     } else {
       assert(0 && "wait called before send()");
@@ -372,7 +373,7 @@ public:
 
 /*! \brief Receive a LocalDomain face using Recver
  */
-template <typename Recver> class RegionRecver : public HaloRecver {
+template <typename Recver> class MTRegionRecver : public HaloRecver {
 private:
   const LocalDomain *domain_; // the domain we are receiving into
   Dim3 dir_;                  // the direction of the send we are recving
@@ -387,8 +388,8 @@ private:
   std::vector<RcStream> streams_;
 
 public:
-  RegionRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
-               size_t dstRank, size_t dstGPU, const Dim3 &dir)
+  MTRegionRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
+                 size_t dstRank, size_t dstGPU, const Dim3 &dir)
       : domain_(&domain), dir_(dir) {
 
     assert(dir_.x >= -1 && dir.x <= 1);
@@ -447,8 +448,8 @@ public:
 
   void recv() override {
     for (size_t dataIdx = 0; dataIdx < domain_->num_data(); ++dataIdx) {
-      futs_[dataIdx] = std::async(std::launch::async, &RegionRecver::recv_impl,
-                                  this, dataIdx);
+      futs_[dataIdx] = std::async(std::launch::async,
+                                  &MTRegionRecver::recv_impl, this, dataIdx);
     }
   }
 
@@ -460,11 +461,221 @@ public:
       if (fut.valid()) {
         fut.wait();
 #ifdef REGION_LOUD
-        std::cerr << "RegionRecver::wait(): " << dir_ << " done\n";
+        std::cerr << "MTRegionRecver::wait(): " << dir_ << " done\n";
 #endif
       } else {
         assert(0 && "wait called before recv");
       }
+    }
+  }
+};
+
+/*! \brief Send a LocalDomain region
+
+  All data fields are packed into a single message
+ */
+class RegionSender : public HaloSender {
+private:
+  const LocalDomain *domain_; // the domain we are sending from
+  int srcRank_;
+  int srcGPU_;
+  int dstRank_;
+  int dstGPU_;
+  Dim3 dir_; // the direction vector of the send
+
+  std::future<void> fut_; // future for asyc call to send_impl
+
+  // one flattened buffer with all domain data
+  char *devBuf_;
+  std::vector<char *> hostBuf_;
+
+  // stream for packs and copy
+  RcStream stream_;
+
+public:
+  RegionSender(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
+               size_t dstRank, size_t dstGPU, Dim3 dir)
+      : domain_(&domain), srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank),
+        dstGPU_(dstGPU), dir_(dir), stream_(domain.gpu()) {
+
+    assert(dir_.x >= -1 && dir.x <= 1);
+    assert(dir_.y >= -1 && dir.y <= 1);
+    assert(dir_.z >= -1 && dir.z <= 1);
+  }
+
+  virtual void allocate() override {
+    size_t totalBytes = 0;
+    for (size_t i = 0; i < domain_->num_data(); ++i) {
+      totalBytes += domain_->halo_bytes(dir_, i);
+    }
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    hostBuf_.resize(totalBytes);
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, totalBytes));
+  }
+
+  void send_impl() {
+    nvtxRangePush("RegionSender::send_impl");
+    assert(bufs_.size() == senders_.size() && "was allocate called?");
+    const Dim3 haloPos = domain_->halo_pos(dir_, false /*compute region*/);
+    const Dim3 haloExtent = domain_->halo_extent(dir_);
+
+    size_t bufOffset = 0;
+    assert(senders_.size() == domain_->num_data());
+    const Dim3 rawSz = domain_->raw_size();
+    // pack all regions into device buffer
+    nvtxRangePush("RegionSender::send_impl() pack");
+    for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
+      const char *src = domain_->curr_data(idx);
+      const size_t elemSize = domain_->elem_size(idx);
+
+      // pack into buffer
+      dim3 dimGrid(20, 20, 20);
+      dim3 dimBlock(32, 4, 4);
+
+      assert(stream.device() == domain_->gpu());
+      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+      pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
+                                              0 /*pitch*/, haloPos, haloExtent,
+                                              elemSize);
+      bufOffset += domain_->halo_bytes(dir_, idx);
+    }
+    nvtxRangePop(); // RegionSender::send_impl() pack
+
+    // copy to host buffer
+    nvtxRangePush("RegionSender::send_impl() cudaMemcpyAsync");
+    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), devBuf_, hostBuf_.size(),
+                                 cudaMemcpyDefault, stream_));
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    nvtxRangePop(); // RegionSender::send_impl() cudaMemcpyAsync
+
+    // Send to destination rank
+    const int tag = make_tag(dstGPU_, dir_);
+    nvtxRangePush("RegionSender::send_impl() MPI_Send");
+    MPI_Send(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank_, tag,
+             MPI_COMM_WORLD);
+    nvtxRangePop(); // RegionSender::send_impl() MPI_Send
+
+    nvtxRangePop(); // RegionSender::send_impl
+  }
+
+  void send() override {
+    fut_ = std::async(std::launch::async, &RegionSender::send_impl, this);
+  }
+
+  // wait for send to be complete
+  void wait() override {
+    if (fut_.valid()) {
+      fut_.wait();
+#ifdef REGION_LOUD
+      std::cerr << "RegionSender::wait(): " << dir_ << " done\n";
+#endif
+    } else {
+      assert(0 && "wait called before send()");
+    }
+  }
+};
+
+/*! \brief Receive a LocalDomain region
+
+    All data fields come in a single message
+ */
+class RegionRecver : public HaloRecver {
+private:
+  const LocalDomain *domain_; // the domain we are receiving into
+  int srcRank_;
+  int srcGPU_;
+  int dstRank_;
+  int dstGPU_;
+  Dim3 dir_; // the direction vector of the send we are recving
+
+  std::future<void> fut_; // future for asyc call to recv_impl
+
+  // one flattened buffer with all domain data
+  char *devBuf_;
+  std::vector<char *> hostBuf_;
+
+  // stream for copy and unpacks
+  RcStream stream_;
+
+public:
+  RegionRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
+               size_t dstRank, size_t dstGPU, const Dim3 &dir)
+      : domain_(&domain), srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank),
+        dstGPU_(dstGPU), dir_(dir), stream_(domain.gpu()) {
+
+    assert(dir_.x >= -1 && dir.x <= 1);
+    assert(dir_.y >= -1 && dir.y <= 1);
+    assert(dir_.z >= -1 && dir.z <= 1);
+  }
+
+  virtual void allocate() override {
+    size_t totalBytes = 0;
+    for (size_t i = 0; i < domain_->num_data(); ++i) {
+      totalBytes += domain_->halo_bytes(dir_, i);
+    }
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    hostBuf_.resize(totalBytes);
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, totalBytes));
+  }
+
+  void recv_impl() {
+
+    // MPI_Recv
+    const int tag = make_tag(dstGPU_, dir_);
+    nvtxRangePush("RegionRecver::recv_impl() MPI_Recv");
+    MPI_Recv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank_, tag,
+             MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    nvtxRangePop(); // RegionRecver::recv_impl() MPI_Recv
+
+    // copy to device
+    nvtxRangePush("RegionRecver::recv_impl() cudaMemcpyAsync");
+    CUDA_RUNTIME(cudaMemcpyAsync(devBuf_, hostBuf_.data(), hostBuf_.size(),
+                                 cudaMemcpyDefault, stream_));
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    nvtxRangePop(); // RegionRecver::recv_impl() cudaMemcpyAsync
+
+    // unpack into domain data
+    nvtxRangePush("RegionRecver::recv_impl() unpack");
+    size_t bufOffset = 0;
+    for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
+
+      const Dim3 haloPos = domain_->halo_pos(dir_, true /*halo region*/);
+      const Dim3 haloExtent = domain_->halo_extent(dir_);
+
+      const Dim3 rawSz = domain_->raw_size();
+
+      char *dst = domain_->curr_data(idx);
+
+      // unpack from buffer into halo
+      dim3 dimGrid(20, 20, 20);
+      dim3 dimBlock(32, 4, 4);
+      size_t elemSize = domain_->elem_size(idx);
+      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+      unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0 /*pitch*/,
+                                                haloPos, haloExtent,
+                                                &devBuf_[bufOffset], elemSize);
+      bufOffset += domain_->halo_bytes(dir_, idx);
+    }
+
+    // wait for unpack
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    nvtxRangePop(); // RegionRecver::recv_impl() unpack
+  }
+
+  void recv() override {
+    fut_ = std::async(std::launch::async, &RegionRecver::recv_impl, this);
+  }
+
+  // wait for send to be complete
+  virtual void wait() override {
+
+    if (fut_.valid()) {
+      fut_.wait();
+#ifdef REGION_LOUD
+      std::cerr << "RegionRecver::wait(): " << dir_ << " done\n";
+#endif
+    } else {
+      assert(0 && "wait called before recv");
     }
   }
 };

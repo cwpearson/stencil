@@ -49,6 +49,48 @@ static int make_tag(int gpu, int idx, Dim3 dir) {
   return t;
 }
 
+/*!
+  Construct an MPI tag from a gpu id and a direction vector
+  tags must be non-negative, so MSB must be 0, leaving 31 bits
+
+
+  gpu id in bits 0-7        ( 8 bits)
+  direction vec in bits 8-13 ( 6 bits)
+   0 -> 0b00
+   1 -> 0b01
+  -1 -> 0b10
+
+*/
+static int make_tag(int gpu, Dim3 dir) {
+  static_assert(sizeof(int) == 4);
+  constexpr int GPU_BITS = 8;
+  constexpr int DIR_BITS = 6;
+
+  static_assert(DIR_BITS + GPU_BITS < sizeof(int) * CHAR_BIT);
+  static_assert(DIR_BITS >= 6);
+  assert(gpu < (1 << GPU_BITS));
+  assert(dir.x >= -1 && dir.x <= 1);
+  assert(dir.y >= -1 && dir.y <= 1);
+  assert(dir.z >= -1 && dir.z <= 1);
+
+  int t = 0;
+
+  int gpuBits = (gpu & ((1 << GPU_BITS) - 1));
+  int dirBits = 0;
+  dirBits |= dir.x == 0 ? 0b00 : (dir.x == 1 ? 0b01 : 0b10);
+  dirBits |= (dir.y == 0 ? 0b00 : (dir.y == 1 ? 0b01 : 0b10)) << 2;
+  dirBits |= (dir.z == 0 ? 0b00 : (dir.z == 1 ? 0b01 : 0b10)) << 4;
+
+  t |= gpuBits;
+  t |= dirBits << GPU_BITS;
+
+  assert(t >= 0 && "tag must be non-negative");
+
+  return t;
+}
+
+
+
 /*! An asynchronous sender, to be paired with a Recver
  */
 class Sender {
