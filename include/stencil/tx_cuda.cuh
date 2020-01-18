@@ -685,11 +685,8 @@ public:
 class RegionCopier : public HaloSender {
 private:
   const LocalDomain *srcDomain_, *dstDomain_;
-
   Dim3 dir_;
-
-  // one stream per domain data
-  std::vector<RcStream> streams_;
+  RcStream stream_;
 
   /* async copy data field dataIdx
    */
@@ -708,7 +705,6 @@ private:
 
     char *dst = dstDomain_->curr_data(dataIdx);
     char *src = srcDomain_->curr_data(dataIdx);
-    RcStream stream = streams_[dataIdx];
 
     size_t elemSize = srcDomain_->elem_size(dataIdx);
     assert(elemSize == dstDomain_->elem_size(dataIdx));
@@ -718,21 +714,16 @@ private:
     const dim3 dimGrid = (extent + (Dim3(dimBlock) - 1)) / Dim3(dimBlock);
 
     CUDA_RUNTIME(cudaSetDevice(srcDomain_->gpu()));
-    translate<<<dimGrid, dimBlock, 0, stream>>>(
+    translate<<<dimGrid, dimBlock, 0, stream_>>>(
         dst, dstPos, dstSize, src, srcPos, srcSize, extent, elemSize);
   }
 
 public:
   RegionCopier(const LocalDomain &dstDomain, const LocalDomain &srcDomain,
                const Dim3 &dir)
-      : srcDomain_(&srcDomain), dstDomain_(&dstDomain), dir_(dir) {
+      : srcDomain_(&srcDomain), dstDomain_(&dstDomain), dir_(dir), stream_(srcDomain.gpu()) {
 
     assert(dstDomain.num_data() == srcDomain.num_data());
-
-    // associate domain data array with a receiver and a stream
-    for (size_t di = 0; di < srcDomain.num_data(); ++di) {
-      streams_.push_back(RcStream(srcDomain_->gpu()));
-    }
   }
 
   virtual void allocate() override {
@@ -750,9 +741,7 @@ public:
 
   // wait for send()
   virtual void wait() override {
-    for (auto &s : streams_) {
-      CUDA_RUNTIME(cudaStreamSynchronize(s))
-    }
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
   }
 };
 
