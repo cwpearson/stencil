@@ -21,6 +21,7 @@
 
 // #define ANY_LOUD
 // #define REGION_LOUD
+#define REMOTE_LOUD
 
 class Message {
 private:
@@ -30,18 +31,17 @@ public:
 
   Dim3 dir_;
 
-  bool operator<(const Message &rhs) const noexcept {
-    return dir_ < rhs.dir_;
-  }
+  bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
 };
 
 /* Send messages to two local domains
  */
 class SameRankSender {
-
+private:
   // one stream per domain
   std::vector<RcStream> streams_;
 
+public:
   SameRankSender() {}
 
   ~SameRankSender() {}
@@ -74,24 +74,38 @@ private:
   cudaEvent_t event_; // d2h is finished
   bool isD2h_;        // in d2h phase
 
+  std::vector<Message> outbox_;
+
 public:
+  RemoteSender() : devBuf_(nullptr) {}
   RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                const LocalDomain &domain)
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain), stream_(domain.gpu()), isD2h_(false) {
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-    CUDA_RUNTIME(cudaEventCreate(&event_));
-  }
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()), event_(0),
+        isD2h_(false) {}
 
-  ~RemoteSender() { CUDA_RUNTIME(cudaFree(devBuf_)); }
+  ~RemoteSender() {
+    CUDA_RUNTIME(cudaFree(devBuf_));
+    if (event_) {
+      CUDA_RUNTIME(cudaEventDestroy(event_));
+    }
+  }
 
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
    */
   void prepare(std::vector<Message> &outbox) {
+    outbox_ = outbox;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
+    CUDA_RUNTIME(cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
+
+#ifdef REMOTE_LOUD
+    std::cerr << "RemoteSender::prepare(): " << outbox_.size() << " messages\n";
+#endif
+
     // sort messages by direction vector
-    std::sort(outbox.begin(), outbox.end());
+    std::sort(outbox_.begin(), outbox_.end());
 
     // compute total size
     size_t totalBytes = 0;
@@ -101,7 +115,10 @@ public:
       }
     }
 
-    // allocate device & host buffers
+// allocate device & host buffers
+#ifdef REMOTE_LOUD
+    std::cerr << "RemoteSender::prepare(): alloc " << totalBytes << "\n";
+#endif
     CUDA_RUNTIME(cudaMalloc(&devBuf_, totalBytes));
     hostBuf_.resize(totalBytes);
   }
@@ -109,15 +126,15 @@ public:
   void send_d2h() {
     isD2h_ = true;
 
-
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
     dim3 dimBlock(32, 4, 4);
     dim3 dimGrid(20, 20, 20);
     size_t bufOffset = 0;
-    for (auto &msg : outbox) {
-      const Dim3 haloPos = domain_->halo_pos(msg.dir_, false /*compute region*/);
+    for (auto &msg : outbox_) {
+      const Dim3 haloPos =
+          domain_->halo_pos(msg.dir_, false /*compute region*/);
       const Dim3 haloExtent = domain_->halo_extent(msg.dir_);
 
       for (size_t i = 0; i < domain_->num_data(); ++i) {
@@ -178,10 +195,15 @@ private:
 
   bool isH2h_; // in d2h phase
 
+  std::vector<Message> inbox_;
+
 public:
+  RemoteRecver() : devBuf_(nullptr) {}
   RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                const LocalDomain &domain)
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain), stream_(domain.gpu()), isH2h_(false) {
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()),
+        isH2h_(false) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
@@ -191,10 +213,11 @@ public:
    * outbox
    */
   void prepare(std::vector<Message> &inbox) {
+    inbox_ = inbox;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
     // sort messages by direction vector
-    std::sort(inbox.begin(), inbox.end());
+    std::sort(inbox_.begin(), inbox_.end());
 
     // compute total size
     size_t totalBytes = 0;
@@ -216,14 +239,13 @@ public:
     CUDA_RUNTIME(cudaMemcpyAsync(devBuf_, hostBuf_.data(), hostBuf_.size(),
                                  cudaMemcpyDefault, stream_));
 
-
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
     dim3 dimBlock(32, 4, 4);
     dim3 dimGrid(20, 20, 20);
     size_t bufOffset = 0;
-    for (auto &msg : outbox) {
+    for (auto &msg : inbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
       for (size_t i = 0; i < domain_->num_data(); ++i) {
