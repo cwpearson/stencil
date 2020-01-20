@@ -149,6 +149,9 @@ public:
 
   // return the extent of the halo in direction `dir`
   Dim3 halo_extent(const Dim3 &dir) const noexcept {
+    assert(dir.x >= -1 && dir.x <= 1);
+    assert(dir.y >= -1 && dir.y <= 1);
+    assert(dir.z >= -1 && dir.z <= 1);
     Dim3 ret;
 
     ret.x = (dir.x != 0) ? radius_ : sz_.x;

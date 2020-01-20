@@ -28,8 +28,8 @@ private:
 public:
   int srcGPU_;
   int dstGPU_;
-
   Dim3 dir_;
+  Message(Dim3 dir) : dir_(dir) {}
 
   bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
 };
@@ -66,7 +66,8 @@ private:
   const LocalDomain *domain_;
 
   char *devBuf_;
-  std::vector<char> hostBuf_;
+  char *hostBuf_;
+  size_t bufSize_;
 
   RcStream stream_;
   MPI_Request req_;
@@ -81,11 +82,12 @@ public:
   RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()), event_(0),
-        isD2h_(false) {}
+        domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
+        stream_(domain.gpu()), event_(0), isD2h_(false) {}
 
   ~RemoteSender() {
     CUDA_RUNTIME(cudaFree(devBuf_));
+    CUDA_RUNTIME(cudaFreeHost(hostBuf_));
     if (event_) {
       CUDA_RUNTIME(cudaEventDestroy(event_));
     }
@@ -108,48 +110,50 @@ public:
     std::sort(outbox_.begin(), outbox_.end());
 
     // compute total size
-    size_t totalBytes = 0;
+    bufSize_ = 0;
     for (auto &msg : outbox) {
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        totalBytes += domain_->halo_bytes(msg.dir_, i);
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
       }
     }
 
 // allocate device & host buffers
 #ifdef REMOTE_LOUD
-    std::cerr << "RemoteSender::prepare(): alloc " << totalBytes << "\n";
+    std::cerr << "RemoteSender::prepare: alloc " << bufSize_ << "\n";
 #endif
-    CUDA_RUNTIME(cudaMalloc(&devBuf_, totalBytes));
-    hostBuf_.resize(totalBytes);
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
   }
 
   void send_d2h() {
+    nvtxRangePush("RemoteSender::send_d2h");
     isD2h_ = true;
 
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
-    dim3 dimBlock(32, 4, 4);
-    dim3 dimGrid(20, 20, 20);
+    dim3 dimBlock(8, 8, 8);
     size_t bufOffset = 0;
     for (auto &msg : outbox_) {
-      const Dim3 haloPos =
-          domain_->halo_pos(msg.dir_, false /*compute region*/);
-      const Dim3 haloExtent = domain_->halo_extent(msg.dir_);
+      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
 
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         const char *src = domain_->curr_data(i);
-        const size_t elemSize = domain_->elem_size(i);
-        pack<<<dimBlock, dimGrid, 0, stream_>>>(
-            &devBuf_[bufOffset], src, rawSz, 0, haloPos, haloExtent, elemSize);
+        const size_t elemSz = domain_->elem_size(i);
+        pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
+                                                0, pos, extent, elemSz);
+        CUDA_RUNTIME(cudaGetLastError());
         bufOffset += domain_->halo_bytes(msg.dir_, i);
       }
     }
 
     // copy to host buffer
-    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_.data(), devBuf_, bufOffset,
-                                 cudaMemcpyDefault, stream_));
+    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, devBuf_, bufSize_, cudaMemcpyDefault,
+                                 stream_));
     CUDA_RUNTIME(cudaEventRecord(event_));
+    nvtxRangePop(); // RemoteSender::send_d2h
   }
 
   bool is_d2h() { return isD2h_; }
@@ -167,9 +171,11 @@ public:
   }
 
   void send_h2h() {
+    nvtxRangePush("RemoteSender::send_h2h");
     isD2h_ = false;
-    MPI_Isend(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank_, dstGPU_,
-              MPI_COMM_WORLD, &req_);
+    MPI_Isend(hostBuf_, bufSize_, MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
+              &req_);
+    nvtxRangePop(); // RemoteSender::send_h2h
   }
 
   void wait() { MPI_Wait(&req_, MPI_STATUS_IGNORE); }
@@ -187,9 +193,11 @@ private:
   const LocalDomain *domain_;
 
   char *devBuf_;
-  std::vector<char> hostBuf_;
+  char *hostBuf_;
+  size_t bufSize_;
 
   RcStream stream_;
+  cudaEvent_t event_;
 
   MPI_Request req_;
 
@@ -202,12 +210,18 @@ public:
   RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()),
-        isH2h_(false) {
+        domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
+        stream_(domain.gpu()), event_(0), isH2h_(false) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
-  ~RemoteRecver() { CUDA_RUNTIME(cudaFree(devBuf_)); }
+  ~RemoteRecver() {
+    CUDA_RUNTIME(cudaFree(devBuf_));
+    CUDA_RUNTIME(cudaFreeHost(hostBuf_));
+    if (event_) {
+      CUDA_RUNTIME(cudaEventDestroy(event_));
+    }
+  }
 
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
@@ -215,47 +229,51 @@ public:
   void prepare(std::vector<Message> &inbox) {
     inbox_ = inbox;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
 
     // sort messages by direction vector
     std::sort(inbox_.begin(), inbox_.end());
 
     // compute total size
-    size_t totalBytes = 0;
+    bufSize_ = 0;
     for (auto &msg : inbox) {
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        totalBytes += domain_->halo_bytes(msg.dir_, i);
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
       }
     }
 
     // allocate device & host buffers
-    CUDA_RUNTIME(cudaMalloc(&devBuf_, totalBytes));
-    hostBuf_.resize(totalBytes);
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
   }
 
   void recv_h2d() {
+    nvtxRangePush("RemoteRecver::recv_h2d");
     isH2h_ = false;
 
     // copy to device buffer
-    CUDA_RUNTIME(cudaMemcpyAsync(devBuf_, hostBuf_.data(), hostBuf_.size(),
-                                 cudaMemcpyDefault, stream_));
+    CUDA_RUNTIME(cudaMemcpyAsync(devBuf_, hostBuf_, bufSize_, cudaMemcpyDefault,
+                                 stream_));
 
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
-    dim3 dimBlock(32, 4, 4);
-    dim3 dimGrid(20, 20, 20);
+    dim3 dimBlock(8, 8, 8);
     size_t bufOffset = 0;
     for (auto &msg : inbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
+      dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         char *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
-        unpack<<<dimBlock, dimGrid, 0, stream_>>>(dst, rawSz, 0, pos, extent,
+        unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
                                                   &devBuf_[bufOffset], elemSz);
         bufOffset += domain_->halo_bytes(msg.dir_, i);
       }
     }
+    CUDA_RUNTIME(cudaEventRecord(event_, stream_));
+    nvtxRangePop(); // RemoteRecver::recv_h2d
   }
 
   bool is_h2h() const { return isH2h_; }
@@ -271,12 +289,16 @@ public:
   }
 
   void recv_h2h() {
+    nvtxRangePush("RemoteRecver::recv_h2h");
     isH2h_ = true;
-    MPI_Irecv(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, srcRank_, srcGPU_,
-              MPI_COMM_WORLD, &req_);
+    MPI_Irecv(hostBuf_, bufSize_, MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
+              &req_);
+    nvtxRangePop(); // RemoteRecver::recv_h2h
   }
 
-  void wait() { MPI_Wait(&req_, MPI_STATUS_IGNORE); }
+  /*! wait for recv_h2d
+   */
+  void wait() { CUDA_RUNTIME(cudaEventSynchronize(event_)); }
 };
 
 /*! A data sender that should work as long as MPI and CUDA are installed

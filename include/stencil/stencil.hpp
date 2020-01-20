@@ -268,6 +268,7 @@ public:
     }
 
     // plan messages
+    nvtxRangePush("DistributedDomain::realize() plan messages");
     for (size_t di = 0; di < domains_.size(); ++di) {
       const Dim3 myIdx = partition_->dom_idx(rank_, di);
       for (int z = -1; z < 1; ++z) {
@@ -279,14 +280,14 @@ public:
             int srcRank = partition_->get_rank(srcIdx);
             int dstRank = partition_->get_rank(dstIdx);
 
-            Message sMsg;
+            Message sMsg(dir);
             if (rank_ == srcRank) {
               sameRankOutbox_.push_back(sMsg);
             } else {
               remoteOutboxes[di][dstIdx].push_back(sMsg);
             }
 
-            Message rMsg;
+            Message rMsg(dir);
             if (rank_ == dstRank) {
               // no recver for same-rank messages
             } else {
@@ -296,6 +297,7 @@ public:
         }
       }
     }
+    nvtxRangePop();
 
     // prepare senders and receivers
     sameRankSender_.prepare(sameRankOutbox_, domains_);
@@ -350,6 +352,7 @@ public:
     }
 
     // poll senders and recvers to move onto next step until all are done
+    nvtxRangePush("poll");
     bool pending = true;
     while (pending) {
       pending = false;
@@ -382,6 +385,7 @@ public:
         }
       }
     }
+    nvtxRangePop();
 
     // wait for sends
     printf("rank=%d wait for sameRankSender\n", rank_);
