@@ -65,6 +65,8 @@ public:
     CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
 
     // create a communicator for ranks on the same node
+    MPI_Barrier(MPI_COMM_WORLD); // to stabilize co-located timing
+    double start = MPI_Wtime();
     MPI_Comm shmcomm;
     MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
                         &shmcomm);
@@ -72,6 +74,21 @@ public:
     MPI_Comm_rank(shmcomm, &shmrank);
     MPI_Comm_size(shmcomm, &shmsize);
     printf("DistributedDomain::ctor(): shmcomm rank %d/%d\n", shmrank, shmsize);
+
+
+    // Give every rank a list of co-located ranks
+    std::vector<int> colocated(shmsize);
+    MPI_Allgather(&rank_, 1, MPI_INT, colocated.data(), 1, MPI_INT, shmcomm);
+    for (auto &r : colocated) {
+      colocated_.insert(r);
+    }
+    double elapsed = MPI_Wtime() - start;
+    printf("time.colocate [%d] %fs\n", rank_, elapsed);
+    assert(colocated_.count(rank_) == 1 && "should be colocated with self");
+    printf(
+        "DistributedDomain::ctor(): rank %d colocated with %lu other ranks\n",
+        rank_, colocated_.size() - 1);
+
 
     // if fewer ranks than GPUs, round-robin GPUs to ranks
     if (shmsize <= deviceCount) {
@@ -89,28 +106,18 @@ public:
              gpu);
     }
 
-    // Give every rank a list of co-located ranks
-    std::vector<int> colocated(shmsize);
-    MPI_Allgather(&rank_, 1, MPI_INT, colocated.data(), 1, MPI_INT, shmcomm);
-    for (auto &r : colocated) {
-      colocated_.insert(r);
-    }
-    assert(colocated_.count(rank_) == 1 && "should be colocated with self");
-    printf(
-        "DistributedDomain::ctor(): rank %d colocated with %lu other ranks\n",
-        rank_, colocated_.size() - 1);
+
+    start = MPI_Wtime();
 
     // Try to enable peer access between all GPUs
     nvtxRangePush("peer_en");
 
     // can't use gpus_.size() because we don't own all the GPUs
-    int count;
-    CUDA_RUNTIME(cudaGetDeviceCount(&count));
     peerAccess_ =
-        std::vector<std::vector<bool>>(count, std::vector<bool>(count, false));
+        std::vector<std::vector<bool>>(deviceCount, std::vector<bool>(deviceCount, false));
 
-    for (int src = 0; src < count; ++src) {
-      for (int dst = 0; dst < count; ++dst) {
+    for (int src = 0; src < deviceCount; ++src) {
+      for (int dst = 0; dst < deviceCount; ++dst) {
         if (src == dst) {
           peerAccess_[src][dst] = true;
           std::cout << src << " -> " << dst << " peer access\n";
@@ -130,7 +137,11 @@ public:
       }
     }
     nvtxRangePop();
+    elapsed = MPI_Wtime() - start;
+    printf("time.peer [%d] %fs\n", rank_, elapsed);
 
+
+    start = MPI_Wtime();
     nvtxRangePush("gpu_topo");
     Mat2D dist = get_gpu_distance_matrix();
     nvtxRangePop();
@@ -143,11 +154,16 @@ public:
         std::cerr << "\n";
       }
     }
+    elapsed = MPI_Wtime() - start;
+    printf("time.topo [%d] %fs\n", rank_, elapsed);
 
     // determine decomposition information
+    start = MPI_Wtime();
     nvtxRangePush("partition");
     partition_ = new PFP(size_, worldSize_, gpus_.size());
     nvtxRangePop();
+    elapsed = MPI_Wtime() - start;
+    printf("time.partition [%d] %fs\n", rank_, elapsed);
 
     MPI_Barrier(MPI_COMM_WORLD);
     if (0 == rank_) {
@@ -170,6 +186,7 @@ public:
   void realize(bool useUnified = false) {
 
     // create local domains
+    double start = MPI_Wtime();
     for (int i = 0; i < gpus_.size(); i++) {
 
       Dim3 idx = partition_->dom_idx(rank_, i);
@@ -196,6 +213,8 @@ public:
         d.realize();
       printf("DistributedDomain.realize(): finished creating LocalDomain\n");
     }
+    double elapsed = MPI_Wtime() - start;
+    printf("time.local_realize [%d] %fs\n", rank_, elapsed);
 
     // initialize null senders recvers for each domain
     domainDirSender_.resize(gpus_.size());
@@ -215,6 +234,7 @@ public:
     const Dim3 rankDim = partition_->rank_dim();
 
     // create communication plan
+    start = MPI_Wtime();
     nvtxRangePush("comm plan");
     for (size_t di = 0; di < domains_.size(); ++di) {
       assert(domains_.size() == domainIdx_.size());
@@ -298,13 +318,6 @@ public:
                           << " recv same rank\n";
                 recver = nullptr; // no recver needed for PackMemcpyCopier
               }
-
-            } else if (rank_ == dstRank) {
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " recv same rank, no peer access\n";
-              recver = new MTRegionRecver<AnyRecver>(myDomain, srcRank, srcGPU,
-                                                     rank_, myGPU, dirVec);
-
             } else if (colocated_.count(srcRank)) { // both domains on this node
               std::cerr << "DistributedDomain.realize(): dir=" << dirVec
                         << " recv colocated\n";
@@ -330,11 +343,14 @@ public:
       }
     }
     nvtxRangePop(); // comm plan
+    elapsed = MPI_Wtime() - start;
+    printf("time.plan [%d] %fs\n", rank_, elapsed);
   }
 
   /* issue async sends for a domain
    */
   void send(const size_t domainIdx) {
+    double start = MPI_Wtime();
     assert(domainIdx < domainDirSender_.size());
     auto &dirSenders = domainDirSender_[domainIdx];
     for (int z = 0; z < 3; ++z) {
@@ -346,11 +362,14 @@ public:
         }
       }
     }
+    double elapsed = MPI_Wtime() - start;
+    printf("time.issue_send [%d] [%lu] %fs\n", rank_, domainIdx, elapsed);
   }
 
   /* issue async recvs for a domain
    */
   void recv(const size_t domainIdx) {
+    double start = MPI_Wtime();
     assert(domainIdx < domainDirRecver_.size());
     auto &dirRecvers = domainDirRecver_[domainIdx];
     for (int z = 0; z < 3; ++z) {
@@ -362,12 +381,17 @@ public:
         }
       }
     }
+    double elapsed = MPI_Wtime() - start;
+    printf("time.issue_recv [%d] [%lu] %fs\n", rank_, domainIdx, elapsed);
   }
 
   /*!
   do a halo exchange and return
   */
   void exchange() {
+    MPI_Barrier(MPI_COMM_WORLD); // stabilize time
+
+    double start = MPI_Wtime();
 
     // the sends and recvs for each domain issued async
     std::vector<std::future<void>> sends(domains_.size());
@@ -414,6 +438,9 @@ public:
       }
     }
     nvtxRangePop(); // wait
+
+    double elapsed = MPI_Wtime() - start;
+    printf("time.exchange [%d] %fs\n", rank_, elapsed);
 
     // wait for all ranks to be done
     MPI_Barrier(MPI_COMM_WORLD);
