@@ -111,7 +111,7 @@ public:
 
     // compute total size
     bufSize_ = 0;
-    for (auto &msg : outbox) {
+    for (auto &msg : outbox_) {
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         bufSize_ += domain_->halo_bytes(msg.dir_, i);
       }
@@ -142,9 +142,10 @@ public:
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         const char *src = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
+	assert(stream_.device() == domain_->gpu());
+	CUDA_RUNTIME(cudaSetDevice(stream_.device()));
         pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
                                                 0, pos, extent, elemSz);
-        CUDA_RUNTIME(cudaGetLastError());
         bufOffset += domain_->halo_bytes(msg.dir_, i);
       }
     }
@@ -267,6 +268,8 @@ public:
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         char *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
+	CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+	assert(stream_.device() == domain_->gpu());
         unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
                                                   &devBuf_[bufOffset], elemSz);
         bufOffset += domain_->halo_bytes(msg.dir_, i);
