@@ -58,8 +58,14 @@ test/test_cpu "<case name>" -c "<section name>"
 ```
 mpirun -n 4 src/astaroth-sim
 ```
+## Profiling with nsys
 
-## Profiling MPI
+```
+nsys profile mpirun -n <int> src/astaroth-sim
+```
+
+
+## Profiling with nvprof
 
 ```
 mpirun -n <int> nvprof -o timeline_%p.nvvp ...

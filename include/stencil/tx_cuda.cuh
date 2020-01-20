@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <future>
+#include <sstream>
 
 #include <mpi.h>
 
@@ -503,7 +504,12 @@ public:
     assert(dir_.z >= -1 && dir.z <= 1);
   }
 
+  ~RegionSender() {
+    CUDA_RUNTIME(cudaFree(devBuf_));
+  }
+
   virtual void allocate() override {
+    assert(nullptr == devBuf_);
     size_t totalBytes = 0;
     for (size_t i = 0; i < domain_->num_data(); ++i) {
       totalBytes += domain_->halo_bytes(dir_, i);
@@ -514,6 +520,11 @@ public:
   }
 
   void send_impl() {
+
+    std::stringstream ss;
+    ss << "RegionSender" << dir_;
+    nvtxNameOsThread(pthread_self(), ss.str().c_str());
+
     nvtxRangePush("RegionSender::send_impl");
 
     assert(devBuf_ && "not allocated");
@@ -603,14 +614,19 @@ public:
   RegionRecver(const LocalDomain &domain, size_t srcRank, size_t srcGPU,
                size_t dstRank, size_t dstGPU, const Dim3 &dir)
       : domain_(&domain), srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank),
-        dstGPU_(dstGPU), dir_(dir), stream_(domain.gpu()) {
+        dstGPU_(dstGPU), dir_(dir), devBuf_(nullptr), stream_(domain.gpu()) {
 
     assert(dir_.x >= -1 && dir.x <= 1);
     assert(dir_.y >= -1 && dir.y <= 1);
     assert(dir_.z >= -1 && dir.z <= 1);
   }
 
+  ~RegionRecver() {
+    CUDA_RUNTIME(cudaFree(devBuf_));
+  }
+
   virtual void allocate() override {
+    assert(nullptr == devBuf_);
     size_t totalBytes = 0;
     for (size_t i = 0; i < domain_->num_data(); ++i) {
       totalBytes += domain_->halo_bytes(dir_, i);
