@@ -90,7 +90,6 @@ static int make_tag(int gpu, Dim3 dir) {
 }
 
 
-
 /*! An asynchronous sender, to be paired with a Recver
  */
 class Sender {

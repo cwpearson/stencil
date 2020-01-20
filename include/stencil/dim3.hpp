@@ -82,13 +82,32 @@ public:
 
   CUDA_CALLABLE_MEMBER size_t flatten() const { return x * y * z; }
 
-  CUDA_CALLABLE_MEMBER bool operator>(const Dim3 &rhs) const {
-    return x > rhs.x && y > rhs.y && z > rhs.z;
-  }
+
   CUDA_CALLABLE_MEMBER bool operator<(const Dim3 &rhs) const {
-    return x < rhs.x && y < rhs.y && z < rhs.z;
+    if (x < rhs.x) {
+      return true;
+    } else if (x > rhs.x) {
+      return false;
+    } else {
+      if (y < rhs.y) {
+        return true;
+      } else if (y > rhs.y) {
+        return false;
+      } else {
+        return z < rhs.z;
+      }
+    }
   }
-  CUDA_CALLABLE_MEMBER bool operator>=(const int64_t rhs) const {
+
+  CUDA_CALLABLE_MEMBER bool all_lt(const int64_t rhs) const {
+    return x < rhs && y < rhs && z < rhs;
+  }
+
+    CUDA_CALLABLE_MEMBER bool all_gt(const int64_t rhs) const {
+    return x > rhs && y > rhs && z > rhs;
+  }
+
+  CUDA_CALLABLE_MEMBER bool all_ge(const int64_t rhs) const {
     return x >= rhs && y >= rhs && z >= rhs;
   }
 
