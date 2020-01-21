@@ -134,7 +134,6 @@ private:
   RcStream stream_;
   MPI_Request req_;
 
-  cudaEvent_t event_; // d2h is finished
   bool isD2h_;        // in d2h phase
 
   std::vector<Message> outbox_;
@@ -145,14 +144,11 @@ public:
                const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
-        stream_(domain.gpu()), event_(0), isD2h_(false) {}
+        stream_(domain.gpu()), isD2h_(false) {}
 
   ~RemoteSender() {
     CUDA_RUNTIME(cudaFree(devBuf_));
     CUDA_RUNTIME(cudaFreeHost(hostBuf_));
-    if (event_) {
-      CUDA_RUNTIME(cudaEventDestroy(event_));
-    }
   }
 
   /*! Prepare to send a set of messages whose direction vectors are store in
@@ -161,8 +157,6 @@ public:
   void prepare(std::vector<Message> &outbox) {
     outbox_ = outbox;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-
-    CUDA_RUNTIME(cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
 
 #ifdef REMOTE_LOUD
     std::cerr << "RemoteSender::prepare(): " << outbox_.size() << " messages\n";
@@ -215,14 +209,13 @@ public:
     // copy to host buffer
     CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, devBuf_, bufSize_, cudaMemcpyDefault,
                                  stream_));
-    CUDA_RUNTIME(cudaEventRecord(event_));
     nvtxRangePop(); // RemoteSender::send_d2h
   }
 
   bool is_d2h() { return isD2h_; }
 
   bool d2h_done() {
-    cudaError_t err = cudaEventQuery(event_);
+    cudaError_t err = cudaStreamQuery(stream_);
     if (cudaSuccess == err) {
       return true;
     } else if (cudaErrorNotReady == err) {
@@ -260,7 +253,6 @@ private:
   size_t bufSize_;
 
   RcStream stream_;
-  cudaEvent_t event_;
 
   MPI_Request req_;
 
@@ -274,16 +266,13 @@ public:
                const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
-        stream_(domain.gpu()), event_(0), isH2h_(false) {
+        stream_(domain.gpu()), isH2h_(false) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
   ~RemoteRecver() {
     CUDA_RUNTIME(cudaFree(devBuf_));
     CUDA_RUNTIME(cudaFreeHost(hostBuf_));
-    if (event_) {
-      CUDA_RUNTIME(cudaEventDestroy(event_));
-    }
   }
 
   /*! Prepare to send a set of messages whose direction vectors are store in
@@ -292,7 +281,6 @@ public:
   void prepare(std::vector<Message> &inbox) {
     inbox_ = inbox;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-    CUDA_RUNTIME(cudaEventCreateWithFlags(&event_, cudaEventDisableTiming));
 
     // sort messages by direction vector
     std::sort(inbox_.begin(), inbox_.end());
@@ -337,7 +325,6 @@ public:
         bufOffset += domain_->halo_bytes(msg.dir_, i);
       }
     }
-    CUDA_RUNTIME(cudaEventRecord(event_, stream_));
     nvtxRangePop(); // RemoteRecver::recv_h2d
   }
 
@@ -363,7 +350,7 @@ public:
 
   /*! wait for recv_h2d
    */
-  void wait() { CUDA_RUNTIME(cudaEventSynchronize(event_)); }
+  void wait() { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
 };
 
 /*! A data sender that should work as long as MPI and CUDA are installed
