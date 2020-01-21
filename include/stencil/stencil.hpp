@@ -247,6 +247,9 @@ public:
         for (int y = -1; y < 1; ++y) {
           for (int x = -1; x < 1; ++x) {
             Dim3 dir(x, y, z);
+	    if (Dim3(0,0,0) == dir) {
+               continue; // no communication in this direction
+	    }
             Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
             Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
             const int srcRank = partition_->get_rank(srcIdx);
@@ -281,6 +284,9 @@ public:
         for (int y = -1; y < 1; ++y) {
           for (int x = -1; x < 1; ++x) {
             const Dim3 dir(x, y, z);
+	    if (Dim3(0,0,0) == dir) {
+              continue; // no message
+	    }
 
             const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
             const int dstRank = partition_->get_rank(dstIdx);
