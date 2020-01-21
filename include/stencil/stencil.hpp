@@ -342,10 +342,6 @@ public:
 
     double start = MPI_Wtime();
 
-    // send local messages
-    printf("rank=%d send same rank\n", rank_);
-    peerAccessSender_.send();
-
     // start remote send d2h
     printf("rank=%d send remote d2h\n", rank_);
     for (size_t di = 0; di < domains_.size(); ++di) {
@@ -366,6 +362,10 @@ public:
       }
     }
 
+    // send local messages
+    printf("rank=%d send peer access\n", rank_);
+    peerAccessSender_.send();
+
     // poll senders and recvers to move onto next step until all are done
     nvtxRangePush("poll");
     bool pending = true;
@@ -379,8 +379,6 @@ public:
           if (recver.is_h2h()) {
             pending = true;
             if (recver.h2h_done()) {
-              std::cerr << "rank=" << rank_ << " di=" << di
-                        << " srcIdx=" << srcIdx << " recver h2h->h2d\n";
               recver.recv_h2d();
             }
           }
@@ -392,8 +390,6 @@ public:
           if (sender.is_d2h()) {
             pending = true;
             if (sender.d2h_done()) {
-              std::cerr << "rank=" << rank_ << " di=" << di
-                        << " dstIdx=" << dstIdx << " sender d2h->h2d\n";
               sender.send_h2h();
             }
           }
