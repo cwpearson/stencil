@@ -70,6 +70,9 @@ public:
         streams_.resize(dstDev + 1);
       }
     }
+    for (size_t i = 0; i < streams_.size(); ++i) {
+      streams_[i] = RcStream(i);
+    }
 
 
   }
@@ -88,15 +91,19 @@ public:
       const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
       const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
-      const char *src = srcDomain->curr_data(msg.srcGPU_);
-      char *dst = dstDomain->curr_data(msg.dstGPU_);
-      const size_t elemSz = srcDomain->elem_size(msg.srcGPU_);
       RcStream &stream = streams_[srcDomain->gpu()];
-
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-	    assert(stream.device() == srcDomain->gpu());
+      assert(stream.device() == srcDomain->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream.device()));
-      translate<<<dimGrid, dimBlock, 0, stream>>>(dst, dstPos, dstSz, src, srcPos, srcSz, extent, elemSz);
+      assert(srcDomain->num_data() == dstDomain->num_data());
+      for (size_t i = 0; i < srcDomain->num_data(); ++i) {
+        const char *src = srcDomain->curr_data(i);
+        char *dst = dstDomain->curr_data(i);
+        const size_t elemSz = srcDomain->elem_size(i);
+	assert(dstDomain->elem_size(i) == elemSz);
+        translate<<<dimGrid, dimBlock, 0, stream>>>(dst, dstPos, dstSz, src, srcPos, srcSz, extent, elemSz);
+      }
+
     }
 
     nvtxRangePop(); // PeerSender::send
