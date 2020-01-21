@@ -60,10 +60,14 @@ mpirun -n 4 src/astaroth-sim
 ```
 ## Profiling with nsys
 
+With the default profiling settings, we sometimes see a crash.
+Restrict profiling to CUDA, NVTX, and OS calls.
+
 ```
-nsys profile mpirun -n <int> src/astaroth-sim
+nsys profile -t cuda,nvtx,osrt mpirun n <int> src/astaroth-sim
 ```
 
+Use the Nsight Systems application to view the resulting `qdrep` file.
 
 ## Profiling with nvprof
 
