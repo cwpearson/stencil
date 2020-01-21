@@ -343,7 +343,7 @@ public:
     double start = MPI_Wtime();
 
     // start remote send d2h
-    printf("rank=%d send remote d2h\n", rank_);
+    // printf("rank=%d send remote d2h\n", rank_);
     for (size_t di = 0; di < domains_.size(); ++di) {
       for (auto &kv : remoteSenders_[di]) {
         Dim3 dstIdx = kv.first;
@@ -353,7 +353,7 @@ public:
     }
 
     // start remote recv h2h
-    printf("rank=%d recv remote h2h\n", rank_);
+    // printf("rank=%d recv remote h2h\n", rank_);
     for (size_t di = 0; di < domains_.size(); ++di) {
       for (auto &kv : remoteRecvers_[di]) {
         Dim3 srcIdx = kv.first;
@@ -363,7 +363,7 @@ public:
     }
 
     // send local messages
-    printf("rank=%d send peer access\n", rank_);
+    // printf("rank=%d send peer access\n", rank_);
     peerAccessSender_.send();
 
     // poll senders and recvers to move onto next step until all are done
@@ -399,11 +399,11 @@ public:
     nvtxRangePop();
 
     // wait for sends
-    printf("rank=%d wait for sameRankSender\n", rank_);
+    // printf("rank=%d wait for sameRankSender\n", rank_);
     peerAccessSender_.wait();
 
     // wait for remote senders and recvers
-    printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
+    // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
     for (size_t di = 0; di < domains_.size(); ++di) {
       for (auto &kv : remoteRecvers_[di]) {
         Dim3 srcIdx = kv.first;
