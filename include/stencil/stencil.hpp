@@ -44,12 +44,12 @@ private:
   Partition *partition_;
 
   std::vector<std::map<Dim3, RemoteSender>>
-      remoteSenders_; // remoteOutboxes_[domain][dstIdx] = sender
+      remoteSenders_; // remoteSender_[domain][dstIdx] = sender
   std::vector<std::map<Dim3, RemoteRecver>>
-      remoteRecvers_; // remoteOutboxes_[domain][srcIdx] = sender
+      remoteRecvers_; // remoteRecver_[domain][srcIdx] = sender
 
   // one sender for all local exchanges
-  SameRankSender sameRankSender_;
+  PeerAccessSender peerAccessSender_;
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -218,7 +218,7 @@ public:
     nvtxRangePush("comm plan");
 
     // one outbox and sender for all local exchanges
-    std::vector<Message> sameRankOutbox_;
+    std::vector<Message> peerAccessOutbox;
 
     // one inbox for each remote domain my domains recv from
     std::vector<std::map<Dim3, std::vector<Message>>>
@@ -274,22 +274,37 @@ public:
       for (int z = -1; z < 1; ++z) {
         for (int y = -1; y < 1; ++y) {
           for (int x = -1; x < 1; ++x) {
-            Dim3 dir(x, y, z);
-            Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
-            Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
-            int srcRank = partition_->get_rank(srcIdx);
-            int dstRank = partition_->get_rank(dstIdx);
+            const Dim3 dir(x, y, z);
 
-            Message sMsg(dir);
-            if (rank_ == srcRank) {
-              sameRankOutbox_.push_back(sMsg);
+            const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
+            const int dstRank = partition_->get_rank(dstIdx);
+            const int dstGPU = partition_->get_gpu(dstIdx);
+
+            Message sMsg(dir, di, dstGPU);
+            if (rank_ == dstRank) {
+              const int myDev = domains_[di].gpu();
+              const int dstDev = domains_[dstGPU].gpu();
+              if (peerAccess_[myDev][dstDev]) {
+                peerAccessOutbox.push_back(sMsg);
+              } else {
+                remoteOutboxes[di][dstIdx].push_back(sMsg);
+              }
             } else {
               remoteOutboxes[di][dstIdx].push_back(sMsg);
             }
 
-            Message rMsg(dir);
-            if (rank_ == dstRank) {
-              // no recver for same-rank messages
+            const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
+            const int srcRank = partition_->get_rank(srcIdx);
+            const int srcGPU = partition_->get_gpu(srcIdx);
+            Message rMsg(dir, srcGPU, di);
+            if (rank_ == srcRank) {
+              const int myDev = domains_[di].gpu();
+              const int srcDev = domains_[srcGPU].gpu();
+              if (peerAccess_[srcDev][myDev]) {
+                // no recver needed for peer access
+              } else {
+                remoteInboxes[di][srcIdx].push_back(rMsg);
+              }
             } else {
               remoteInboxes[di][srcIdx].push_back(rMsg);
             }
@@ -300,7 +315,7 @@ public:
     nvtxRangePop();
 
     // prepare senders and receivers
-    sameRankSender_.prepare(sameRankOutbox_, domains_);
+    peerAccessSender_.prepare(peerAccessOutbox, domains_);
     for (size_t di = 0; di < domains_.size(); ++di) {
       for (auto &kv : remoteSenders_[di]) {
         const Dim3 dstIdx = kv.first;
@@ -329,7 +344,7 @@ public:
 
     // send local messages
     printf("rank=%d send same rank\n", rank_);
-    sameRankSender_.send();
+    peerAccessSender_.send();
 
     // start remote send d2h
     printf("rank=%d send remote d2h\n", rank_);
@@ -389,7 +404,7 @@ public:
 
     // wait for sends
     printf("rank=%d wait for sameRankSender\n", rank_);
-    sameRankSender_.wait();
+    peerAccessSender_.wait();
 
     // wait for remote senders and recvers
     printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);

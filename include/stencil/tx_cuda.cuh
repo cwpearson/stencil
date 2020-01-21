@@ -26,32 +26,87 @@
 class Message {
 private:
 public:
+  Dim3 dir_;
   int srcGPU_;
   int dstGPU_;
-  Dim3 dir_;
-  Message(Dim3 dir) : dir_(dir) {}
+  Message(Dim3 dir, int srcGPU, int dstGPU) : dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
 
   bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
 };
 
-/* Send messages to two local domains
+/* Send messages to local domains
  */
-class SameRankSender {
+class PeerAccessSender {
 private:
-  // one stream per domain
+
+  std::vector<Message> outbox_;
+
+  // one stream per source device
   std::vector<RcStream> streams_;
 
-public:
-  SameRankSender() {}
+  std::vector<const LocalDomain *> domains_;
 
-  ~SameRankSender() {}
+public:
+  PeerAccessSender() {}
+
+  ~PeerAccessSender() {}
 
   void prepare(std::vector<Message> &outbox,
-               const std::vector<LocalDomain> &domains) {}
+               const std::vector<LocalDomain> &domains) {
+    outbox_ = outbox;
 
-  void send() {}
+    for (auto &e : domains) {
+      domains_.push_back(&e);
+    }
 
-  void wait() {}
+    // create a stream per device
+    for (auto &msg : outbox_) {
+      int srcDev = domains_[msg.srcGPU_]->gpu();
+      int dstDev = domains_[msg.dstGPU_]->gpu();
+      if (srcDev >= streams_.size()) {
+        streams_.resize(srcDev+1);
+      }
+      if (dstDev >= streams_.size()) {
+        streams_.resize(dstDev + 1);
+      }
+    }
+
+
+  }
+
+  void send() {
+
+    nvtxRangePush("PeerSender::send");
+
+    // translate data with kernel
+    const dim3 dimBlock(8, 8, 8);
+    for (auto &msg : outbox_) {
+      const LocalDomain *srcDomain = domains_[msg.srcGPU_];
+      const LocalDomain *dstDomain = domains_[msg.dstGPU_];
+      const Dim3 dstSz = dstDomain->raw_size();
+      const Dim3 srcSz = srcDomain->raw_size();
+      const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
+      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
+      const Dim3 extent = srcDomain->halo_extent(msg.dir_);
+      const char *src = srcDomain->curr_data(msg.srcGPU_);
+      char *dst = dstDomain->curr_data(msg.dstGPU_);
+      const size_t elemSz = srcDomain->elem_size(msg.srcGPU_);
+      RcStream &stream = streams_[srcDomain->gpu()];
+
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+	    assert(stream.device() == srcDomain->gpu());
+      CUDA_RUNTIME(cudaSetDevice(stream.device()));
+      translate<<<dimGrid, dimBlock, 0, stream>>>(dst, dstPos, dstSz, src, srcPos, srcSz, extent, elemSz);
+    }
+
+    nvtxRangePop(); // PeerSender::send
+
+  }
+
+  void wait() {
+    for (auto &s : streams_) {
+      cudaStreamSynchronize(s);}
+    }
 };
 
 /*! Send from one domain to a remote domain
