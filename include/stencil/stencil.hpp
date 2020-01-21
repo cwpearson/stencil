@@ -383,8 +383,9 @@ public:
     bool pending = true;
     while (pending) {
       pending = false;
+recvers:
+      // move recvers from h2h to h2d
       for (size_t di = 0; di < domains_.size(); ++di) {
-        // move recvers from h2h to h2d
         for (auto &kv : remoteRecvers_[di]) {
           Dim3 srcIdx = kv.first;
           RemoteRecver &recver = kv.second;
@@ -392,10 +393,14 @@ public:
             pending = true;
             if (recver.h2h_done()) {
               recver.recv_h2d();
+	      goto senders; // try to overlap recv_h2d with send_h2h
             }
           }
         }
-        // move senders from d2h to h2h
+      }
+senders:
+      // move senders from d2h to h2h
+      for (size_t di = 0; di < domains_.size(); ++di) {
         for (auto &kv : remoteSenders_[di]) {
           Dim3 dstIdx = kv.first;
           RemoteSender &sender = kv.second;
@@ -403,6 +408,7 @@ public:
             pending = true;
             if (sender.d2h_done()) {
               sender.send_h2h();
+	      goto recvers; // try to overlap recv_h2d with send_h2h
             }
           }
         }
@@ -412,8 +418,11 @@ public:
 
     // wait for sends
     // printf("rank=%d wait for sameRankSender\n", rank_);
+    nvtxRangePush("peerAccessSender.wait()");
     peerAccessSender_.wait();
+    nvtxRangePop();
 
+    nvtxRangePush("remote wait");
     // wait for remote senders and recvers
     // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
     for (size_t di = 0; di < domains_.size(); ++di) {
@@ -428,11 +437,14 @@ public:
         sender.wait();
       }
     }
+    nvtxRangePop(); // remote wait
 
     double elapsed = MPI_Wtime() - start;
     printf("time.exchange [%d] %fs\n", rank_, elapsed);
 
     // wait for all ranks to be done
+    nvtxRangePush("barrier");
     MPI_Barrier(MPI_COMM_WORLD);
+    nvtxRangePop(); // barrier
   }
 };
