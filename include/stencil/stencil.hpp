@@ -121,18 +121,24 @@ public:
           peerAccess_[src][dst] = true;
           std::cout << src << " -> " << dst << " peer access\n";
         } else {
-          CUDA_RUNTIME(cudaSetDevice(src))
-          cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
-          if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
-            peerAccess_[src][dst] = true;
-            std::cout << src << " -> " << dst << " peer access\n";
-          } else if (cudaErrorInvalidDevice) {
-            peerAccess_[src][dst] = false;
+          int canAccess;
+	  CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
+	  if (canAccess) {
+            CUDA_RUNTIME(cudaSetDevice(src))
+            cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
+            if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+              peerAccess_[src][dst] = true;
+              std::cout << src << " -> " << dst << " peer access\n";
+            } else if (cudaErrorInvalidDevice) {
+              peerAccess_[src][dst] = false;
+            } else {
+              assert(0);
+              peerAccess_[src][dst] = false;
+            }
           } else {
-            assert(0);
             peerAccess_[src][dst] = false;
-          }
-        }
+	  }
+	}
       }
     }
     nvtxRangePop();
