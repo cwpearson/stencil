@@ -15,16 +15,29 @@ int main(int argc, char **argv) {
   int size;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+  double kernelMillis = 50;
+  size_t x = 64;
+  size_t y = 64;
+  size_t z = 64;
+
+  cudaDeviceProp prop;
+  CUDA_RUNTIME(cudaGetDeviceProperties ( &prop, 0 ));
+  if (std::string("Tesla V100-SXM2-32GB") == prop.name) {
+    kernelMillis = 20.1;
+    x = 512 * pow(size, 0.333);
+    y = 512 * pow(size, 0.333);
+    z = 512 * pow(size, 0.333);
+  } else {
+    std::cerr << "WARN: unknown GPU " << prop.name << ", using " << kernelMillis << "ms for kernel\n";
+  }
+
+
   /*
   Table 5
+  512^3
   512^3 on Pascal 34.1ms
   512^3 on Volta  20.1ms
   */
-
-  size_t x = 64 * pow(size, 0.333);
-  size_t y = 64 * pow(size, 0.333);
-  size_t z = 64 * pow(size, 0.333);
-  size_t kernelMillis = 34;
 
   size_t radius = 3;
 
@@ -47,7 +60,8 @@ int main(int argc, char **argv) {
     nvtxRangePop();
 
     nvtxRangePush("kernels");
-    std::this_thread::sleep_for(std::chrono::milliseconds(kernelMillis));
+    auto dur = std::chrono::duration<double, std::milli>(kernelMillis);
+    std::this_thread::sleep_for(dur);
     nvtxRangePop();
   }
 
