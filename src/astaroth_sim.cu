@@ -25,6 +25,11 @@ int main(int argc, char **argv) {
     x = 512 * pow(size, 0.333);
     y = 512 * pow(size, 0.333);
     z = 512 * pow(size, 0.333);
+  } else if (std::string("Tesla P100-SXM2-16GB") == prop.name) {
+    kernelMillis = 34.1;
+    x = 512 * pow(size, 0.333);
+    y = 512 * pow(size, 0.333);
+    z = 512 * pow(size, 0.333);
   } else {
     std::cerr << "WARN: unknown GPU " << prop.name << ", using " << kernelMillis << "ms for kernel\n";
   }
