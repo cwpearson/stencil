@@ -387,6 +387,7 @@ public:
     }
 
     // send same-rank messages
+    // printf("rank=%d send peer copy\n", rank_);
     peerCopySender_.send();
 
     // send local messages
