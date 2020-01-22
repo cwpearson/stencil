@@ -159,7 +159,6 @@ public:
       }
     }
 
-
     // initialize streams, events, and buffers
     srcStreams_.resize(domains_.size());
     dstStreams_.resize(domains_.size());
@@ -167,19 +166,20 @@ public:
       srcStreams_[i].resize(domains_.size());
       dstStreams_[i].resize(domains_.size());
     }
-    events_ = std::vector<std::vector<cudaEvent_t>>(domains_.size(), std::vector<cudaEvent_t>(domains.size()));
+    events_ = std::vector<std::vector<cudaEvent_t>>(
+        domains_.size(), std::vector<cudaEvent_t>(domains.size()));
     srcBufs_ = std::vector<std::vector<void *>>(
         domains_.size(), std::vector<void *>(domains_.size(), nullptr));
     dstBufs_ = std::vector<std::vector<void *>>(
         domains_.size(), std::vector<void *>(domains_.size(), nullptr));
     for (size_t i = 0; i < srcStreams_.size(); ++i) {
       for (size_t j = 0; j < srcStreams_[i].size(); ++j) {
-	const int srcDev = domains_[i]->gpu();
-	const int dstDev = domains_[j]->gpu();
+        const int srcDev = domains_[i]->gpu();
+        const int dstDev = domains_[j]->gpu();
         srcStreams_[i][j] = RcStream(srcDev);
         dstStreams_[i][j] = RcStream(dstDev);
-	CUDA_RUNTIME(cudaSetDevice(srcDev));
-	CUDA_RUNTIME(cudaEventCreate(&events_[i][j]));
+        CUDA_RUNTIME(cudaSetDevice(srcDev));
+        CUDA_RUNTIME(cudaEventCreate(&events_[i][j]));
         CUDA_RUNTIME(cudaSetDevice(srcDev));
         CUDA_RUNTIME(cudaMalloc(&srcBufs_[i][j], bufSizes_[i][j]));
         CUDA_RUNTIME(cudaSetDevice(dstDev));
@@ -255,8 +255,8 @@ public:
         const size_t elemSz = dstDomain->elem_size(n);
         char *dst = dstDomain->curr_data(n);
         CUDA_RUNTIME(cudaStreamWaitEvent(dstStream, event, 0 /*flags*/));
-        unpack<<<dimGrid, dimBlock, 0, dstStream>>>(dst, dstSz, 0, dstPos, extent,
-                                                    &dstBuf[bufOffset], elemSz);
+        unpack<<<dimGrid, dimBlock, 0, dstStream>>>(
+            dst, dstSz, 0, dstPos, extent, &dstBuf[bufOffset], elemSz);
         bufOffset += dstDomain->halo_bytes(msg.dir_, n);
       }
       bufOffsets[i][j] = bufOffset;
@@ -274,6 +274,197 @@ public:
     for (auto &v : dstStreams_) {
       for (auto &stream : v) {
         cudaStreamSynchronize(stream);
+      }
+    }
+  }
+};
+
+class ColocatedSender {
+private:
+  int srcRank_;
+  int srcGPU_;
+  int dstRank_;
+  int dstGPU_;
+
+  const LocalDomain *domain_;
+
+  char *srcBuf_; // buffer in this process
+  void *dstBuf_; // buffer on dst device in another process
+  size_t bufSize_;
+
+  cudaEvent_t event_;
+  cudaIpcMemHandle_t memHandle_;
+  cudaIpcEventHandle_t evtHandle_;
+
+  int dstDev_; // cuda device ID of the destination
+
+  std::vector<Message> outbox_;
+
+  MPI_Request evtReq_;
+  MPI_Request memReq_;
+  MPI_Request idReq_;
+
+  RcStream stream_;
+
+public:
+  ~ColocatedSender() {
+    CUDA_RUNTIME(cudaFree(srcBuf_));
+    CUDA_RUNTIME(cudaIpcCloseMemHandle(dstBuf_));
+    CUDA_RUNTIME(cudaEventDestroy(event_));
+  }
+
+  void start_prepare(const std::vector<Message> &outbox) {
+    outbox_ = outbox;
+    std::sort(outbox_.begin(), outbox_.end());
+
+    // Recieve the IPC mem handle
+    MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, srcGPU_,
+              MPI_COMM_WORLD, &memReq_);
+    // Retrieve the destination device id
+    MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_, srcGPU_, MPI_COMM_WORLD, &idReq_);
+
+    // create an event and associated handle
+    CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess |
+                                              cudaEventDisableTiming));
+    CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
+
+    // Send the IPC event handle to the dst process
+    MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_, srcGPU_,
+              MPI_COMM_WORLD, &evtReq_);
+
+    // compute the required buffer size
+    bufSize_ = 0;
+    for (auto &msg : outbox_) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    // allocate a buffer
+    CUDA_RUNTIME(cudaMalloc(&srcBuf_, bufSize_));
+  }
+
+  void finish_prepare() {
+    // wait for recv mem handle and destination device ID
+    MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
+    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
+    // block until we have send the event handle
+    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
+    // convert to a pointer
+    CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_,
+                                      cudaIpcMemLazyEnablePeerAccess));
+  }
+
+  void send() {
+    // add packs to stream
+    const Dim3 rawSz = domain_->raw_size();
+    size_t bufOffset = 0;
+    const dim3 dimBlock(8, 8, 8);
+    for (auto &msg : outbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        const char *src = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        assert(stream_.device() == domain_->gpu());
+        CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+        pack<<<dimGrid, dimBlock, 0, stream_>>>(&srcBuf_[bufOffset], src, rawSz,
+                                                0, pos, extent, elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+    // add memcpy to stream
+
+    assert(domain_->gpu() == stream_.device());
+    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, srcBuf_, domain_->gpu(),
+                                     bufSize_, stream_));
+    // record the event
+    CUDA_RUNTIME(cudaEventRecord(event_, stream_));
+  }
+};
+
+class ColocatedRecver {
+private:
+  int srcRank_;
+  int srcGPU_;
+
+  const LocalDomain *domain_;
+
+  char *devBuf_;
+  size_t bufSize_;
+
+  cudaIpcMemHandle_t memHandle_;
+  cudaIpcEventHandle_t evtHandle_;
+  MPI_Request ipcReq_;
+  MPI_Request idReq_;
+  MPI_Request evtReq_;
+
+  cudaEvent_t event_;
+
+  RcStream stream_;
+
+  std::vector<Message> inbox_;
+
+public:
+  void start_prepare(const std::vector<Message> &inbox) {
+    inbox_ = inbox;
+    std::sort(inbox_.begin(), inbox_.end());
+
+    // allocate a buffer
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+
+    // get an Ipc handle for it
+    CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devBuf_));
+
+    // Send the IPC handle to the ColocatedSender
+    MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_, srcGPU_,
+              MPI_COMM_WORLD, &ipcReq_);
+    // Send the CUDA device id to the ColocatedSender
+    int dstDev = domain_->gpu();
+    MPI_Isend(&dstDev, 1, MPI_INT, srcRank_, srcGPU_, MPI_COMM_WORLD, &idReq_);
+
+    // recv the event handle
+    MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_, srcGPU_,
+              MPI_COMM_WORLD, &evtReq_);
+  }
+
+  void finish_prepare() {
+
+    // wait to recv the event
+    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
+
+    // wait to send the mem handle and the CUDA device ID
+    MPI_Wait(&ipcReq_, MPI_STATUS_IGNORE);
+    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
+
+    // convert event handle to event
+    CUDA_RUNTIME(cudaIpcOpenEventHandle(&event_, evtHandle_));
+  }
+
+  void recv() {
+    // wait for ColocatedSender cudaMemcpyPeerAsync to be done
+    CUDA_RUNTIME(cudaStreamWaitEvent(stream_, event_, 0 /*flags*/));
+
+    // add unpacks to stream
+    const Dim3 rawSz = domain_->raw_size();
+
+    // pack data into device buffer
+    dim3 dimBlock(8, 8, 8);
+    size_t bufOffset = 0;
+    for (auto &msg : inbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        char *dst = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+        assert(stream_.device() == domain_->gpu());
+        unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
+                                                  &devBuf_[bufOffset], elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
       }
     }
   }
