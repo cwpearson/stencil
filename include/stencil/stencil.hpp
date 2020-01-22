@@ -48,8 +48,11 @@ private:
   std::vector<std::map<Dim3, RemoteRecver>>
       remoteRecvers_; // remoteRecver_[domain][srcIdx] = sender
 
-  // one sender for all local exchanges
+  // kernel sender for same-domain sends
   PeerAccessSender peerAccessSender_;
+
+  // cudaMemcpyPeerAsync sender for local exchanges
+  PeerCopySender peerCopySender_;
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -122,11 +125,12 @@ public:
           std::cout << src << " -> " << dst << " peer access\n";
         } else {
           int canAccess;
-	  CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
-	  if (canAccess) {
+          CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
+          if (canAccess) {
             CUDA_RUNTIME(cudaSetDevice(src))
             cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
-            if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+            if (cudaSuccess == err ||
+                cudaErrorPeerAccessAlreadyEnabled == err) {
               peerAccess_[src][dst] = true;
               std::cout << src << " -> " << dst << " peer access\n";
             } else if (cudaErrorInvalidDevice) {
@@ -137,8 +141,8 @@ public:
             }
           } else {
             peerAccess_[src][dst] = false;
-	  }
-	}
+          }
+        }
       }
     }
     nvtxRangePop();
@@ -223,23 +227,26 @@ public:
     start = MPI_Wtime();
     nvtxRangePush("comm plan");
 
-    // one outbox and sender for all local exchanges
+    // outbox for same-GPU exchanges
     std::vector<Message> peerAccessOutbox;
 
-    // one inbox for each remote domain my domains recv from
+    // outbox for same-rank exchanges
+    std::vector<Message> peerCopyOutbox;
+
+    // inbox for each remote domain my domains recv from
     std::vector<std::map<Dim3, std::vector<Message>>>
         remoteInboxes; // remoteOutboxes_[domain][srcIdx] = messages
-    // one outbox for each remote domain my domains send to
+    // outbox for each remote domain my domains send to
     std::vector<std::map<Dim3, std::vector<Message>>>
         remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
 
+    // per-domain senders and messages
     remoteOutboxes.resize(gpus_.size());
-    remoteSenders_.resize(gpus_.size());
     remoteInboxes.resize(gpus_.size());
+    remoteSenders_.resize(gpus_.size());
     remoteRecvers_.resize(gpus_.size());
 
     // create all remote senders/recvers
-
     const Dim3 globalDim = partition_->gpu_dim() * partition_->rank_dim();
     for (size_t di = 0; di < domains_.size(); ++di) {
       const Dim3 myIdx = partition_->dom_idx(rank_, di);
@@ -247,9 +254,9 @@ public:
         for (int y = -1; y < 1; ++y) {
           for (int x = -1; x < 1; ++x) {
             Dim3 dir(x, y, z);
-	    if (Dim3(0,0,0) == dir) {
-               continue; // no communication in this direction
-	    }
+            if (Dim3(0, 0, 0) == dir) {
+              continue; // no communication in this direction
+            }
             Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
             Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
             const int srcRank = partition_->get_rank(srcIdx);
@@ -284,9 +291,9 @@ public:
         for (int y = -1; y < 1; ++y) {
           for (int x = -1; x < 1; ++x) {
             const Dim3 dir(x, y, z);
-	    if (Dim3(0,0,0) == dir) {
+            if (Dim3(0, 0, 0) == dir) {
               continue; // no message
-	    }
+            }
 
             const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
             const int dstRank = partition_->get_rank(dstIdx);
@@ -296,11 +303,13 @@ public:
             if (rank_ == dstRank) {
               const int myDev = domains_[di].gpu();
               const int dstDev = domains_[dstGPU].gpu();
-              if (peerAccess_[myDev][dstDev]) {
+              if (myDev == dstDev) {
                 peerAccessOutbox.push_back(sMsg);
               } else {
-                remoteOutboxes[di][dstIdx].push_back(sMsg);
+                peerCopyOutbox.push_back(sMsg);
               }
+            } else if (colocated_.count(dstRank) != 0) {
+              remoteOutboxes[di][dstIdx].push_back(sMsg);
             } else {
               remoteOutboxes[di][dstIdx].push_back(sMsg);
             }
@@ -312,11 +321,13 @@ public:
             if (rank_ == srcRank) {
               const int myDev = domains_[di].gpu();
               const int srcDev = domains_[srcGPU].gpu();
-              if (peerAccess_[srcDev][myDev]) {
-                // no recver needed for peer access
+              if (myDev == srcDev) {
+                // no recver needed for same GPU
               } else {
-                remoteInboxes[di][srcIdx].push_back(rMsg);
+                // no recver needed for same rank
               }
+            } else if (colocated_.count(srcRank) != 0) {
+              remoteInboxes[di][srcIdx].push_back(rMsg);
             } else {
               remoteInboxes[di][srcIdx].push_back(rMsg);
             }
@@ -328,6 +339,7 @@ public:
 
     // prepare senders and receivers
     peerAccessSender_.prepare(peerAccessOutbox, domains_);
+    peerCopySender_.prepare(peerCopyOutbox, domains_);
     for (size_t di = 0; di < domains_.size(); ++di) {
       for (auto &kv : remoteSenders_[di]) {
         const Dim3 dstIdx = kv.first;
@@ -374,6 +386,9 @@ public:
       }
     }
 
+    // send same-rank messages
+    peerCopySender_.send();
+
     // send local messages
     // printf("rank=%d send peer access\n", rank_);
     peerAccessSender_.send();
@@ -383,7 +398,7 @@ public:
     bool pending = true;
     while (pending) {
       pending = false;
-recvers:
+    recvers:
       // move recvers from h2h to h2d
       for (size_t di = 0; di < domains_.size(); ++di) {
         for (auto &kv : remoteRecvers_[di]) {
@@ -393,12 +408,12 @@ recvers:
             pending = true;
             if (recver.h2h_done()) {
               recver.recv_h2d();
-	      goto senders; // try to overlap recv_h2d with send_h2h
+              goto senders; // try to overlap recv_h2d with send_h2h
             }
           }
         }
       }
-senders:
+    senders:
       // move senders from d2h to h2h
       for (size_t di = 0; di < domains_.size(); ++di) {
         for (auto &kv : remoteSenders_[di]) {
@@ -408,7 +423,7 @@ senders:
             pending = true;
             if (sender.d2h_done()) {
               sender.send_h2h();
-	      goto recvers; // try to overlap recv_h2d with send_h2h
+              goto recvers; // try to overlap recv_h2d with send_h2h
             }
           }
         }
