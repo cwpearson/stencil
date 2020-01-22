@@ -27,6 +27,11 @@ Depending on availability, the following compiler defines exist:
 | CUDA | `STENCIL_USE_CUDA=1` | `STENCIL_USE_CUDA=0` |
 | libnuma | `STENCIL_USE_NUMA=1` | `STENCIL_USE_NUMA=0` |
 
+## Requirements
+Tested on
+
+* CUDA 10.1 / 10.2
+* OpenMPI 2.1
 
 ## Tests
 
@@ -92,30 +97,37 @@ Checking for CUDA-Aware MPI support:
 ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ```
 
-
 ## Design Goals
-  * v1 (prototype)
-    * joint stencils over multiple data types (Astaroth)
-    * user-defined stencil kernels (Astaroth)
-    * edge communication (Astaroth)
-    * corner communication (Astaroth)
-    * face communication (Astaroth)
-    * overlap MPI and CUDA
-  * v2
-    * Remove requirement of CUDA
-    * data placement in heterogeneous environments
-    * direct GPU-GPU communication
-      * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
-      * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node   
-    * N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
-  * future
-    * CPU stencil (HPCG)
-    * halo size (performance)
-      * fewer, larger messages
-      * less frequent barriers
-    * pitched arrays (performance)
-    * optimized communication (performance)
-    * Stop decomposition early
+  * v1 (AsHES)
+    * [x] joint stencils over multiple data types (Astaroth)
+    * [x] uneven partitioning
+    * [x] edge communication (Astaroth)
+    * [x] corner communication (Astaroth)
+    * [x] face communication (Astaroth)
+    * [x] overlap MPI and CUDA
+    * [x] Same-GPU halo exchange with kernels
+    * [x] Same-rank halo exchange with kernels
+    * [x] Same-rank halo exchange with `cudaMemcpyPeer`
+    * [ ] co-located MPI rank halo exchange with with `cudaIpc...` and `cudaMemcpyPeer`
+    * [ ] automatic data placement in heterogeneous environments
+    * [ ] Manually hint which GPUs a distributed domain should use
+      * `DistributedDomain::use_gpus(const std::vector<int> &gpus)` 
+    * [ ] `cudaMemcpy3D` and family for data transfers & allocations
+      * supports pitched arrays
+    * [ ] Autodetect CUDA-Aware MPI support
+      * testing at build time with `ompi_info`
+      * `MPI_T_cvar_read` / `MPI_T_cvar_get_info` ?
+  * future work
+    * [ ] Remove requirement of CUDA (HPCG)
+    * [ ] support uneven radius
+    * [ ] Indexing object passed to kernels
+      * could allow halo allocations to be stored non-contiguously
+    * [ ] N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
+      * would prevent the use of `cudaMemcpy3D` and family
+    * [ ] selectable halo multiplier
+      * fewer, larger messages and less frequent barriers
+      * larger halo allocations
+    * [ ] pitched arrays
 
 
 ## Interesting Things
