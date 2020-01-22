@@ -149,22 +149,7 @@ public:
       domains_.push_back(&e);
     }
 
-    // initialize streams
-    srcStreams_.resize(domains_.size());
-    dstStreams_.resize(domains_.size());
-    for (size_t i = 0; i < srcStreams_.size(); ++i) {
-      srcStreams_[i].resize(domains_.size());
-      dstStreams_[i].resize(domains_.size());
-    }
-
-    for (size_t i = 0; i < srcStreams_.size(); ++i) {
-      for (size_t j = 0; j < srcStreams_[i].size(); ++j) {
-        srcStreams_[i][j] = RcStream(i);
-        dstStreams_[i][j] = RcStream(j);
-      }
-    }
-
-    // compute buffer sizes
+    // compute send and recv device buffer sizes
     bufSizes_ = std::vector<std::vector<size_t>>(
         domains_.size(), std::vector<size_t>(domains_.size(), 0));
     for (auto &msg : outbox_) {
@@ -174,16 +159,30 @@ public:
       }
     }
 
-    // initialize buffers
+
+    // initialize streams, events, and buffers
+    srcStreams_.resize(domains_.size());
+    dstStreams_.resize(domains_.size());
+    for (size_t i = 0; i < srcStreams_.size(); ++i) {
+      srcStreams_[i].resize(domains_.size());
+      dstStreams_[i].resize(domains_.size());
+    }
+    events_ = std::vector<std::vector<cudaEvent_t>>(domains_.size(), std::vector<cudaEvent_t>(domains.size()));
     srcBufs_ = std::vector<std::vector<void *>>(
         domains_.size(), std::vector<void *>(domains_.size(), nullptr));
     dstBufs_ = std::vector<std::vector<void *>>(
         domains_.size(), std::vector<void *>(domains_.size(), nullptr));
-    for (size_t i = 0; i < domains_.size(); ++i) {
-      for (size_t j = 0; j < domains_.size(); ++j) {
-        CUDA_RUNTIME(cudaSetDevice(i));
+    for (size_t i = 0; i < srcStreams_.size(); ++i) {
+      for (size_t j = 0; j < srcStreams_[i].size(); ++j) {
+	const int srcDev = domains_[i]->gpu();
+	const int dstDev = domains_[j]->gpu();
+        srcStreams_[i][j] = RcStream(srcDev);
+        dstStreams_[i][j] = RcStream(dstDev);
+	CUDA_RUNTIME(cudaSetDevice(srcDev));
+	CUDA_RUNTIME(cudaEventCreate(&events_[i][j]));
+        CUDA_RUNTIME(cudaSetDevice(srcDev));
         CUDA_RUNTIME(cudaMalloc(&srcBufs_[i][j], bufSizes_[i][j]));
-        CUDA_RUNTIME(cudaSetDevice(j));
+        CUDA_RUNTIME(cudaSetDevice(dstDev));
         CUDA_RUNTIME(cudaMalloc(&dstBufs_[i][j], bufSizes_[i][j]));
       }
     }
@@ -202,12 +201,22 @@ public:
     for (auto &msg : outbox_) {
       const int i = msg.srcGPU_;
       const int j = msg.dstGPU_;
+      assert(i < domains_.size());
+      assert(j < domains_.size());
       const LocalDomain *srcDomain = domains_[i];
       const LocalDomain *dstDomain = domains_[j];
       const int srcDev = srcDomain->gpu();
       const int dstDev = dstDomain->gpu();
+      assert(i < srcStreams_.size());
+      assert(j < srcStreams_[i].size());
+      assert(i < dstStreams_.size());
+      assert(j < dstStreams_[i].size());
       RcStream &srcStream = srcStreams_[i][j];
       RcStream &dstStream = dstStreams_[i][j];
+      assert(i < events_.size());
+      assert(j < events_[i].size());
+      assert(i < events_.size());
+      assert(j < events_[i].size());
       cudaEvent_t event = events_[i][j];
       const Dim3 dstSz = dstDomain->raw_size();
       const Dim3 srcSz = srcDomain->raw_size();
@@ -216,6 +225,9 @@ public:
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
       char *srcBuf = (char *)srcBufs_[i][j];
       char *dstBuf = (char *)dstBufs_[i][j];
+
+      assert(srcBuf);
+      assert(dstBuf);
 
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
 
