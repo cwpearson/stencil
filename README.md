@@ -110,8 +110,9 @@ ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
     * [x] Same-rank halo exchange with `cudaMemcpyPeer`
     * [ ] co-located MPI rank halo exchange with with `cudaIpc...` and `cudaMemcpyPeer`
     * [ ] automatic data placement in heterogeneous environments
-    * [ ] Manually hint which GPUs a distributed domain should use
+    * [ ] Control which GPUs a distributed domain should use
       * `DistributedDomain::use_gpus(const std::vector<int> &gpus)` 
+    * [x] Control which exchange method should be used
     * [ ] `cudaMemcpy3D` and family for data transfers & allocations
       * supports pitched arrays
     * [ ] Autodetect CUDA-Aware MPI support

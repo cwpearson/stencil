@@ -21,6 +21,28 @@
 #include "stencil/partition.hpp"
 #include "stencil/tx.hpp"
 
+enum class MethodFlags {
+  None = 0,
+  CudaMpi = 1,
+  CudaAwareMpi = 2,
+  CudaMemcpyPeer = 4,
+  CudaKernel = 8,
+  All = 1 + 2 + 4 + 8
+};
+static_assert(sizeof(MethodFlags) == sizeof(int));
+
+inline MethodFlags operator|(MethodFlags a, MethodFlags b) {
+  return static_cast<MethodFlags>(static_cast<int>(a) | static_cast<int>(b));
+}
+
+inline MethodFlags operator&(MethodFlags a, MethodFlags b) {
+  return static_cast<MethodFlags>(static_cast<int>(a) & static_cast<int>(b));
+}
+
+inline bool any(MethodFlags a) noexcept {
+  return a != MethodFlags::None;
+}
+
 class DistributedDomain {
 private:
   Dim3 size_;
@@ -62,8 +84,11 @@ private:
 
   std::vector<std::vector<bool>> peerAccess_; //<! which GPUs have peer access
 
+  MethodFlags flags_;
+
 public:
-  DistributedDomain(size_t x, size_t y, size_t z) : size_(x, y, z) {
+  DistributedDomain(size_t x, size_t y, size_t z)
+      : size_(x, y, z), flags_(MethodFlags::All) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
     int deviceCount;
@@ -191,6 +216,19 @@ public:
     return DataHandle<T>(dataElemSize_.size() - 1);
   }
 
+  /* Choose comm methods from MethodFlags
+
+    d.set_methods(MethodFlags::Any);
+    d.set_methods(MethodFlags::CudaAwareMpi | MethodFlags::Kernel);
+  */
+  void set_methods(MethodFlags flags) noexcept { flags_ = flags; }
+
+  /*! return true if any provided methods are enabled
+  */
+  bool any_methods(MethodFlags methods) const noexcept {
+    return (methods & flags_) != MethodFlags::None;
+  }
+
   void realize(bool useUnified = false) {
 
     // create local domains
@@ -240,43 +278,46 @@ public:
     std::vector<std::map<Dim3, std::vector<Message>>>
         remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
 
-    // per-domain senders and messages
-    remoteOutboxes.resize(gpus_.size());
-    remoteInboxes.resize(gpus_.size());
-    remoteSenders_.resize(gpus_.size());
-    remoteRecvers_.resize(gpus_.size());
-
-    // create all remote senders/recvers
     const Dim3 globalDim = partition_->gpu_dim() * partition_->rank_dim();
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      const Dim3 myIdx = partition_->dom_idx(rank_, di);
-      for (int z = -1; z < 1; ++z) {
-        for (int y = -1; y < 1; ++y) {
-          for (int x = -1; x < 1; ++x) {
-            Dim3 dir(x, y, z);
-            if (Dim3(0, 0, 0) == dir) {
-              continue; // no communication in this direction
-            }
-            Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
-            Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
-            const int srcRank = partition_->get_rank(srcIdx);
-            const int dstRank = partition_->get_rank(dstIdx);
-            const int srcGPU = partition_->get_gpu(srcIdx);
-            const int dstGPU = partition_->get_gpu(dstIdx);
 
-            if (rank_ != srcRank) {
-              if (0 == remoteRecvers_[di].count(srcIdx)) {
-                remoteRecvers_[di][srcIdx] =
-                    RemoteRecver(rank_, di, dstRank, dstGPU, domains_[di]);
-                remoteInboxes[di][srcIdx] = std::vector<Message>();
+    if (any_methods(MethodFlags::CudaMpi)) {
+      // per-domain senders and messages
+      remoteOutboxes.resize(gpus_.size());
+      remoteInboxes.resize(gpus_.size());
+      remoteSenders_.resize(gpus_.size());
+      remoteRecvers_.resize(gpus_.size());
+
+      // create all remote senders/recvers
+      for (size_t di = 0; di < domains_.size(); ++di) {
+        const Dim3 myIdx = partition_->dom_idx(rank_, di);
+        for (int z = -1; z < 1; ++z) {
+          for (int y = -1; y < 1; ++y) {
+            for (int x = -1; x < 1; ++x) {
+              Dim3 dir(x, y, z);
+              if (Dim3(0, 0, 0) == dir) {
+                continue; // no communication in this direction
               }
-            }
+              const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
+              const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
+              const int srcRank = partition_->get_rank(srcIdx);
+              const int dstRank = partition_->get_rank(dstIdx);
+              const int srcGPU = partition_->get_gpu(srcIdx);
+              const int dstGPU = partition_->get_gpu(dstIdx);
 
-            if (rank_ != dstRank) {
-              // TODO: don't reconstruct
-              remoteSenders_[di][dstIdx] =
-                  RemoteSender(srcRank, srcGPU, rank_, di, domains_[di]);
-              remoteOutboxes[di][dstIdx] = std::vector<Message>();
+              if (rank_ != srcRank) {
+                if (0 == remoteRecvers_[di].count(srcIdx)) {
+                  remoteRecvers_[di][srcIdx] =
+                      RemoteRecver(rank_, di, dstRank, dstGPU, domains_[di]);
+                  remoteInboxes[di][srcIdx] = std::vector<Message>();
+                }
+              }
+
+              if (rank_ != dstRank) {
+                // TODO: don't reconstruct
+                remoteSenders_[di][dstIdx] =
+                    RemoteSender(srcRank, srcGPU, rank_, di, domains_[di]);
+                remoteOutboxes[di][dstIdx] = std::vector<Message>();
+              }
             }
           }
         }
@@ -298,20 +339,27 @@ public:
             const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
             const int dstRank = partition_->get_rank(dstIdx);
             const int dstGPU = partition_->get_gpu(dstIdx);
-
             Message sMsg(dir, di, dstGPU);
             if (rank_ == dstRank) {
               const int myDev = domains_[di].gpu();
               const int dstDev = domains_[dstGPU].gpu();
-              if (myDev == dstDev) {
+              if ((myDev == dstDev) && any_methods(MethodFlags::CudaKernel)) {
                 peerAccessOutbox.push_back(sMsg);
-              } else {
+              } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
                 peerCopyOutbox.push_back(sMsg);
+              } else if (any_methods(MethodFlags::CudaMpi)) {
+                remoteOutboxes[di][dstIdx].push_back(sMsg);
+              } else {
+                std::cerr << "No method available to send required message\n";
+                exit(EXIT_FAILURE);
               }
-            } else if (colocated_.count(dstRank) != 0) {
+            } else if (colocated_.count(dstRank) && any_methods(MethodFlags::CudaMpi)) {
+              remoteOutboxes[di][dstIdx].push_back(sMsg);
+            } else if (any_methods(MethodFlags::CudaMpi)) {
               remoteOutboxes[di][dstIdx].push_back(sMsg);
             } else {
-              remoteOutboxes[di][dstIdx].push_back(sMsg);
+              std::cerr << "No method available to send required message\n";
+              exit(EXIT_FAILURE);
             }
 
             const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
@@ -321,15 +369,23 @@ public:
             if (rank_ == srcRank) {
               const int myDev = domains_[di].gpu();
               const int srcDev = domains_[srcGPU].gpu();
-              if (myDev == srcDev) {
+              if ((myDev == srcDev) && any_methods(MethodFlags::CudaKernel)) {
                 // no recver needed for same GPU
-              } else {
+              } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
                 // no recver needed for same rank
+              } else if (any_methods(MethodFlags::CudaMpi)) {
+                remoteInboxes[di][srcIdx].push_back(rMsg);
+              } else {
+                std::cerr << "No method available to recv required message\n";
+                exit(EXIT_FAILURE);
               }
-            } else if (colocated_.count(srcRank) != 0) {
+            } else if (colocated_.count(srcRank) && any_methods(MethodFlags::CudaMpi)) {
+              remoteInboxes[di][srcIdx].push_back(rMsg);
+            } else if (any_methods(MethodFlags::CudaMpi)){
               remoteInboxes[di][srcIdx].push_back(rMsg);
             } else {
-              remoteInboxes[di][srcIdx].push_back(rMsg);
+              std::cerr << "No method available to recv required message\n";
+              exit(EXIT_FAILURE);
             }
           }
         }
@@ -340,7 +396,8 @@ public:
     // prepare senders and receivers
     peerAccessSender_.prepare(peerAccessOutbox, domains_);
     peerCopySender_.prepare(peerCopyOutbox, domains_);
-    for (size_t di = 0; di < domains_.size(); ++di) {
+    assert(remoteSenders_.size() == remoteRecvers_.size());
+    for (size_t di = 0; di < remoteSenders_.size(); ++di) {
       for (auto &kv : remoteSenders_[di]) {
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
@@ -368,9 +425,8 @@ public:
 
     // start remote send d2h
     // printf("rank=%d send remote d2h\n", rank_);
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      for (auto &kv : remoteSenders_[di]) {
-        Dim3 dstIdx = kv.first;
+    for (auto &domSenders : remoteSenders_) {
+      for (auto &kv : domSenders) {
         RemoteSender &sender = kv.second;
         sender.send_d2h();
       }
@@ -378,9 +434,8 @@ public:
 
     // start remote recv h2h
     // printf("rank=%d recv remote h2h\n", rank_);
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      for (auto &kv : remoteRecvers_[di]) {
-        Dim3 srcIdx = kv.first;
+    for (auto &domRecvers : remoteRecvers_) {
+      for (auto &kv : domRecvers) {
         RemoteRecver &recver = kv.second;
         recver.recv_h2h();
       }
@@ -401,9 +456,8 @@ public:
       pending = false;
     recvers:
       // move recvers from h2h to h2d
-      for (size_t di = 0; di < domains_.size(); ++di) {
-        for (auto &kv : remoteRecvers_[di]) {
-          Dim3 srcIdx = kv.first;
+    for (auto &domRecvers : remoteRecvers_) {
+      for (auto &kv : domRecvers) {
           RemoteRecver &recver = kv.second;
           if (recver.is_h2h()) {
             pending = true;
@@ -416,9 +470,8 @@ public:
       }
     senders:
       // move senders from d2h to h2h
-      for (size_t di = 0; di < domains_.size(); ++di) {
-        for (auto &kv : remoteSenders_[di]) {
-          Dim3 dstIdx = kv.first;
+    for (auto &domSenders : remoteSenders_) {
+      for (auto &kv : domSenders) {
           RemoteSender &sender = kv.second;
           if (sender.is_d2h()) {
             pending = true;
@@ -441,14 +494,14 @@ public:
     nvtxRangePush("remote wait");
     // wait for remote senders and recvers
     // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      for (auto &kv : remoteRecvers_[di]) {
-        Dim3 srcIdx = kv.first;
+    for (auto &domRecvers : remoteRecvers_) {
+      for (auto &kv : domRecvers) {
         RemoteRecver &recver = kv.second;
         recver.wait();
       }
-      for (auto &kv : remoteSenders_[di]) {
-        Dim3 dstIdx = kv.first;
+    }
+    for (auto &domSenders : remoteSenders_) {
+      for (auto &kv : domSenders) {
         RemoteSender &sender = kv.second;
         sender.wait();
       }
