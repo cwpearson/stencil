@@ -504,7 +504,7 @@ public:
 
   void finish_prepare() { sender_.finish_prepare(); }
 
-  void send() {
+  void send() noexcept {
     // pack data into device buffer
     const Dim3 rawSz = domain_->raw_size();
     size_t bufOffset = 0;
@@ -527,6 +527,10 @@ public:
 
     // insert send into stream
     sender_.send(srcBuf_, stream_);
+  }
+
+  void wait() noexcept {
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
   }
 };
 
