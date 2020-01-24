@@ -316,28 +316,24 @@ private:
   MPI_Request idReq_;
 
 public:
+  ColocatedDeviceSender() : dstBuf_(nullptr), event_(0) {
+    CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess |
+                                              cudaEventDisableTiming));
+  }
   ColocatedDeviceSender(int srcRank, int srcGPU, // domain ID
                         int dstRank, int dstGPU, // domain ID
                         int srcDev)              // cuda ID
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        srcDev_(srcDev), dstBuf_(nullptr), bufSize_(0) {}
+        srcDev_(srcDev), dstBuf_(nullptr), bufSize_(0), event_(0) {}
 
   ~ColocatedDeviceSender() {
-    CUDA_RUNTIME(cudaIpcCloseMemHandle(dstBuf_));
+    if (dstBuf_) {
+      CUDA_RUNTIME(cudaIpcCloseMemHandle(dstBuf_));
+    }
+    dstBuf_ = nullptr;
+    if (event_) {
     CUDA_RUNTIME(cudaEventDestroy(event_));
-  }
-
-  static int evt_handle_tag(int payload) {
-    static_assert(sizeof(int) == 4);
-    return (payload & 0x0FFFFFFF) | 0x00000000;
-  }
-  static int mem_handle_tag(int payload) {
-    static_assert(sizeof(int) == 4);
-    return (payload & 0x0FFFFFFF) | 0x10000000;
-  }
-  static int dev_tag(int payload) {
-    static_assert(sizeof(int) == 4);
-    return (payload & 0x0FFFFFFF) | 0x20000000;
+    }
   }
 
   void start_prepare(size_t numBytes) {
@@ -348,13 +344,16 @@ public:
                                               cudaEventDisableTiming));
     CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
     MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_,
-              evt_handle_tag(dstGPU_), MPI_COMM_WORLD, &evtReq_);
+              make_tag<MsgKind::ColocatedEvt>(dstGPU_), MPI_COMM_WORLD,
+              &evtReq_);
 
     // Recieve the IPC mem handle
     MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_,
-              mem_handle_tag(srcGPU_), MPI_COMM_WORLD, &memReq_);
+              make_tag<MsgKind::ColocatedMem>(srcGPU_), MPI_COMM_WORLD,
+              &memReq_);
     // Retrieve the destination device id
-    MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_, dev_tag(srcGPU_), MPI_COMM_WORLD,
+    MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_,
+              make_tag<MsgKind::ColocatedDev>(srcGPU_), MPI_COMM_WORLD,
               &idReq_);
 
     // compute the required buffer size
@@ -394,33 +393,25 @@ private:
 
   cudaEvent_t event_;
 
-  char *devBuf_;
-
   cudaIpcMemHandle_t memHandle_;
   cudaIpcEventHandle_t evtHandle_;
   MPI_Request ipcReq_;
   MPI_Request idReq_;
   MPI_Request evtReq_;
 
-  static int evt_handle_tag(int payload) {
-    static_assert(sizeof(int) == 4);
-    return (payload & 0x0FFFFFFF) | 0x00000000;
-  }
-  static int mem_handle_tag(int payload) {
-    static_assert(sizeof(int) == 4);
-    return (payload & 0x0FFFFFFF) | 0x10000000;
-  }
-  static int dev_tag(int payload) {
-    static_assert(sizeof(int) == 4);
-    return (payload & 0x0FFFFFFF) | 0x20000000;
-  }
-
 public:
+  ColocatedDeviceRecver() : event_(0) {}
   ColocatedDeviceRecver(int srcRank, int srcGPU, int dstRank,
                         int dstGPU, // domain ID
                         int dstDev  // cuda ID
                         )
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), dstDev_(dstDev) {}
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), dstDev_(dstDev), event_(0) {}
+  ~ColocatedDeviceRecver() {
+    if (event_) {
+      CUDA_RUNTIME(cudaEventDestroy(event_));
+    }
+  }
+
 
   /*! prepare to recieve devPtr
    */
@@ -429,16 +420,19 @@ public:
     // recv the event handle
     std::cerr << "Irecv event handle\n";
     MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_,
-              evt_handle_tag(dstGPU_), MPI_COMM_WORLD, &evtReq_);
+              make_tag<MsgKind::ColocatedEvt>(dstGPU_), MPI_COMM_WORLD,
+              &evtReq_);
 
     // get an Ipc handle for it
     CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
 
     // Send the IPC handle to the ColocatedSender
     MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_,
-              mem_handle_tag(srcGPU_), MPI_COMM_WORLD, &ipcReq_);
+              make_tag<MsgKind::ColocatedMem>(srcGPU_), MPI_COMM_WORLD,
+              &ipcReq_);
     // Send the CUDA device id to the ColocatedSender
-    MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_, dev_tag(srcGPU_), MPI_COMM_WORLD,
+    MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_,
+              make_tag<MsgKind::ColocatedDev>(srcGPU_), MPI_COMM_WORLD,
               &idReq_);
   }
 
@@ -479,6 +473,7 @@ private:
   ColocatedDeviceSender sender_;
 
 public:
+  ColocatedHaloSender() : srcBuf_(nullptr) {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       const LocalDomain &domain)
       : domain_(&domain), srcBuf_(nullptr), bufSize_(0), stream_(domain.gpu()),
@@ -535,7 +530,7 @@ public:
   }
 };
 
-class ColocatedRecver {
+class ColocatedHaloRecver {
 private:
   int srcRank_;
   int srcGPU_;
@@ -544,62 +539,50 @@ private:
   const LocalDomain *domain_;
   std::vector<Message> inbox_;
 
-  cudaEvent_t event_;
   RcStream stream_;
 
   char *devBuf_;
   size_t bufSize_;
 
-  cudaIpcMemHandle_t memHandle_;
-  cudaIpcEventHandle_t evtHandle_;
-  MPI_Request ipcReq_;
-  MPI_Request idReq_;
-  MPI_Request evtReq_;
+  ColocatedDeviceRecver recver_;
 
 public:
-  ColocatedRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
+  ColocatedHaloRecver() : devBuf_(nullptr), domain_(nullptr) {
+  }
+  ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                   const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
-        devBuf_(nullptr), bufSize_(0) {}
+        devBuf_(nullptr), bufSize_(0), recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
+
+  ~ColocatedHaloRecver() {
+    CUDA_RUNTIME(cudaFree(devBuf_));
+  }
 
   void start_prepare(const std::vector<Message> &inbox) {
     inbox_ = inbox;
     std::sort(inbox_.begin(), inbox_.end());
 
+    // compute the buffer size
+    bufSize_ = 0;
+    for (auto &msg : inbox_) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
     // allocate a buffer
     CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
 
-    // get an Ipc handle for it
-    CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devBuf_));
-
-    // Send the IPC handle to the ColocatedSender
-    MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_, srcGPU_,
-              MPI_COMM_WORLD, &ipcReq_);
-    // Send the CUDA device id to the ColocatedSender
-    int dstDev = domain_->gpu();
-    MPI_Isend(&dstDev, 1, MPI_INT, srcRank_, srcGPU_, MPI_COMM_WORLD, &idReq_);
-
-    // recv the event handle
-    MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_, dstGPU_,
-              MPI_COMM_WORLD, &evtReq_);
+    // prepare to recieve
+    recver_.start_prepare(devBuf_, bufSize_);
   }
 
   void finish_prepare() {
-
-    // wait to recv the event
-    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
-
-    // wait to send the mem handle and the CUDA device ID
-    MPI_Wait(&ipcReq_, MPI_STATUS_IGNORE);
-    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
-
-    // convert event handle to event
-    CUDA_RUNTIME(cudaIpcOpenEventHandle(&event_, evtHandle_));
+    recver_.finish_prepare();
   }
 
   void recv() {
-    // wait for ColocatedSender cudaMemcpyPeerAsync to be done
-    CUDA_RUNTIME(cudaStreamWaitEvent(stream_, event_, 0 /*flags*/));
+    recver_.wait(stream_);
 
     // add unpacks to stream
     const Dim3 rawSz = domain_->raw_size();
@@ -621,6 +604,10 @@ public:
         bufOffset += domain_->halo_bytes(msg.dir_, i);
       }
     }
+  }
+
+  void wait() noexcept {
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
   }
 };
 
