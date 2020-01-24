@@ -25,9 +25,10 @@ enum class MethodFlags {
   None = 0,
   CudaMpi = 1,
   CudaAwareMpi = 2,
-  CudaMemcpyPeer = 4,
-  CudaKernel = 8,
-  All = 1 + 2 + 4 + 8
+  CudaMpiColocated = 4,
+  CudaMemcpyPeer = 8,
+  CudaKernel = 16,
+  All = 1 + 2 + 4 + 8 + 16
 };
 static_assert(sizeof(MethodFlags) == sizeof(int));
 
@@ -39,9 +40,7 @@ inline MethodFlags operator&(MethodFlags a, MethodFlags b) {
   return static_cast<MethodFlags>(static_cast<int>(a) & static_cast<int>(b));
 }
 
-inline bool any(MethodFlags a) noexcept {
-  return a != MethodFlags::None;
-}
+inline bool any(MethodFlags a) noexcept { return a != MethodFlags::None; }
 
 class DistributedDomain {
 private:
@@ -75,6 +74,9 @@ private:
 
   // cudaMemcpyPeerAsync sender for local exchanges
   PeerCopySender peerCopySender_;
+
+  std::vector<std::map<int, ColocatedHaloSender>> colocatedSenders_;
+  std::vector<std::map<int, ColocatedHaloRecver>> colocatedRecvers_;
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -224,7 +226,7 @@ public:
   void set_methods(MethodFlags flags) noexcept { flags_ = flags; }
 
   /*! return true if any provided methods are enabled
-  */
+   */
   bool any_methods(MethodFlags methods) const noexcept {
     return (methods & flags_) != MethodFlags::None;
   }
@@ -271,6 +273,12 @@ public:
     // outbox for same-rank exchanges
     std::vector<Message> peerCopyOutbox;
 
+    // outbox for co-located domains in different ranks
+    // one outbox for each co-located rank
+    std::vector<std::map<int, std::vector<Message>>> colocatedOutboxes;
+    std::vector<std::map<int, std::vector<Message>>> colocatedInboxes;
+    // colocatedOutboxes[di][dstRank] = messages
+
     // inbox for each remote domain my domains recv from
     std::vector<std::map<Dim3, std::vector<Message>>>
         remoteInboxes; // remoteOutboxes_[domain][srcIdx] = messages
@@ -280,6 +288,7 @@ public:
 
     const Dim3 globalDim = partition_->gpu_dim() * partition_->rank_dim();
 
+    // create remote sender/recvers
     if (any_methods(MethodFlags::CudaMpi)) {
       // per-domain senders and messages
       remoteOutboxes.resize(gpus_.size());
@@ -287,6 +296,7 @@ public:
       remoteSenders_.resize(gpus_.size());
       remoteRecvers_.resize(gpus_.size());
 
+      std::cerr << "create remote\n";
       // create all remote senders/recvers
       for (size_t di = 0; di < domains_.size(); ++di) {
         const Dim3 myIdx = partition_->dom_idx(rank_, di);
@@ -324,6 +334,49 @@ public:
       }
     }
 
+    std::cerr << "create colocated\n";
+    // create colocated sender/recvers
+    if (any_methods(MethodFlags::CudaMpiColocated)) {
+      // per-domain senders and messages
+      colocatedOutboxes.resize(gpus_.size());
+      colocatedInboxes.resize(gpus_.size());
+      colocatedRecvers_.resize(gpus_.size());
+      colocatedSenders_.resize(gpus_.size());
+
+      for (size_t di = 0; di < domains_.size(); ++di) {
+        const Dim3 myIdx = partition_->dom_idx(rank_, di);
+        for (int z = -1; z < 1; ++z) {
+          for (int y = -1; y < 1; ++y) {
+            for (int x = -1; x < 1; ++x) {
+              Dim3 dir(x, y, z);
+              if (Dim3(0, 0, 0) == dir) {
+                continue; // no communication in this direction
+              }
+              const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
+              const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
+              const int srcRank = partition_->get_rank(srcIdx);
+              const int dstRank = partition_->get_rank(dstIdx);
+              const int srcGPU = partition_->get_gpu(srcIdx);
+              const int dstGPU = partition_->get_gpu(dstIdx);
+
+              if ((rank_ != srcRank) && colocated_.count(srcRank)) {
+                colocatedRecvers_[di][srcRank] = ColocatedHaloRecver(
+                    srcRank, srcGPU, dstRank, dstGPU, domains_[di]);
+                colocatedInboxes[di][srcRank] = std::vector<Message>();
+              }
+
+              if ((rank_ != dstRank) && colocated_.count(dstRank)) {
+                colocatedSenders_[di][dstRank] = ColocatedHaloSender(
+                    srcRank, srcGPU, dstRank, dstGPU, domains_[di]);
+                colocatedOutboxes[di][srcRank] = std::vector<Message>();
+              }
+            }
+          }
+        }
+      }
+    }
+
+    std::cerr << "plan\n";
     // plan messages
     nvtxRangePush("DistributedDomain::realize() plan messages");
     for (size_t di = 0; di < domains_.size(); ++di) {
@@ -348,13 +401,18 @@ public:
               } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
                 peerCopyOutbox.push_back(sMsg);
               } else if (any_methods(MethodFlags::CudaMpi)) {
+                assert(di < remoteOutboxes.size());
+                assert(remoteOutboxes[di].count(dstIdx));
                 remoteOutboxes[di][dstIdx].push_back(sMsg);
               } else {
                 std::cerr << "No method available to send required message\n";
                 exit(EXIT_FAILURE);
               }
-            } else if (colocated_.count(dstRank) && any_methods(MethodFlags::CudaMpi)) {
-              remoteOutboxes[di][dstIdx].push_back(sMsg);
+            } else if (colocated_.count(dstRank) &&
+                       any_methods(MethodFlags::CudaMpiColocated)) {
+              assert(di < colocatedOutboxes.size());
+              assert(colocatedOutboxes[di].count(dstRank));
+              colocatedOutboxes[di][dstRank].push_back(sMsg);
             } else if (any_methods(MethodFlags::CudaMpi)) {
               remoteOutboxes[di][dstIdx].push_back(sMsg);
             } else {
@@ -379,9 +437,10 @@ public:
                 std::cerr << "No method available to recv required message\n";
                 exit(EXIT_FAILURE);
               }
-            } else if (colocated_.count(srcRank) && any_methods(MethodFlags::CudaMpi)) {
-              remoteInboxes[di][srcIdx].push_back(rMsg);
-            } else if (any_methods(MethodFlags::CudaMpi)){
+            } else if (colocated_.count(srcRank) &&
+                       any_methods(MethodFlags::CudaMpi)) {
+              colocatedInboxes[di][srcRank].push_back(rMsg);
+            } else if (any_methods(MethodFlags::CudaMpi)) {
               remoteInboxes[di][srcIdx].push_back(rMsg);
             } else {
               std::cerr << "No method available to recv required message\n";
@@ -393,9 +452,38 @@ public:
     }
     nvtxRangePop();
 
+    // summarize communication plan
+
     // prepare senders and receivers
+    std::cerr << "DistributedDomain::realize: prepare peerAccessSender\n";
     peerAccessSender_.prepare(peerAccessOutbox, domains_);
+    std::cerr << "DistributedDomain::realize: prepare peerCopySender\n";
     peerCopySender_.prepare(peerCopyOutbox, domains_);
+    std::cerr << "DistributedDomain::realize: prepare colocatedHaloSender\n";
+    assert(colocatedSenders_.size() == colocatedRecvers_.size());
+    for (size_t di = 0; di < colocatedSenders_.size(); ++di) {
+      for (auto &kv : colocatedSenders_[di]) {
+        const int dstRank = kv.first;
+        auto &sender = kv.second;
+        sender.start_prepare(colocatedOutboxes[di][dstRank]);
+      }
+      for (auto &kv : colocatedRecvers_[di]) {
+        const int srcRank = kv.first;
+        auto &recver = kv.second;
+        recver.start_prepare(colocatedInboxes[di][srcRank]);
+      }
+    }
+    for (size_t di = 0; di < colocatedSenders_.size(); ++di) {
+      for (auto &kv : colocatedSenders_[di]) {
+        auto &sender = kv.second;
+        sender.finish_prepare();
+      }
+      for (auto &kv : colocatedRecvers_[di]) {
+        auto &recver = kv.second;
+        recver.finish_prepare();
+      }
+    }
+    std::cerr << "DistributedDomain::realize: prepare remoteSender\n";
     assert(remoteSenders_.size() == remoteRecvers_.size());
     for (size_t di = 0; di < remoteSenders_.size(); ++di) {
       for (auto &kv : remoteSenders_[di]) {
@@ -441,6 +529,22 @@ public:
       }
     }
 
+    // start colocated Senders
+    for (auto &domSenders : colocatedSenders_) {
+      for (auto &kv : domSenders) {
+        ColocatedHaloSender &sender = kv.second;
+        sender.send();
+      }
+    }
+
+    // start colocated recvers
+        for (auto &domRecvers : colocatedRecvers_) {
+      for (auto &kv : domRecvers) {
+        ColocatedHaloRecver &recver = kv.second;
+        recver.recv();
+      }
+    }
+
     // send same-rank messages
     // printf("rank=%d send peer copy\n", rank_);
     peerCopySender_.send();
@@ -456,8 +560,8 @@ public:
       pending = false;
     recvers:
       // move recvers from h2h to h2d
-    for (auto &domRecvers : remoteRecvers_) {
-      for (auto &kv : domRecvers) {
+      for (auto &domRecvers : remoteRecvers_) {
+        for (auto &kv : domRecvers) {
           RemoteRecver &recver = kv.second;
           if (recver.is_h2h()) {
             pending = true;
@@ -470,8 +574,8 @@ public:
       }
     senders:
       // move senders from d2h to h2h
-    for (auto &domSenders : remoteSenders_) {
-      for (auto &kv : domSenders) {
+      for (auto &domSenders : remoteSenders_) {
+        for (auto &kv : domSenders) {
           RemoteSender &sender = kv.second;
           if (sender.is_d2h()) {
             pending = true;
@@ -490,6 +594,26 @@ public:
     nvtxRangePush("peerAccessSender.wait()");
     peerAccessSender_.wait();
     nvtxRangePop();
+
+    nvtxRangePush("peerCopySender.wait()");
+    peerCopySender_.wait();
+    nvtxRangePop();
+
+    // wait for colocated
+    nvtxRangePush("colocated.wait()");
+    for (auto &domSenders : colocatedSenders_) {
+      for (auto &kv : domSenders) {
+        ColocatedHaloSender &sender = kv.second;
+        sender.wait();
+      }
+    }
+    for (auto &domRecvers : colocatedRecvers_) {
+      for (auto &kv : domRecvers) {
+        ColocatedHaloRecver &recver = kv.second;
+        recver.wait();
+      }
+    }
+    nvtxRangePop(); // colocated wait
 
     nvtxRangePush("remote wait");
     // wait for remote senders and recvers
