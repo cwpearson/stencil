@@ -68,12 +68,14 @@ TEST_CASE("exchange") {
   size_t radius = 1;
   typedef float TestType1;
 
-  INFO("create");
+  INFO("ctor");
   DistributedDomain dd(10, 10, 10);
   dd.set_radius(radius);
   auto dh1 = dd.add_data<TestType1>();
+  INFO("realize");
   dd.realize();
 
+  INFO("barrier");
   MPI_Barrier(MPI_COMM_WORLD);
 
   INFO("init");
