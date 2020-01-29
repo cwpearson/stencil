@@ -142,7 +142,7 @@ The underlying stream is released when the reference count drops to zero.
 
 ### GPU Distance Matrix
 
-`include/stencil/gpu_topo.hpp`
+`include/stencil/gpu_topology.hpp`
 
 The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
 This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
