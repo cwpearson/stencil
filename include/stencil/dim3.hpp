@@ -101,6 +101,10 @@ public:
   CUDA_CALLABLE_MEMBER bool all_lt(const int64_t rhs) const {
     return x < rhs && y < rhs && z < rhs;
   }
+  
+  CUDA_CALLABLE_MEMBER bool all_lt(const Dim3 rhs) const {
+    return x < rhs.x && y < rhs.y && z < rhs.z;
+  }
 
   CUDA_CALLABLE_MEMBER bool all_gt(const int64_t rhs) const {
     return x > rhs && y > rhs && z > rhs;
