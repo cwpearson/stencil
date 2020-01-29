@@ -379,7 +379,9 @@ public:
     assert(rank < ranks_);
     assert(rank < domIdx_.size());
     assert(domId < domIdx_[rank].size());
-    return domIdx_[rank][domId];
+    const Dim3 ret = domIdx_[rank][domId];
+    assert(ret.all_lt(gpu_dim() * rank_dim()));
+    return ret;
   }
 
   /* return the rank for a domain
@@ -662,7 +664,7 @@ public:
       const int domId = id % rankGpus.size();
       const Dim3 gpuIdx = dimensionize(domId, gpuDim_);
       const Dim3 rankIdx = dimensionize(rank, rankDim_);
-      const Dim3 domIdx = rankIdx + gpuDim_ + gpuIdx;
+      const Dim3 domIdx = rankIdx * gpuDim_ + gpuIdx;
       std::cerr << "id=" << id << "(cuda=" << nodeGpus[id]
                 << ") rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " rank=" << rank
                 << " domId=" << domId << "\n";
