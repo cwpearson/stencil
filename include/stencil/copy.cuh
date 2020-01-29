@@ -50,9 +50,6 @@ static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
                               const void *__restrict__ src,
                               const size_t elemSize) {
 
-  char *cDst = reinterpret_cast<char *>(dst);
-  const char *cSrc = reinterpret_cast<const char *>(src);
-
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
   const size_t tx = blockDim.x * blockIdx.x + threadIdx.x;
@@ -68,7 +65,19 @@ static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
         // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
         // xo,
         //        yo, zo, oi);
-        memcpy(&cDst[oi * elemSize], &cSrc[ii * elemSize], elemSize);
+        if (4 == elemSize) {
+          uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
+          const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
+          pDst[oi] = pSrc[ii];
+        } else if (8 == elemSize) {
+          uint64_t *pDst = reinterpret_cast<uint64_t *>(dst);
+          const uint64_t *pSrc = reinterpret_cast<const uint64_t *>(src);
+          pDst[oi] = pSrc[ii];
+        } else {
+          char *pDst = reinterpret_cast<char *>(dst);
+          const char *pSrc = reinterpret_cast<const char *>(src);
+          memcpy(&pDst[oi * elemSize], &pSrc[ii * elemSize], elemSize);
+        }
       }
     }
   }
