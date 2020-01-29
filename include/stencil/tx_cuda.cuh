@@ -24,17 +24,6 @@
 // #define REGION_LOUD
 // #define REMOTE_LOUD
 
-static int nextPowerOfTwo(int x) {
-  x--;
-  x |= x >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  x++;
-  return x;
-}
-
 inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::hex << std::setfill('0'); // needs to be set only once
   auto *ptr = reinterpret_cast<const unsigned char *>(obj);
@@ -47,7 +36,31 @@ inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::endl;
 }
 
-static int ceil(int a, int b) { return a > b ? a : b; }
+static int nextPowerOfTwo(int x) {
+  x--;
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  x |= x >> 8;
+  x |= x >> 16;
+  x++;
+  return x;
+}
+
+static Dim3 make_block_dim(const Dim3 extent, int threads) {
+  Dim3 ret;
+  ret.x = min(threads, nextPowerOfTwo(extent.x));
+  threads /= ret.x;
+  ret.y = min(threads, nextPowerOfTwo(extent.y));
+  threads /= ret.y;
+  ret.z = min(threads, nextPowerOfTwo(extent.z));
+  assert(ret.x < 1024);
+  assert(ret.y < 1024);
+  assert(ret.z < 1024);
+  assert(ret.x * ret.y * ret.z < 1024);
+  std::cerr << extent << " " << ret << "\n";
+  return ret;
+}
 
 class Message {
 private:
@@ -71,16 +84,6 @@ private:
   std::vector<RcStream> streams_;
 
   std::vector<const LocalDomain *> domains_;
-
-  static Dim3 make_block_dim(const Dim3 extent, int threads) {
-    Dim3 ret;
-    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
-    threads /= ret.x;
-    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
-    threads /= ret.y;
-    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
-    return ret;
-  }
 
 public:
   PeerAccessSender() {}
@@ -175,18 +178,6 @@ public:
   PeerCopySender() {}
 
   ~PeerCopySender() {}
-
-  static int ceil(int a, int b) { return a > b ? a : b; }
-
-  static Dim3 make_block_dim(const Dim3 extent, int threads) {
-    Dim3 ret;
-    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
-    threads /= ret.x;
-    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
-    threads /= ret.y;
-    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
-    return ret;
-  }
 
   void prepare(std::vector<Message> &outbox,
                const std::vector<LocalDomain> &domains) {
@@ -525,16 +516,6 @@ private:
   RcStream stream_;
   ColocatedDeviceSender sender_;
 
-  static Dim3 make_block_dim(const Dim3 extent, int threads) {
-    Dim3 ret;
-    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
-    threads /= ret.x;
-    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
-    threads /= ret.y;
-    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
-    return ret;
-  }
-
 public:
   ColocatedHaloSender() : srcBuf_(nullptr) {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
@@ -614,16 +595,6 @@ private:
   size_t bufSize_;
 
   ColocatedDeviceRecver recver_;
-
-  static Dim3 make_block_dim(const Dim3 extent, int threads) {
-    Dim3 ret;
-    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
-    threads /= ret.x;
-    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
-    threads /= ret.y;
-    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
-    return ret;
-  }
 
 public:
   ColocatedHaloRecver() : devBuf_(nullptr), domain_(nullptr) {}
