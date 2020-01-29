@@ -351,8 +351,15 @@ private:
     return count;
   }
 
-  std::map<int, Dim3> gpuIdx_; // domainId to gpuIdx
-  std::map<Dim3, int> domId_;  // gpuIdx to domainId
+  // map of domIdx to cuda device for all ranks
+  std::map<Dim3, int> cudaId_;
+  // convert domIdx to domId for all ranks
+  std::map<Dim3, int> domId_;
+  // convert rank and domain ID to domainIdx
+  // since each domain is already attached to a GPU, and the domIdx controls the communication requirements,
+  // there is no direct conversion between domainId and domIdx.
+  // domIdx_[rank][domId] = domIdx
+  std::vector<std::vector<Dim3>> domIdx_;
 
 public:
   Dim3 gpu_dim() const { return gpuDim_; }
@@ -365,18 +372,14 @@ public:
     return dimensionize(rank, rankDim_);
   }
 
-  /*! return the gpuIdx for a domain ID
-   */
-  Dim3 gpu_idx(const int domId) { return gpuIdx_[domId]; }
-
   /*! return the compute domain index associated with a particular rank and
       domain ID `domId`.
   */
   Dim3 dom_idx(int rank, int domId) {
     assert(rank < ranks_);
-    Dim3 rIdx = rank_idx(rank);
-    Dim3 gIdx = gpu_idx(domId);
-    return rIdx * gpuDim_ + gIdx;
+    assert(rank < domIdx_.size());
+    assert(domId < domIdx_[rank].size());
+    return domIdx_[rank][domId];
   }
 
   /* return the rank for a domain
@@ -389,9 +392,12 @@ public:
   /*! return the domain id for a domain, consistent with indices passed into
       the constructor
   */
-  int get_gpu(Dim3 domIdx) {
-    domIdx %= gpuDim_;
+  int get_gpu(const Dim3 &domIdx) {
     return domId_[domIdx];
+  }
+
+  int get_cuda(const Dim3 &domIdx) {
+    return cudaId_[domIdx];
   }
 
   Dim3 domain_size(const Dim3 &domIdx) {
@@ -421,6 +427,11 @@ public:
       : size_(domSize), ranks_(ranks), gpuDim_(1, 1, 1), rankDim_(1, 1, 1) {
 
     // TODO: make sure everyone is contributing the same number of GPUs
+
+    domIdx_.resize(ranks_);
+    for (auto &v : domIdx_) {
+      v.resize(rankGpus.size());
+    }
 
     domSize_ = size_;
     auto rankFactors = prime_factors(ranks_);
@@ -551,7 +562,7 @@ public:
       std::cerr << ss.str();
     }
 
-    // build a bandwidth matrix between all participating GPUs
+    // build a bandwidth matrix between all participating GPUs on the node
     Mat2D<double> gpuBandwidth;
     gpuBandwidth.resize(numDomains);
     for (auto &r : gpuBandwidth) {
@@ -638,6 +649,12 @@ public:
       }
     } while (std::next_permutation(mapping.begin(), mapping.end()));
 
+
+    // gather up per-rank and global information about what cuda device is used for each domain
+    std::vector<Dim3> localDomIdx, allDomIdx(rankGpus.size() * mpiTopo.size());
+    std::vector<int> localDomId, allDomId(rankGpus.size() * mpiTopo.size());
+    std::vector<int> allCudaId(rankGpus.size() * mpiTopo.size());
+
     std::cerr << "found best placement\n";
     for (size_t i = 0; i < bestMap.size(); ++i) {
       const int id = bestMap[i]; // id of gpu in the node
@@ -645,20 +662,52 @@ public:
       const int domId = id % rankGpus.size();
       const Dim3 gpuIdx = dimensionize(domId, gpuDim_);
       const Dim3 rankIdx = dimensionize(rank, rankDim_);
+      const Dim3 domIdx = rankIdx + gpuDim_ + gpuIdx;
       std::cerr << "id=" << id << "(cuda=" << nodeGpus[id]
                 << ") rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " rank=" << rank
                 << " domId=" << domId << "\n";
-      // only save the mapping relevant to my rank
+      // only send the mapping from my rank
       if (rank == mpiTopo.rank()) {
-        std::cerr << "rank=" << rank << " mapping gpuIdx=" << gpuIdx
-                  << " to domId " << domId << "\n";
-        gpuIdx_[domId] = gpuIdx;
-        domId_[gpuIdx] = domId;
-        // FIXME: assumes placement decisions are identical on all ranks
-        // smaller domains at the outside edges if domain doesn't divide evenly could change this?
+        localDomIdx.push_back(domIdx);
+        localDomId.push_back(domId);
       }
     }
     std::cerr << "\n";
+
+    // should be no duplicates
+
+    // should be one domain in the rank per GPU
+    assert(localDomIdx.size() == rankGpus.size());
+
+    // all ranks provide their domain indices
+    {
+    size_t numBytes = localDomIdx.size() * sizeof(localDomIdx[0]);
+    MPI_Allgather(localDomIdx.data(), numBytes, MPI_BYTE, allDomIdx.data(), numBytes, MPI_BYTE, mpiTopo.comm());
+    }
+
+    // all ranks provide the corresponding cuda device ID
+    MPI_Allgather(rankGpus.data(), rankGpus.size(), MPI_INT, allCudaId.data(), rankGpus.size(), MPI_INT, mpiTopo.comm());
+
+    // all ranks provide the corresponding domain ID
+    MPI_Allgather(localDomId.data(), localDomId.size(), MPI_INT, allDomId.data(), localDomId.size(), MPI_INT, mpiTopo.comm());
+
+
+    for (size_t i = 0; i < allCudaId.size(); ++i) {
+      const int rank = i / rankGpus.size(); // TODO: assuming all ranks provide the same number of GPUs
+      const Dim3 domIdx = allDomIdx[i];
+      const int cuda = allCudaId[i];
+      const int domId = allDomId[i];
+
+      assert(cudaId_.count(domIdx) == 0);
+      cudaId_[domIdx] = cuda;
+      domId_[domIdx] = domId;
+
+      assert(rank < domIdx_.size());
+      assert(domId < domIdx_[rank].size());
+      domIdx_[rank][domId] = domIdx;
+    }
+
+
   }
 
   // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
