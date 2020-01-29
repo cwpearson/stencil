@@ -42,6 +42,7 @@ int main(int argc, char **argv) {
   512^3 on Volta  20.1ms
   */
 
+  {
   size_t radius = 3;
 
   DistributedDomain dd(x, y, z);
@@ -67,6 +68,7 @@ int main(int argc, char **argv) {
     std::this_thread::sleep_for(dur);
     nvtxRangePop();
   }
+} // send domains out of scope before MPI_Finalize
 
   MPI_Finalize();
 
