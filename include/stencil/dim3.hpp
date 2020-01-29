@@ -110,6 +110,14 @@ public:
     return x >= rhs && y >= rhs && z >= rhs;
   }
 
+  CUDA_CALLABLE_MEMBER bool any_lt(const int64_t rhs) const {
+    return x < rhs || y < rhs || z < rhs;
+  }
+
+  CUDA_CALLABLE_MEMBER bool any_gt(const int64_t rhs) const {
+    return x > rhs || y > rhs || z > rhs;
+  }
+
   CUDA_CALLABLE_MEMBER Dim3 &operator%=(const Dim3 &rhs) {
     x %= rhs.x;
     y %= rhs.y;
