@@ -72,6 +72,8 @@ Restrict profiling to CUDA, NVTX, and OS calls.
 nsys profile -t cuda,nvtx,osrt mpirun -n <int> src/astaroth-sim
 ```
 
+Nsight Systems 2019.5.2 allows `-t mpi`, but on amd64 it causes the importer to hang.
+
 Use the Nsight Systems application to view the resulting `qdrep` file.
 
 ## Profiling with nvprof
