@@ -561,12 +561,11 @@ public:
       const Dim3 extent = domain_->halo_extent(msg.dir_);
       const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-
+      assert(stream_.device() == domain_->gpu());
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         const char *src = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
-        assert(stream_.device() == domain_->gpu());
-        CUDA_RUNTIME(cudaSetDevice(stream_.device()));
         pack<<<dimGrid, dimBlock, 0, stream_>>>(&srcBuf_[bufOffset], src, rawSz,
                                                 0, pos, extent, elemSz);
         bufOffset += domain_->halo_bytes(msg.dir_, i);
@@ -645,11 +644,11 @@ public:
       const Dim3 extent = domain_->halo_extent(msg.dir_);
       const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      assert(stream_.device() == domain_->gpu());
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         char *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
-        CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-        assert(stream_.device() == domain_->gpu());
         unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
                                                   &devBuf_[bufOffset], elemSz);
         bufOffset += domain_->halo_bytes(msg.dir_, i);
@@ -741,18 +740,17 @@ public:
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
-    dim3 dimBlock(8, 8, 8);
     size_t bufOffset = 0;
     for (auto &msg : outbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      assert(stream_.device() == domain_->gpu());
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         const char *src = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
-        assert(stream_.device() == domain_->gpu());
-        CUDA_RUNTIME(cudaSetDevice(stream_.device()));
         pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
                                                 0, pos, extent, elemSz);
         bufOffset += domain_->halo_bytes(msg.dir_, i);
@@ -869,17 +867,18 @@ public:
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
-    dim3 dimBlock(8, 8, 8);
     size_t bufOffset = 0;
     for (auto &msg : inbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      const dim3 dimBlock =
+          make_block_dim(extent, 1024 /* threads per block */);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      assert(stream_.device() == domain_->gpu());
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         char *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
-        CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-        assert(stream_.device() == domain_->gpu());
         unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
                                                   &devBuf_[bufOffset], elemSz);
         bufOffset += domain_->halo_bytes(msg.dir_, i);
