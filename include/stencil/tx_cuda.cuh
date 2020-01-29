@@ -153,6 +153,29 @@ public:
 
   ~PeerCopySender() {}
 
+  static int nextPowerOfTwo(int x) {
+    x--;
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x++;
+    return x;
+  }
+
+  static int ceil(int a, int b) { return a > b ? a : b; }
+
+  static Dim3 make_block_dim(const Dim3 extent, int threads) {
+    Dim3 ret;
+    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
+    threads /= ret.x;
+    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
+    threads /= ret.y;
+    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
+    return ret;
+  }
+
   void prepare(std::vector<Message> &outbox,
                const std::vector<LocalDomain> &domains) {
     outbox_ = outbox;
@@ -210,7 +233,6 @@ public:
         domains_.size(), std::vector<size_t>(domains_.size(), 0));
 
     // insert packs and copies into src stream, and unpacks into dst stream
-    const dim3 dimBlock(8, 8, 8);
     for (auto &msg : outbox_) {
       const int i = msg.srcGPU_;
       const int j = msg.dstGPU_;
@@ -242,6 +264,7 @@ public:
       assert(srcBuf);
       assert(dstBuf);
 
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
 
       // insert packs
@@ -261,7 +284,7 @@ public:
                                        bufSizes_[i][j], srcStream));
       CUDA_RUNTIME(cudaEventRecord(event, srcStream));
 
-      // insert dsts
+      // insert unpacks
       CUDA_RUNTIME(cudaSetDevice(dstStream.device()));
       bufOffset = bufOffsets[i][j];
       for (size_t n = 0; n < dstDomain->num_data(); ++n) {
@@ -337,7 +360,8 @@ public:
   void start_prepare(size_t numBytes) {
     const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
-    //fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
+    // fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to
+    // r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
 
     // create an event and associated handle
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
@@ -365,7 +389,8 @@ public:
   void finish_prepare() {
     // block until we have recved the device ID
     MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
-    //fprintf(stderr, "ColoDevSend::finish_prepare: srcDev=%d dstDev=%d (r%dg%d to r%dg%d)\n", srcDev_, dstDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
+    // fprintf(stderr, "ColoDevSend::finish_prepare: srcDev=%d dstDev=%d (r%dg%d
+    // to r%dg%d)\n", srcDev_, dstDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
 
     // wait for recv mem handle
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
@@ -392,8 +417,7 @@ public:
     CUDA_RUNTIME(cudaEventRecord(event_, stream));
   }
 
-  void wait() { 
-    CUDA_RUNTIME(cudaEventSynchronize(event_)); }
+  void wait() { CUDA_RUNTIME(cudaEventSynchronize(event_)); }
 };
 
 class ColocatedDeviceRecver {
@@ -428,7 +452,8 @@ public:
   /*! prepare to recieve devPtr
    */
   void start_prepare(void *devPtr, const size_t numBytes) {
-    //fprintf(stderr, "ColoDevRecv::start_prepare: send mem on %d(%d) to r%dg%d\n", dstDev_, dstGPU_, srcRank_, srcGPU_);
+    // fprintf(stderr, "ColoDevRecv::start_prepare: send mem on %d(%d) to
+    // r%dg%d\n", dstDev_, dstGPU_, srcRank_, srcGPU_);
 
     int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
@@ -463,8 +488,6 @@ public:
     // wait to send the mem handle and the CUDA device ID
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
     MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
-
-
   }
 
   /*! have stream wait for data to arrive
@@ -517,7 +540,8 @@ public:
     std::sort(outbox_.begin(), outbox_.end());
 
     // allocate a buffer
-    //fprintf(stderr, "ColoHaloSend:start_prepare: alloc on %d\n", domain_->gpu());
+    // fprintf(stderr, "ColoHaloSend:start_prepare: alloc on %d\n",
+    // domain_->gpu());
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     CUDA_RUNTIME(cudaMalloc(&srcBuf_, bufSize_));
   }
@@ -549,9 +573,7 @@ public:
     sender_.send(srcBuf_, stream_);
   }
 
-  void wait() noexcept { 
-    sender_.wait();
-  }
+  void wait() noexcept { sender_.wait(); }
 };
 
 class ColocatedHaloRecver {
@@ -593,7 +615,8 @@ public:
     }
 
     // allocate a buffer
-    //fprintf(stderr, "ColoHaloRecv:start_prepare: alloc on %d for r%dg%d\n", domain_->gpu(),srcRank_, srcGPU_);
+    // fprintf(stderr, "ColoHaloRecv:start_prepare: alloc on %d for r%dg%d\n",
+    // domain_->gpu(),srcRank_, srcGPU_);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
     assert(devBuf_);
@@ -630,9 +653,10 @@ public:
     }
   }
 
-  void wait() noexcept { 
+  void wait() noexcept {
     assert(stream_.device() == domain_->gpu());
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+  }
 };
 
 /*! Send from one domain to a remote domain
@@ -702,7 +726,8 @@ public:
     CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
     assert(hostBuf_);
 
-    //fprintf(stderr, "RemoteSender::prepare r%dg%d -> r%dg%d %luB\n", srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+    // fprintf(stderr, "RemoteSender::prepare r%dg%d -> r%dg%d %luB\n",
+    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
   void send_d2h() {
@@ -825,7 +850,8 @@ public:
     CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
     CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
     assert(hostBuf_);
-    //fprintf(stderr, "RemoteRecver::prepare r%dg%d -> r%dg%d %luB\n", srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+    // fprintf(stderr, "RemoteRecver::prepare r%dg%d -> r%dg%d %luB\n",
+    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
   void recv_h2d() {
