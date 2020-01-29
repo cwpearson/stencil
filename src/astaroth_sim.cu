@@ -59,10 +59,12 @@ int main(int argc, char **argv) {
   MPI_Barrier(MPI_COMM_WORLD);
 
   for (size_t iter = 0; iter < 3; ++iter) {
+    std::cerr << "exchange\n";
     nvtxRangePush("exchange");
     dd.exchange();
     nvtxRangePop();
 
+    std::cerr << "kernels\n";
     nvtxRangePush("kernels");
     auto dur = std::chrono::duration<double, std::milli>(kernelMillis);
     std::this_thread::sleep_for(dur);
