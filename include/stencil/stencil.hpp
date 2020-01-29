@@ -122,7 +122,6 @@ public:
     }
     assert(!gpus_.empty());
 
-
     // create a list of cuda device IDs in use by the ranks on this node
     // TODO: assumes all ranks use the same number of GPUs
     MPI_Barrier(MPI_COMM_WORLD);
@@ -307,6 +306,8 @@ public:
       for (size_t di = 0; di < domains_.size(); ++di) {
         const Dim3 myIdx = nap_->dom_idx(rank_, di);
         const int myGPU = nap_->get_gpu(myIdx);
+        const int myDev = domains_[di].gpu();
+        assert(myDev == nap_->get_cuda(myIdx));
         for (int z = -1; z < 1; ++z) {
           for (int y = -1; y < 1; ++y) {
             for (int x = -1; x < 1; ++x) {
@@ -320,8 +321,11 @@ public:
               const int dstRank = nap_->get_rank(dstIdx);
               const int srcGPU = nap_->get_gpu(srcIdx);
               const int dstGPU = nap_->get_gpu(dstIdx);
+              const int srcDev = nap_->get_cuda(srcIdx);
+              const int dstDev = nap_->get_cuda(dstIdx);
 
-              if ((rank_ != srcRank) && mpiTopology_.colocated(srcRank)) {
+              if ((rank_ != srcRank) && mpiTopology_.colocated(srcRank) &&
+                  gpuTopology_.peer(srcDev, myDev)) {
                 std::cerr << "create colo recv " << srcIdx << "=r" << srcRank
                           << "d" << srcGPU << " -> " << myIdx << "=r" << rank_
                           << "d" << myGPU << "\n";
@@ -330,7 +334,8 @@ public:
                 coloInboxes[di][srcIdx] = std::vector<Message>();
               }
 
-              if ((rank_ != dstRank) && mpiTopology_.colocated(dstRank)) {
+              if ((rank_ != dstRank) && mpiTopology_.colocated(dstRank) &&
+                  gpuTopology_.peer(myDev, dstDev)) {
                 std::cerr << "create colo send " << myIdx << "=r" << rank_
                           << "d" << myGPU << " -> " << dstIdx << "=r" << dstRank
                           << "d" << dstGPU << "\n";
@@ -350,6 +355,8 @@ public:
     nvtxRangePush("DistributedDomain::realize() plan messages");
     for (size_t di = 0; di < domains_.size(); ++di) {
       const Dim3 myIdx = nap_->dom_idx(rank_, di);
+      const int myDev = domains_[di].gpu();
+      assert(myDev == nap_->get_cuda(myIdx));
       for (int z = -1; z < 1; ++z) {
         for (int y = -1; y < 1; ++y) {
           for (int x = -1; x < 1; ++x) {
@@ -361,6 +368,7 @@ public:
             const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
             const int dstRank = nap_->get_rank(dstIdx);
             const int dstGPU = nap_->get_gpu(dstIdx);
+            const int dstDev = nap_->get_cuda(dstIdx);
             Message sMsg(dir, di, dstGPU);
             if (rank_ == dstRank) {
               const int myDev = domains_[di].gpu();
@@ -377,8 +385,9 @@ public:
                 std::cerr << "No method available to send required message\n";
                 exit(EXIT_FAILURE);
               }
-            } else if (mpiTopology_.colocated(dstRank) &&
-                       any_methods(MethodFlags::CudaMpiColocated)) {
+            } else if (any_methods(MethodFlags::CudaMpiColocated) &&
+                       mpiTopology_.colocated(dstRank) &&
+                       gpuTopology_.peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
               assert(coloOutboxes[di].count(dstIdx));
               coloOutboxes[di][dstIdx].push_back(sMsg);
@@ -392,6 +401,7 @@ public:
             const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
             const int srcRank = nap_->get_rank(srcIdx);
             const int srcGPU = nap_->get_gpu(srcIdx);
+            const int srcDev = nap_->get_cuda(srcIdx);
             Message rMsg(dir, srcGPU, di);
             if (rank_ == srcRank) {
               const int myDev = domains_[di].gpu();
@@ -406,8 +416,9 @@ public:
                 std::cerr << "No method available to recv required message\n";
                 exit(EXIT_FAILURE);
               }
-            } else if (mpiTopology_.colocated(srcRank) &&
-                       any_methods(MethodFlags::CudaMpiColocated)) {
+            } else if (any_methods(MethodFlags::CudaMpiColocated) &&
+                       mpiTopology_.colocated(srcRank) &&
+                       gpuTopology_.peer(srcDev, myDev)) {
               coloInboxes[di][srcIdx].push_back(rMsg);
             } else if (any_methods(MethodFlags::CudaMpi)) {
               remoteInboxes[di][srcIdx].push_back(rMsg);
@@ -534,7 +545,6 @@ public:
       }
     }
     nvtxRangePop();
-
 
     // send same-rank messages
     // printf("rank=%d send peer copy\n", rank_);
