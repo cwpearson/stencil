@@ -246,6 +246,7 @@ public:
     const Dim3 globalDim = nap_->gpu_dim() * nap_->rank_dim();
 
     // create remote sender/recvers
+    nvtxRangePush("DistributedDomain::realize: create remote");
     if (any_methods(MethodFlags::CudaMpi)) {
       // per-domain senders and messages
       remoteOutboxes.resize(gpus_.size());
@@ -290,9 +291,11 @@ public:
         }
       }
     }
+    nvtxRangePop(); // create remote
 
     std::cerr << "create colocated\n";
     // create colocated sender/recvers
+    nvtxRangePush("DistributedDomain::realize: create colocated");
     if (any_methods(MethodFlags::CudaMpiColocated)) {
       // per-domain senders and messages
       coloOutboxes.resize(gpus_.size());
@@ -339,6 +342,7 @@ public:
         }
       }
     }
+    nvtxRangePop(); // create colocated
 
     std::cerr << "plan\n";
     // plan messages
@@ -420,9 +424,13 @@ public:
 
     // prepare senders and receivers
     std::cerr << "DistributedDomain::realize: prepare peerAccessSender\n";
+    nvtxRangePush("DistributedDomain::realize: prep peerAccessSender");
     peerAccessSender_.prepare(peerAccessOutbox, domains_);
+    nvtxRangePop();
     std::cerr << "DistributedDomain::realize: prepare peerCopySender\n";
+    nvtxRangePush("DistributedDomain::realize: prep peerCopySender");
     peerCopySender_.prepare(peerCopyOutbox, domains_);
+    nvtxRangePop();
     std::cerr << "DistributedDomain::realize: prepare colocatedHaloSender\n";
     assert(coloSenders_.size() == coloRecvers_.size());
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
@@ -453,7 +461,9 @@ public:
         recver.finish_prepare();
       }
     }
+    nvtxRangePop(); // prep colocated
     std::cerr << "DistributedDomain::realize: prepare remoteSender\n";
+    nvtxRangePush("DistributedDomain::realize: prep remote");
     assert(remoteSenders_.size() == remoteRecvers_.size());
     for (size_t di = 0; di < remoteSenders_.size(); ++di) {
       for (auto &kv : remoteSenders_[di]) {
@@ -467,6 +477,7 @@ public:
         recver.prepare(remoteInboxes[di][srcIdx]);
       }
     }
+    nvtxRangePop(); // prep remote
 
     nvtxRangePop(); // comm plan
     elapsed = MPI_Wtime() - start;
@@ -483,48 +494,61 @@ public:
 
     // start remote send d2h
     // printf("rank=%d send remote d2h\n", rank_);
+    nvtxRangePush("DD::exchange: remote send d2h");
     for (auto &domSenders : remoteSenders_) {
       for (auto &kv : domSenders) {
         RemoteSender &sender = kv.second;
         sender.send_d2h();
       }
     }
+    nvtxRangePop();
 
     // start remote recv h2h
     // printf("rank=%d recv remote h2h\n", rank_);
+    nvtxRangePush("DD::exchange: remote recv h2h");
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
         RemoteRecver &recver = kv.second;
         recver.recv_h2h();
       }
     }
+    nvtxRangePop();
 
     // start colocated Senders
+    nvtxRangePush("DD::exchange: colo send");
     for (auto &domSenders : coloSenders_) {
       for (auto &kv : domSenders) {
         ColocatedHaloSender &sender = kv.second;
         sender.send();
       }
     }
+    nvtxRangePop();
 
     // start colocated recvers
+    nvtxRangePush("DD::exchange: colo recv");
     for (auto &domRecvers : coloRecvers_) {
       for (auto &kv : domRecvers) {
         ColocatedHaloRecver &recver = kv.second;
         recver.recv();
       }
     }
+    nvtxRangePop();
+
 
     // send same-rank messages
     // printf("rank=%d send peer copy\n", rank_);
+    nvtxRangePush("DD::exchange: peer copy send");
     peerCopySender_.send();
+    nvtxRangePop();
 
     // send local messages
     // printf("rank=%d send peer access\n", rank_);
+    nvtxRangePush("DD::exchange: peer access send");
     peerAccessSender_.send();
+    nvtxRangePop();
 
     // poll senders and recvers to move onto next step until all are done
-    nvtxRangePush("poll");
+    nvtxRangePush("DD::exchange: poll");
     bool pending = true;
     while (pending) {
       pending = false;
