@@ -94,6 +94,16 @@ public:
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
 
+    // create a communicator for ranks on the same node
+    MPI_Barrier(MPI_COMM_WORLD);
+    double start = MPI_Wtime();
+    mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
+    double elapsed = MPI_Wtime() - start;
+    printf("time.mpi_topo [%d] %fs\n", rank_, elapsed);
+
+    std::cout << "[" << rank_ << "] colocated with "
+              << mpiTopology_.colocated_size() << " ranks\n";
+
     // Determine GPUs this DistributedDomain is reposible for
     if (gpus_.empty()) {
       int deviceCount;
@@ -112,15 +122,6 @@ public:
     }
     assert(!gpus_.empty());
 
-    // create a communicator for ranks on the same node
-    MPI_Barrier(MPI_COMM_WORLD);
-    double start = MPI_Wtime();
-    mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
-    double elapsed = MPI_Wtime() - start;
-    printf("time.mpi_topo [%d] %fs\n", rank_, elapsed);
-
-    std::cout << "[" << rank_ << "] colocated with "
-              << mpiTopology_.colocated_size() << " ranks\n";
 
     // create a list of cuda device IDs in use by the ranks on this node
     // TODO: assumes all ranks use the same number of GPUs
