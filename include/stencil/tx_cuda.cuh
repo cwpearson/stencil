@@ -325,6 +325,7 @@ public:
 
   ~ColocatedDeviceSender() {
     if (dstBuf_) {
+      CUDA_RUNTIME(cudaSetDevice(srcDev_));
       CUDA_RUNTIME(cudaIpcCloseMemHandle(dstBuf_));
     }
     dstBuf_ = nullptr;
@@ -334,6 +335,9 @@ public:
   }
 
   void start_prepare(size_t numBytes) {
+    const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+
+    //fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
 
     // create an event and associated handle
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
@@ -342,16 +346,16 @@ public:
     CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
 
     MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_,
-              make_tag<MsgKind::ColocatedEvt>(dstGPU_), MPI_COMM_WORLD,
+              make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
               &evtReq_);
 
     // Recieve the IPC mem handle
     MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_,
-              make_tag<MsgKind::ColocatedMem>(srcGPU_), MPI_COMM_WORLD,
+              make_tag<MsgKind::ColocatedMem>(payload), MPI_COMM_WORLD,
               &memReq_);
     // Retrieve the destination device id
     MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_,
-              make_tag<MsgKind::ColocatedDev>(srcGPU_), MPI_COMM_WORLD,
+              make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD,
               &idReq_);
 
     // compute the required buffer size
@@ -359,15 +363,17 @@ public:
   }
 
   void finish_prepare() {
+    // block until we have recved the device ID
+    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
+    //fprintf(stderr, "ColoDevSend::finish_prepare: srcDev=%d dstDev=%d (r%dg%d to r%dg%d)\n", srcDev_, dstDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
+
     // wait for recv mem handle
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
 
     // convert to a pointer
+    CUDA_RUNTIME(cudaSetDevice(srcDev_));
     CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_,
                                       cudaIpcMemLazyEnablePeerAccess));
-
-    // block until we have recved the device ID
-    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
 
     // block until we have sent event handle
     MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
@@ -422,22 +428,26 @@ public:
   /*! prepare to recieve devPtr
    */
   void start_prepare(void *devPtr, const size_t numBytes) {
+    //fprintf(stderr, "ColoDevRecv::start_prepare: send mem on %d(%d) to r%dg%d\n", dstDev_, dstGPU_, srcRank_, srcGPU_);
+
+    int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
     // recv the event handle
     MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_,
-              make_tag<MsgKind::ColocatedEvt>(dstGPU_), MPI_COMM_WORLD,
+              make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
               &evtReq_);
 
     // get an a memory handle
+    CUDA_RUNTIME(cudaSetDevice(dstDev_));
     CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
 
     // Send the mem handle to the ColocatedSender
     MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_,
-              make_tag<MsgKind::ColocatedMem>(srcGPU_), MPI_COMM_WORLD,
+              make_tag<MsgKind::ColocatedMem>(payload), MPI_COMM_WORLD,
               &memReq_);
     // Send the CUDA device id to the ColocatedSender
     MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_,
-              make_tag<MsgKind::ColocatedDev>(srcGPU_), MPI_COMM_WORLD,
+              make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD,
               &idReq_);
   }
 
@@ -447,6 +457,7 @@ public:
     MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
 
     // convert event handle to event
+    CUDA_RUNTIME(cudaSetDevice(dstDev_));
     CUDA_RUNTIME(cudaIpcOpenEventHandle(&event_, evtHandle_));
 
     // wait to send the mem handle and the CUDA device ID
@@ -506,6 +517,8 @@ public:
     std::sort(outbox_.begin(), outbox_.end());
 
     // allocate a buffer
+    //fprintf(stderr, "ColoHaloSend:start_prepare: alloc on %d\n", domain_->gpu());
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     CUDA_RUNTIME(cudaMalloc(&srcBuf_, bufSize_));
   }
 
@@ -580,7 +593,10 @@ public:
     }
 
     // allocate a buffer
+    //fprintf(stderr, "ColoHaloRecv:start_prepare: alloc on %d for r%dg%d\n", domain_->gpu(),srcRank_, srcGPU_);
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    assert(devBuf_);
 
     // prepare to recieve
     recver_.start_prepare(devBuf_, bufSize_);
@@ -675,13 +691,18 @@ public:
         bufSize_ += domain_->halo_bytes(msg.dir_, i);
       }
     }
+    assert(bufSize_);
 
 // allocate device & host buffers
 #ifdef REMOTE_LOUD
     std::cerr << "RemoteSender::prepare: alloc " << bufSize_ << "\n";
 #endif
     CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    assert(devBuf_);
     CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
+    assert(hostBuf_);
+
+    //fprintf(stderr, "RemoteSender::prepare r%dg%d -> r%dg%d %luB\n", srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
   void send_d2h() {
@@ -710,6 +731,7 @@ public:
     }
 
     // copy to host buffer
+    assert(hostBuf_);
     CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, devBuf_, bufSize_, cudaMemcpyDefault,
                                  stream_));
     nvtxRangePop(); // RemoteSender::send_d2h
@@ -730,11 +752,14 @@ public:
   }
 
   void send_h2h() {
+    std::cerr << "send_h2h()\n";
     nvtxRangePush("RemoteSender::send_h2h");
     isD2h_ = false;
+    assert(hostBuf_);
     MPI_Isend(hostBuf_, bufSize_, MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // RemoteSender::send_h2h
+    nvtxRangePush("RemoteSender::send_h2h done");
   }
 
   void wait() { MPI_Wait(&req_, MPI_STATUS_IGNORE); }
@@ -799,6 +824,8 @@ public:
     // allocate device & host buffers
     CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
     CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
+    assert(hostBuf_);
+    //fprintf(stderr, "RemoteRecver::prepare r%dg%d -> r%dg%d %luB\n", srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
   void recv_h2d() {
