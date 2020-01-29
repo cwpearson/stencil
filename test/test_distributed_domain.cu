@@ -85,6 +85,8 @@ TEST_CASE("exchange") {
   dim3 dimBlock(8, 8, 8);
   for (auto &d : dd.domains()) {
     REQUIRE(d.get_curr(dh1) != nullptr);
+    std::cerr << d.raw_size() << "\n";
+    CUDA_RUNTIME(cudaSetDevice(d.gpu()));
     init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), d.raw_size());
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
