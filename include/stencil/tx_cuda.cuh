@@ -316,10 +316,7 @@ private:
   MPI_Request idReq_;
 
 public:
-  ColocatedDeviceSender() : dstBuf_(nullptr), event_(0) {
-    CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess |
-                                              cudaEventDisableTiming));
-  }
+  ColocatedDeviceSender() : dstBuf_(nullptr), event_(0) {}
   ColocatedDeviceSender(int srcRank, int srcGPU, // domain ID
                         int dstRank, int dstGPU, // domain ID
                         int srcDev)              // cuda ID
@@ -343,6 +340,7 @@ public:
     CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess |
                                               cudaEventDisableTiming));
     CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
+
     MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_,
               make_tag<MsgKind::ColocatedEvt>(dstGPU_), MPI_COMM_WORLD,
               &evtReq_);
@@ -361,14 +359,18 @@ public:
   }
 
   void finish_prepare() {
-    // wait for recv mem handle and destination device ID
+    // wait for recv mem handle
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
-    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
-    // block until we have send the event handle
-    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
+
     // convert to a pointer
     CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_,
                                       cudaIpcMemLazyEnablePeerAccess));
+
+    // block until we have recved the device ID
+    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
+
+    // block until we have sent event handle
+    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
   }
 
   void send(const void *devPtr, RcStream &stream) {
@@ -378,14 +380,14 @@ public:
     assert(dstDev_ >= 0);
     assert(srcDev_ >= 0);
     assert(bufSize_ > 0);
-    std::cerr << dstDev_ << " " << srcDev_ << " " << bufSize_ << "\n";
     CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_,
                                      bufSize_, stream));
     // record the event
     CUDA_RUNTIME(cudaEventRecord(event_, stream));
   }
 
-  void wait() { CUDA_RUNTIME(cudaEventSynchronize(event_)); }
+  void wait() { 
+    CUDA_RUNTIME(cudaEventSynchronize(event_)); }
 };
 
 class ColocatedDeviceRecver {
@@ -399,7 +401,7 @@ private:
 
   cudaIpcMemHandle_t memHandle_;
   cudaIpcEventHandle_t evtHandle_;
-  MPI_Request ipcReq_;
+  MPI_Request memReq_;
   MPI_Request idReq_;
   MPI_Request evtReq_;
 
@@ -422,18 +424,17 @@ public:
   void start_prepare(void *devPtr, const size_t numBytes) {
 
     // recv the event handle
-    std::cerr << "Irecv event handle\n";
     MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_,
               make_tag<MsgKind::ColocatedEvt>(dstGPU_), MPI_COMM_WORLD,
               &evtReq_);
 
-    // get an Ipc handle for it
+    // get an a memory handle
     CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
 
-    // Send the IPC handle to the ColocatedSender
+    // Send the mem handle to the ColocatedSender
     MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_,
               make_tag<MsgKind::ColocatedMem>(srcGPU_), MPI_COMM_WORLD,
-              &ipcReq_);
+              &memReq_);
     // Send the CUDA device id to the ColocatedSender
     MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_,
               make_tag<MsgKind::ColocatedDev>(srcGPU_), MPI_COMM_WORLD,
@@ -445,18 +446,20 @@ public:
     // wait to recv the event
     MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
 
-    // wait to send the mem handle and the CUDA device ID
-    MPI_Wait(&ipcReq_, MPI_STATUS_IGNORE);
-    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
-
     // convert event handle to event
     CUDA_RUNTIME(cudaIpcOpenEventHandle(&event_, evtHandle_));
+
+    // wait to send the mem handle and the CUDA device ID
+    MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
+    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
+
+
   }
 
   /*! have stream wait for data to arrive
    */
   void wait(RcStream &stream) {
-
+    assert(event_);
     assert(stream.device() == dstDev_);
 
     // wait for ColocatedDeviceSender cudaMemcpyPeerAsync to be done
@@ -533,7 +536,9 @@ public:
     sender_.send(srcBuf_, stream_);
   }
 
-  void wait() noexcept { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+  void wait() noexcept { 
+    sender_.wait();
+  }
 };
 
 class ColocatedHaloRecver {
@@ -557,7 +562,7 @@ public:
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
-        devBuf_(nullptr), bufSize_(0),
+        stream_(domain.gpu()), devBuf_(nullptr), bufSize_(0),
         recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
   ~ColocatedHaloRecver() { CUDA_RUNTIME(cudaFree(devBuf_)); }
@@ -584,6 +589,7 @@ public:
   void finish_prepare() { recver_.finish_prepare(); }
 
   void recv() {
+    assert(stream_.device() == domain_->gpu());
     recver_.wait(stream_);
 
     // add unpacks to stream
@@ -608,7 +614,9 @@ public:
     }
   }
 
-  void wait() noexcept { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+  void wait() noexcept { 
+    assert(stream_.device() == domain_->gpu());
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
 };
 
 /*! Send from one domain to a remote domain
