@@ -332,7 +332,7 @@ public:
     }
     dstBuf_ = nullptr;
     if (event_) {
-    CUDA_RUNTIME(cudaEventDestroy(event_));
+      CUDA_RUNTIME(cudaEventDestroy(event_));
     }
   }
 
@@ -375,6 +375,10 @@ public:
     assert(srcDev_ == stream.device());
     assert(dstBuf_);
     assert(devPtr);
+    assert(dstDev_ >= 0);
+    assert(srcDev_ >= 0);
+    assert(bufSize_ > 0);
+    std::cerr << dstDev_ << " " << srcDev_ << " " << bufSize_ << "\n";
     CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_,
                                      bufSize_, stream));
     // record the event
@@ -405,13 +409,13 @@ public:
                         int dstGPU, // domain ID
                         int dstDev  // cuda ID
                         )
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), dstDev_(dstDev), event_(0) {}
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), dstDev_(dstDev),
+        event_(0) {}
   ~ColocatedDeviceRecver() {
     if (event_) {
       CUDA_RUNTIME(cudaEventDestroy(event_));
     }
   }
-
 
   /*! prepare to recieve devPtr
    */
@@ -529,9 +533,7 @@ public:
     sender_.send(srcBuf_, stream_);
   }
 
-  void wait() noexcept {
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
-  }
+  void wait() noexcept { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
 };
 
 class ColocatedHaloRecver {
@@ -551,16 +553,14 @@ private:
   ColocatedDeviceRecver recver_;
 
 public:
-  ColocatedHaloRecver() : devBuf_(nullptr), domain_(nullptr) {
-  }
+  ColocatedHaloRecver() : devBuf_(nullptr), domain_(nullptr) {}
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                  const LocalDomain &domain)
+                      const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
-        devBuf_(nullptr), bufSize_(0), recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
+        devBuf_(nullptr), bufSize_(0),
+        recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
-  ~ColocatedHaloRecver() {
-    CUDA_RUNTIME(cudaFree(devBuf_));
-  }
+  ~ColocatedHaloRecver() { CUDA_RUNTIME(cudaFree(devBuf_)); }
 
   void start_prepare(const std::vector<Message> &inbox) {
     inbox_ = inbox;
@@ -581,9 +581,7 @@ public:
     recver_.start_prepare(devBuf_, bufSize_);
   }
 
-  void finish_prepare() {
-    recver_.finish_prepare();
-  }
+  void finish_prepare() { recver_.finish_prepare(); }
 
   void recv() {
     recver_.wait(stream_);
@@ -610,9 +608,7 @@ public:
     }
   }
 
-  void wait() noexcept {
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
-  }
+  void wait() noexcept { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
 };
 
 /*! Send from one domain to a remote domain
