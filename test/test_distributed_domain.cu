@@ -75,6 +75,8 @@ TEST_CASE("exchange") {
   INFO("realize");
   dd.realize();
 
+  CUDA_RUNTIME(cudaDeviceSynchronize());
+
   INFO("barrier");
   MPI_Barrier(MPI_COMM_WORLD);
 
@@ -82,7 +84,7 @@ TEST_CASE("exchange") {
   dim3 dimGrid(2, 2, 2);
   dim3 dimBlock(8, 8, 8);
   for (auto &d : dd.domains()) {
-    CUDA_RUNTIME(cudaSetDevice(d.gpu()));
+    REQUIRE(d.get_curr(dh1) != nullptr);
     init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), d.raw_size());
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
@@ -91,6 +93,7 @@ TEST_CASE("exchange") {
 
   INFO("exchange");
   dd.exchange();
+  CUDA_RUNTIME(cudaDeviceSynchronize());
 
   // test exchange
 }

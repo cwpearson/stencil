@@ -12,6 +12,10 @@ TEMPLATE_TEST_CASE("colocated", "[mpi][cuda][template]", int32_t, int64_t) {
   MPI_Comm_rank(MPI_COMM_WORLD, &myRank);
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize);
 
+  // two colocated senders cannot have all of the same
+  // srcRank, dstRank, and dstGPU. MPI tag is only generated from dstGPU
+  REQUIRE(worldSize >= 2);
+
   // recv from left
   int srcRank = myRank - 1;
   if (srcRank < 0) {

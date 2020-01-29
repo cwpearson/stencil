@@ -75,6 +75,8 @@ public:
    */
   void set_radius(size_t r) { radius_ = r; }
 
+  size_t radius() const noexcept { return radius_; }
+
   /*! \brief retrieve a pointer to current domain values (to read in stencil)
    */
   template <typename T> T *get_curr(const DataHandle<T> handle) {
@@ -147,18 +149,24 @@ public:
     return ret;
   }
 
-  // return the extent of the halo in direction `dir`
-  Dim3 halo_extent(const Dim3 &dir) const noexcept {
+  // used by some placement code to compute a hypothetical communication cost
+  static Dim3 halo_extent(const Dim3 &dir, const Dim3 &sz,
+                          const size_t radius) {
     assert(dir.x >= -1 && dir.x <= 1);
     assert(dir.y >= -1 && dir.y <= 1);
     assert(dir.z >= -1 && dir.z <= 1);
     Dim3 ret;
 
-    ret.x = (dir.x != 0) ? radius_ : sz_.x;
-    ret.y = (dir.y != 0) ? radius_ : sz_.y;
-    ret.z = (dir.z != 0) ? radius_ : sz_.z;
+    ret.x = (dir.x != 0) ? radius : sz.x;
+    ret.y = (dir.y != 0) ? radius : sz.y;
+    ret.z = (dir.z != 0) ? radius : sz.z;
 
     return ret;
+  }
+
+  // return the extent of the halo in direction `dir`
+  Dim3 halo_extent(const Dim3 &dir) const noexcept {
+    return halo_extent(dir, sz_, radius_);
   }
 
   // return the number of bytes of the halo in direction `dir`
