@@ -43,6 +43,7 @@ public:
     }
   }
 
+  // move assignment
   MpiTopology &operator=(MpiTopology &&other) {
     comm_ = std::move(other.comm_);
     shmComm_ = std::move(other.shmComm_);
@@ -52,10 +53,20 @@ public:
   }
 
   int rank() const noexcept {
+    assert(comm_);
     int ret;
-    return MPI_Comm_rank(comm_, &ret);
+    MPI_Comm_rank(comm_, &ret);
     return ret;
   }
+
+  int size() const noexcept {
+    assert(comm_);
+    int ret;
+    MPI_Comm_size(comm_, &ret);
+    return ret;
+  }
+
+  MPI_Comm comm() const noexcept { return comm_; }
 
   MPI_Comm colocated_comm() const noexcept {
     assert(shmComm_);
