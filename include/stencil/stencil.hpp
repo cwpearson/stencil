@@ -37,6 +37,11 @@ inline MethodFlags operator|(MethodFlags a, MethodFlags b) {
   return static_cast<MethodFlags>(static_cast<int>(a) | static_cast<int>(b));
 }
 
+inline MethodFlags &operator|=(MethodFlags &a, MethodFlags b) {
+  a = a | b;
+  return a;
+}
+
 inline MethodFlags operator&(MethodFlags a, MethodFlags b) {
   return static_cast<MethodFlags>(static_cast<int>(a) & static_cast<int>(b));
 }
@@ -281,7 +286,7 @@ public:
                 peerCopyOutbox.push_back(sMsg);
               } else if (any_methods(MethodFlags::CudaMpi)) {
                 assert(di < remoteOutboxes.size());
-		remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
+                remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
                 remoteOutboxes[di][dstIdx].push_back(sMsg);
               } else {
                 std::cerr << "No method available to send required message\n";
@@ -291,10 +296,10 @@ public:
                        mpiTopology_.colocated(dstRank) &&
                        gpuTopology_.peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
-	      coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
+              coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
               coloOutboxes[di][dstIdx].push_back(sMsg);
             } else if (any_methods(MethodFlags::CudaMpi)) {
-	      remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
+              remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
               remoteOutboxes[di][dstIdx].push_back(sMsg);
             } else {
               std::cerr << "No method available to send required message\n";
@@ -339,23 +344,27 @@ public:
     nvtxRangePop(); // plan
 
     if (rank_ == 0) {
-    // summarize communication plan
-    std::cerr << "rank=" << rank_ << " peerAccess=" << peerAccessOutbox.size() << "\n";
-    std::cerr << "rank=" << rank_ << " peerCopy=" << peerCopyOutbox.size() << "\n";
-    for (auto &obxs : coloOutboxes) {
-      for (auto &kv : obxs) {
-        const Dim3 dstIdx = kv.first;
-	auto &box = kv.second;
-        std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx << " colo=" << box.size() << "\n";
+      // summarize communication plan
+      std::cerr << "rank=" << rank_ << " peerAccess=" << peerAccessOutbox.size()
+                << "\n";
+      std::cerr << "rank=" << rank_ << " peerCopy=" << peerCopyOutbox.size()
+                << "\n";
+      for (auto &obxs : coloOutboxes) {
+        for (auto &kv : obxs) {
+          const Dim3 dstIdx = kv.first;
+          auto &box = kv.second;
+          std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx
+                    << " colo=" << box.size() << "\n";
+        }
       }
-    }
-    for (auto &obxs : remoteOutboxes) {
-      for (auto &kv : obxs) {
-        const Dim3 dstIdx = kv.first;
-	auto &box = kv.second;
-        std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx << " remote=" << box.size() << "\n";
+      for (auto &obxs : remoteOutboxes) {
+        for (auto &kv : obxs) {
+          const Dim3 dstIdx = kv.first;
+          auto &box = kv.second;
+          std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx
+                    << " remote=" << box.size() << "\n";
+        }
       }
-    }
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -374,13 +383,15 @@ public:
         const Dim3 dstIdx = kv.first;
         const int dstRank = nap_->get_rank(dstIdx);
         const int dstGPU = nap_->get_gpu(dstIdx);
-        remoteSenders_[di].emplace(dstIdx, RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]));
+        remoteSenders_[di].emplace(
+            dstIdx, RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]));
       }
       for (auto &kv : remoteInboxes[di]) {
         const Dim3 srcIdx = kv.first;
         const int srcRank = nap_->get_rank(srcIdx);
         const int srcGPU = nap_->get_gpu(srcIdx);
-        remoteRecvers_[di].emplace(srcIdx, RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]));
+        remoteRecvers_[di].emplace(
+            srcIdx, RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]));
       }
     }
     nvtxRangePop(); // create remote
@@ -399,17 +410,20 @@ public:
         const Dim3 dstIdx = kv.first;
         const int dstRank = nap_->get_rank(dstIdx);
         const int dstGPU = nap_->get_gpu(dstIdx);
-        coloSenders_[di].emplace(dstIdx, ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
+        coloSenders_[di].emplace(
+            dstIdx,
+            ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
       }
       for (auto &kv : coloInboxes[di]) {
         const Dim3 srcIdx = kv.first;
         const int srcRank = nap_->get_rank(srcIdx);
         const int srcGPU = nap_->get_gpu(srcIdx);
-        coloRecvers_[di].emplace(srcIdx, ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
+        coloRecvers_[di].emplace(
+            srcIdx,
+            ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
       }
     }
     nvtxRangePop(); // create colocated
-
 
     // prepare senders and receivers
     std::cerr << "DistributedDomain::realize: prepare peerAccessSender\n";
@@ -440,16 +454,18 @@ public:
       for (auto &kv : coloSenders_[di]) {
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
-	const int srcDev = domains_[di].gpu();
-	const int dstDev = nap_->get_cuda(dstIdx);
-	std::cerr << srcDev << " " << dstDev << "\n";
-        std::cerr << "rank=" << rank_ << " finish_prepare for colo to " << dstIdx << "\n";
+        const int srcDev = domains_[di].gpu();
+        const int dstDev = nap_->get_cuda(dstIdx);
+        std::cerr << srcDev << " " << dstDev << "\n";
+        std::cerr << "rank=" << rank_ << " finish_prepare for colo to "
+                  << dstIdx << "\n";
         sender.finish_prepare();
       }
       for (auto &kv : coloRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
         auto &recver = kv.second;
-        std::cerr << "rank=" << rank_ << " finish_prepare for colo from " << srcIdx << "\n";
+        std::cerr << "rank=" << rank_ << " finish_prepare for colo from "
+                  << srcIdx << "\n";
         recver.finish_prepare();
       }
     }
@@ -555,7 +571,8 @@ public:
           if (recver.is_h2h()) {
             pending = true;
             if (recver.h2h_done()) {
-              std::cerr << "rank=" << rank_ << " src=" << srcIdx << " recv_h2d\n";
+              std::cerr << "rank=" << rank_ << " src=" << srcIdx
+                        << " recv_h2d\n";
               recver.recv_h2d();
               goto senders; // try to overlap recv_h2d with send_h2h
             }
@@ -571,7 +588,8 @@ public:
           if (sender.is_d2h()) {
             pending = true;
             if (sender.d2h_done()) {
-              std::cerr << "rank=" << rank_ << " dst=" << dstIdx << " send_h2h\n";
+              std::cerr << "rank=" << rank_ << " dst=" << dstIdx
+                        << " send_h2h\n";
               sender.send_h2h();
               goto recvers; // try to overlap recv_h2d with send_h2h
             }
