@@ -35,6 +35,22 @@ TEST_CASE("partition") {
     delete part;
   }
 
+  SECTION("10x3x1 into 4x1") {
+
+    Dim3 sz(10, 3, 1);
+    int ranks = 4;
+    int gpus = 1;
+
+    Partition *part = new PFP(sz, ranks, gpus);
+
+    REQUIRE(Dim3(3, 3, 1) == part->local_domain_size(Dim3(0,0,0)));
+    REQUIRE(Dim3(3, 3, 1) == part->local_domain_size(Dim3(1,0,0)));
+    REQUIRE(Dim3(2, 3, 1) == part->local_domain_size(Dim3(2,0,0)));
+    REQUIRE(Dim3(2, 3, 1) == part->local_domain_size(Dim3(3,0,0)));
+
+    delete part;
+  }
+
   SECTION("10x5x5 into 3x1") {
 
     Dim3 sz(10, 5, 5);
