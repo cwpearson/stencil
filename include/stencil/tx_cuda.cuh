@@ -24,6 +24,17 @@
 // #define REGION_LOUD
 // #define REMOTE_LOUD
 
+static int nextPowerOfTwo(int x) {
+  x--;
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  x |= x >> 8;
+  x |= x >> 16;
+  x++;
+  return x;
+}
+
 inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::hex << std::setfill('0'); // needs to be set only once
   auto *ptr = reinterpret_cast<const unsigned char *>(obj);
@@ -35,6 +46,8 @@ inline void print_bytes(const char *obj, size_t n) {
   }
   std::cerr << std::endl;
 }
+
+static int ceil(int a, int b) { return a > b ? a : b; }
 
 class Message {
 private:
@@ -58,6 +71,16 @@ private:
   std::vector<RcStream> streams_;
 
   std::vector<const LocalDomain *> domains_;
+
+  static Dim3 make_block_dim(const Dim3 extent, int threads) {
+    Dim3 ret;
+    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
+    threads /= ret.x;
+    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
+    threads /= ret.y;
+    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
+    return ret;
+  }
 
 public:
   PeerAccessSender() {}
@@ -93,7 +116,6 @@ public:
     nvtxRangePush("PeerSender::send");
 
     // translate data with kernel
-    const dim3 dimBlock(8, 8, 8);
     for (auto &msg : outbox_) {
       const LocalDomain *srcDomain = domains_[msg.srcGPU_];
       const LocalDomain *dstDomain = domains_[msg.dstGPU_];
@@ -103,6 +125,7 @@ public:
       const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
       RcStream &stream = streams_[srcDomain->gpu()];
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream.device() == srcDomain->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream.device()));
@@ -152,17 +175,6 @@ public:
   PeerCopySender() {}
 
   ~PeerCopySender() {}
-
-  static int nextPowerOfTwo(int x) {
-    x--;
-    x |= x >> 1;
-    x |= x >> 2;
-    x |= x >> 4;
-    x |= x >> 8;
-    x |= x >> 16;
-    x++;
-    return x;
-  }
 
   static int ceil(int a, int b) { return a > b ? a : b; }
 
@@ -513,6 +525,16 @@ private:
   RcStream stream_;
   ColocatedDeviceSender sender_;
 
+  static Dim3 make_block_dim(const Dim3 extent, int threads) {
+    Dim3 ret;
+    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
+    threads /= ret.x;
+    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
+    threads /= ret.y;
+    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
+    return ret;
+  }
+
 public:
   ColocatedHaloSender() : srcBuf_(nullptr) {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
@@ -552,10 +574,11 @@ public:
     // pack data into device buffer
     const Dim3 rawSz = domain_->raw_size();
     size_t bufOffset = 0;
-    const dim3 dimBlock(8, 8, 8);
+
     for (auto &msg : outbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
 
       for (size_t i = 0; i < domain_->num_data(); ++i) {
@@ -591,6 +614,16 @@ private:
   size_t bufSize_;
 
   ColocatedDeviceRecver recver_;
+
+  static Dim3 make_block_dim(const Dim3 extent, int threads) {
+    Dim3 ret;
+    ret.x = ceil(threads, nextPowerOfTwo(extent.x));
+    threads /= ret.x;
+    ret.y = ceil(threads, nextPowerOfTwo(extent.y));
+    threads /= ret.y;
+    ret.z = ceil(threads, nextPowerOfTwo(extent.y));
+    return ret;
+  }
 
 public:
   ColocatedHaloRecver() : devBuf_(nullptr), domain_(nullptr) {}
@@ -635,12 +668,12 @@ public:
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
-    dim3 dimBlock(8, 8, 8);
     size_t bufOffset = 0;
     for (auto &msg : inbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         char *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
