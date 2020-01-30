@@ -86,6 +86,13 @@ To mount a remote directory (where there are nvprof files to load):
 ```
 sshfs -o IdentityFile=/path/to/id_rsa user@host:/path /mount/location
 ```
+## Choosing a Different MPI
+
+```
+cd build
+rm -rf *
+cmake -DCMAKE_PREFIX_PATH=path/to/mpi ..
+```
 
 ## MCA Parameters
 
@@ -97,6 +104,12 @@ mpirun --mca mpi_show_handle_leaks 1 -np 4 a.out
 Checking for CUDA-Aware MPI support:
 ```
 ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
+```
+
+## Bulding OpenMPI with CUDA Support
+
+```
+./configure --prefix="blah" --with-cuda=/path/to/cuda
 ```
 
 ## Design Goals
