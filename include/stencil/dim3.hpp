@@ -15,7 +15,6 @@ public:
   int64_t z;
 
 public:
-  CUDA_CALLABLE_MEMBER Dim3() {}
 
 #ifdef __CUDACC__
   /* cuda dim3 ctor */
@@ -25,27 +24,12 @@ public:
 
   CUDA_CALLABLE_MEMBER Dim3(int64_t x, int64_t y, int64_t z)
       : x(x), y(y), z(z) {}
-  /* copy ctor*/
-  CUDA_CALLABLE_MEMBER Dim3(const Dim3 &d) : x(d.x), y(d.y), z(d.z) {}
-  /* move ctor */
-  CUDA_CALLABLE_MEMBER Dim3(Dim3 &&d)
-      : x(std::move(d.x)), y(std::move(d.y)), z(std::move(d.z)) {}
 
-  /* copy assign */
-  CUDA_CALLABLE_MEMBER Dim3 &operator=(const Dim3 &d) {
-    x = d.x;
-    y = d.y;
-    z = d.z;
-    return *this;
-  }
-
-  /* move assign */
-  CUDA_CALLABLE_MEMBER Dim3 &operator=(Dim3 &&d) {
-    x = std::move(d.x);
-    y = std::move(d.y);
-    z = std::move(d.z);
-    return *this;
-  }
+  Dim3() = default; // default ctor
+  Dim3(const Dim3 &d) = default; // copy ctor
+  Dim3(Dim3 &&d) = default; // move ctor
+  Dim3 &operator=(const Dim3 &d) = default; // copy assign
+  Dim3 &operator=(Dim3 &&d) = default; // move assign
 
   void swap(Dim3 &d) {
     std::swap(x, d.x);
