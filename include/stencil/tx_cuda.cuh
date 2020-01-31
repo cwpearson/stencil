@@ -58,7 +58,6 @@ static Dim3 make_block_dim(const Dim3 extent, int threads) {
   assert(ret.y <= 1024);
   assert(ret.z <= 1024);
   assert(ret.x * ret.y * ret.z <= 1024);
-  std::cerr << extent << " " << ret << "\n";
   return ret;
 }
 
@@ -652,7 +651,7 @@ public:
 
 /*! Send from one domain to a remote domain
  */
-class RemoteSender : StatefulSender {
+class RemoteSender : public StatefulSender {
 private:
   int srcRank_;
   int srcGPU_;
@@ -1100,7 +1099,7 @@ public:
 
 };
 
-class CudaAwareMpiRecver : StatefulRecver {
+class CudaAwareMpiRecver : public StatefulRecver {
 private:
   int srcRank_;
   int srcGPU_;
