@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
+#include <fstream>
 #include <set>
 #include <vector>
 
@@ -164,7 +165,18 @@ public:
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
-  ~DistributedDomain() {}
+  ~DistributedDomain() {
+    for (auto &m : remoteSenders_) {
+      for (auto &kv : m) {
+        delete kv.second;
+      }
+    }
+    for (auto &m : remoteRecvers_) {
+      for (auto &kv : m) {
+        delete kv.second;
+      }
+    }
+  }
 
   std::vector<LocalDomain> &domains() { return domains_; }
 
@@ -284,7 +296,8 @@ public:
                 peerAccessOutbox.push_back(sMsg);
               } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
                 peerCopyOutbox.push_back(sMsg);
-              } else if (any_methods(MethodFlags::CudaMpi)) {
+              } else if (any_methods(MethodFlags::CudaMpi |
+                                     MethodFlags::CudaAwareMpi)) {
                 assert(di < remoteOutboxes.size());
                 remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
                 remoteOutboxes[di][dstIdx].push_back(sMsg);
@@ -298,7 +311,8 @@ public:
               assert(di < coloOutboxes.size());
               coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
               coloOutboxes[di][dstIdx].push_back(sMsg);
-            } else if (any_methods(MethodFlags::CudaMpi)) {
+            } else if (any_methods(MethodFlags::CudaMpi |
+                                   MethodFlags::CudaAwareMpi)) {
               remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
               remoteOutboxes[di][dstIdx].push_back(sMsg);
             } else {
@@ -318,7 +332,8 @@ public:
                 // no recver needed for same GPU
               } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
                 // no recver needed for same rank
-              } else if (any_methods(MethodFlags::CudaMpi)) {
+              } else if (any_methods(MethodFlags::CudaMpi |
+                                     MethodFlags::CudaAwareMpi)) {
                 remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
                 remoteInboxes[di][srcIdx].push_back(rMsg);
               } else {
@@ -330,7 +345,8 @@ public:
                        gpuTopology_.peer(srcDev, myDev)) {
               coloInboxes[di].emplace(srcIdx, std::vector<Message>());
               coloInboxes[di][srcIdx].push_back(rMsg);
-            } else if (any_methods(MethodFlags::CudaMpi)) {
+            } else if (any_methods(MethodFlags::CudaMpi |
+                                   MethodFlags::CudaAwareMpi)) {
               remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
               remoteInboxes[di][srcIdx].push_back(rMsg);
             } else {
@@ -343,29 +359,51 @@ public:
     }
     nvtxRangePop(); // plan
 
-    if (rank_ == 0) {
-      // summarize communication plan
-      std::cerr << "rank=" << rank_ << " peerAccess=" << peerAccessOutbox.size()
-                << "\n";
-      std::cerr << "rank=" << rank_ << " peerCopy=" << peerCopyOutbox.size()
-                << "\n";
-      for (auto &obxs : coloOutboxes) {
-        for (auto &kv : obxs) {
-          const Dim3 dstIdx = kv.first;
-          auto &box = kv.second;
-          std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx
-                    << " colo=" << box.size() << "\n";
-        }
-      }
-      for (auto &obxs : remoteOutboxes) {
-        for (auto &kv : obxs) {
-          const Dim3 dstIdx = kv.first;
-          auto &box = kv.second;
-          std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx
-                    << " remote=" << box.size() << "\n";
+    // summarize communication plan
+    std::string planFileName = "plan_" + std::to_string(rank_) + ".txt";
+    std::ofstream planFile(planFileName, std::ofstream::out);
+    
+    planFile << "rank=" << rank_ <<"\n\n";
+
+    planFile << "domains\n";
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      planFile << di << ":" << domains_[di].gpu() << ":" << nap_->dom_idx(rank_, di) << "\n";
+    }
+    planFile << "\n";
+
+    planFile << "peerAccess\n";
+    for (auto &m : peerAccessOutbox) {
+      planFile << m.srcGPU_ << "->" << m.dstGPU_ << " " << m.dir_ << "\n";
+    }
+    planFile << "\n";
+
+    planFile << "peerCopy\n";
+    for (auto &m : peerCopyOutbox) {
+      planFile << m.dir_ << "\n";
+    }
+    planFile << "\n";
+             
+    for (auto &obxs : coloOutboxes) {
+      for (auto &kv : obxs) {
+        const Dim3 dstIdx = kv.first;
+        auto &box = kv.second;
+        planFile << "colo to dstIdx=" << dstIdx << "\n";
+        for (auto &m : box) {
+          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_ << ")\n";
         }
       }
     }
+    for (auto &obxs : remoteOutboxes) {
+      for (auto &kv : obxs) {
+        const Dim3 dstIdx = kv.first;
+        auto &box = kv.second;
+        planFile << "remote to dstIdx=" << dstIdx << "\n";
+        for (auto &m : box) {
+          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_ << ")\n";
+        }
+      }
+    }
+    planFile.close();
 
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -383,17 +421,33 @@ public:
         const Dim3 dstIdx = kv.first;
         const int dstRank = nap_->get_rank(dstIdx);
         const int dstGPU = nap_->get_gpu(dstIdx);
-        remoteSenders_[di].emplace(
-            dstIdx, (StatefulSender *)new RemoteSender(rank_, di, dstRank,
-                                                       dstGPU, domains_[di]));
+        if (0 == remoteSenders_[di].count(dstIdx)) {
+          StatefulSender *sender;
+          if (any_methods(MethodFlags::CudaAwareMpi)) {
+            sender = new CudaAwareMpiSender(rank_, di, dstRank, dstGPU,
+                                            domains_[di]);
+          } else if (any_methods(MethodFlags::CudaMpi)) {
+            sender = new RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]);
+          }
+          assert(sender);
+          remoteSenders_[di].emplace(dstIdx, sender);
+        }
       }
       for (auto &kv : remoteInboxes[di]) {
         const Dim3 srcIdx = kv.first;
         const int srcRank = nap_->get_rank(srcIdx);
         const int srcGPU = nap_->get_gpu(srcIdx);
-        remoteRecvers_[di].emplace(
-            srcIdx, (StatefulRecver *)new RemoteRecver(srcRank, srcGPU, rank_,
-                                                       di, domains_[di]));
+        if (0 == remoteRecvers_[di].count(srcIdx)) {
+          StatefulRecver *recver;
+          if (any_methods(MethodFlags::CudaAwareMpi)) {
+            recver = new CudaAwareMpiRecver(srcRank, srcGPU, rank_, di,
+                                            domains_[di]);
+          } else if (any_methods(MethodFlags::CudaMpi)) {
+            recver = new RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+          }
+          assert(recver);
+          remoteRecvers_[di].emplace(srcIdx, recver);
+        }
       }
     }
     nvtxRangePop(); // create remote
