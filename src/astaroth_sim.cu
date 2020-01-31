@@ -15,7 +15,7 @@ int main(int argc, char **argv) {
   options.add_options()
   ("h,help", "Show help")
   ("remote", "Enable RemoteSender/Recver")
-  ("cuda-aware-mpi", "Unimplemented")
+  ("cuda-aware-mpi", "Enable CudaAwareMpiSender/Recver")
   ("colocated", "Enable ColocatedHaloSender/Recver")
   ("peer", "Enable PeerAccessSender")
   ("kernel", "Enable PeerCopySender")
@@ -67,14 +67,17 @@ int main(int argc, char **argv) {
   if (result["remote"].as<bool>()) {
     methods |= MethodFlags::CudaMpi;
   }
+  if (result["cuda-aware-mpi"].as<bool>()) {
+    methods |= MethodFlags::CudaMpi;
+  }
   if (result["colocated"].as<bool>()) {
     methods |= MethodFlags::CudaMpiColocated;
   }
-  if (result["kernel"].as<bool>()) {
-    methods |= MethodFlags::CudaKernel;
-  }
   if (result["peer"].as<bool>()) {
     methods |= MethodFlags::CudaMemcpyPeer;
+  }
+  if (result["kernel"].as<bool>()) {
+    methods |= MethodFlags::CudaKernel;
   }
   if (MethodFlags::None == methods) {
     methods = MethodFlags::All;
