@@ -884,7 +884,8 @@ public:
   }
 
   virtual bool active() override {
-    return State::H2H != state_;
+    assert(State::None != state_);
+    return State::H2D != state_;
   }
 
 
