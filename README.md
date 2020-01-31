@@ -134,6 +134,7 @@ ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
       * testing at build time with `ompi_info`
       * `MPI_T_cvar_read` / `MPI_T_cvar_get_info` ?
   * future work
+    * [ ] Non-rectangular regions
     * [ ] Remove requirement of CUDA (HPCG)
     * [ ] support uneven radius
     * [ ] Indexing object passed to kernels
