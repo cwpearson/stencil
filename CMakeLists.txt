@@ -13,13 +13,10 @@ message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 option(USE_NUMA "compile with NUMA support" ON)
 option(USE_MPI "compile with MPI support" ON)
 option(USE_CUDA "compile with CUDA support" ON)
-
-
-
+option(USE_CUDA_AWARE_MPI "assume CUDA-aware MPI support" OFF)
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/GetGitRevisionDescription.cmake")
-
 
 get_git_head_revision(GIT_REFSPEC GIT_HASH)
 git_local_changes(GIT_LOCAL_CHANGES)
@@ -61,6 +58,12 @@ elseif (CMAKE_BUILD_TYPE MATCHES Release)
   )
 endif()
 
+if (USE_CUDA_AWARE_MPI)
+  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA_AWARE_MPI=1)
+else()
+  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA_AWARE_MPI=0)
+endif()
+
 if (NUMA_FOUND)
   target_link_libraries(stencil INTERFACE NUMA::NUMA)
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=1)
@@ -96,11 +99,13 @@ endif()
 ## Add MPI flags
 if(MPI_FOUND)
   target_include_directories(stencil SYSTEM INTERFACE ${MPI_CXX_INCLUDE_DIRS})
-  message(STATUS ${MPI_CXX_LIBRARIES})
+
   target_link_libraries(stencil INTERFACE ${MPI_CXX_LIBRARIES})
   # target_link_libraries(stencil INTERFACE MPI::MPI_CXX)
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_MPI=1)
   message(STATUS "MPI found, compiling with STENCIL_USE_MPI=1")
+  message(STATUS ${MPI_CXX_LIBRARIES})
+  message(STATUS ${MPIEXEC_EXECUTABLE})
 else()
   target_compile_definitions(STENCIL INTERFACE -DSTENCIL_USE_MPI=0)
   message(STATUS "MPI found,  compiling with STENCIL_USE_MPI=0")

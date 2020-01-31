@@ -4,6 +4,18 @@
 
 #include <climits>
 
+class Message {
+private:
+public:
+  Dim3 dir_;
+  int srcGPU_;
+  int dstGPU_;
+  Message(Dim3 dir, int srcGPU, int dstGPU)
+      : dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
+
+  bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
+};
+
 enum class MsgKind {
   ColocatedEvt = 0,
   ColocatedMem = 1,
@@ -137,6 +149,73 @@ static int make_tag(int gpu, Dim3 dir) {
 
   return t;
 }
+
+/*! a sender that has multiple phases
+    sender->send();
+    while(sender->active()) {
+      if (sender->state_done()) sender->next();
+    }
+    sender->wait();
+*/
+class StatefulSender {
+public:
+  /*! prepare sender to send these messages
+   */
+  virtual void prepare(std::vector<Message> &outbox) = 0;
+
+  /*! start a send
+   */
+  virtual void send() = 0;
+
+  /*! true if there are states left to complete
+   */
+  virtual bool active() = 0;
+
+  /*! call next() to continue with the send
+   */
+  virtual bool next_ready() = 0;
+
+  /*! move the sender to the next state
+   */
+  virtual void next() = 0;
+
+  /*! block until the final state is done
+      call after sender->active() becomes false
+  */
+  virtual void wait() = 0;
+
+  virtual ~StatefulSender() {}
+};
+
+class StatefulRecver {
+public:
+  /*! prepare reciever to send these messages
+   */
+  virtual void prepare(std::vector<Message> &outbox) = 0;
+
+  /*! start a recv
+   */
+  virtual void recv() = 0;
+
+  /*! true if there are states left to complete
+   */
+  virtual bool active() = 0;
+
+  /*! call next() to continue with the send
+   */
+  virtual bool next_ready() = 0;
+
+  /*! move the sender to the next state
+   */
+  virtual void next() = 0;
+
+  /*! block until the final state is done
+      call after sender->active() becomes false
+  */
+  virtual void wait() = 0;
+
+  virtual ~StatefulRecver() {}
+};
 
 /*! An asynchronous sender, to be paired with a Recver
  */

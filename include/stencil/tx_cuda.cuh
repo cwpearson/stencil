@@ -62,18 +62,6 @@ static Dim3 make_block_dim(const Dim3 extent, int threads) {
   return ret;
 }
 
-class Message {
-private:
-public:
-  Dim3 dir_;
-  int srcGPU_;
-  int dstGPU_;
-  Message(Dim3 dir, int srcGPU, int dstGPU)
-      : dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
-
-  bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
-};
-
 /* Send messages to local domains with a kernel
  */
 class PeerAccessSender {
@@ -664,7 +652,7 @@ public:
 
 /*! Send from one domain to a remote domain
  */
-class RemoteSender {
+class RemoteSender : StatefulSender {
 private:
   int srcRank_;
   int srcGPU_;
@@ -680,9 +668,10 @@ private:
   RcStream stream_;
   MPI_Request req_;
 
-  bool isD2h_; // in d2h phase
-
   std::vector<Message> outbox_;
+
+  enum class State { None, D2H, Wait };
+  State state_;
 
 public:
   RemoteSender() : devBuf_(nullptr) {}
@@ -690,7 +679,7 @@ public:
                const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
-        stream_(domain.gpu()), isD2h_(false) {}
+        stream_(domain.gpu()), state_(State::None) {}
 
   ~RemoteSender() {
     CUDA_RUNTIME(cudaFree(devBuf_));
@@ -700,7 +689,7 @@ public:
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
    */
-  void prepare(std::vector<Message> &outbox) {
+  virtual void prepare(std::vector<Message> &outbox) override {
     outbox_ = outbox;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
@@ -733,9 +722,41 @@ public:
     // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
+  virtual void send() override { send_d2h(); }
+
+  virtual bool active() override {
+    assert(State::None != state_);
+    return State::Wait != state_;
+  }
+
+  virtual bool next_ready() override {
+    assert(State::None != state_);
+    if (state_ == State::D2H) {
+      return d2h_done();
+    } else {
+      assert(0);
+      __builtin_unreachable();
+    }
+  }
+
+  virtual void next() override {
+    if (State::D2H == state_) {
+      send_h2h();
+    } else {
+      assert(0);
+      __builtin_unreachable();
+    }
+  }
+
+  virtual void wait() override {
+    assert(State::Wait == state_);
+    MPI_Wait(&req_, MPI_STATUS_IGNORE);
+    state_ = State::None;
+  }
+
   void send_d2h() {
+    state_ = State::D2H;
     nvtxRangePush("RemoteSender::send_d2h");
-    isD2h_ = true;
 
     const Dim3 rawSz = domain_->raw_size();
 
@@ -764,9 +785,10 @@ public:
     nvtxRangePop(); // RemoteSender::send_d2h
   }
 
-  bool is_d2h() { return isD2h_; }
+  bool is_d2h() const noexcept { return State::D2H == state_; }
 
   bool d2h_done() {
+    assert(State::D2H == state_);
     cudaError_t err = cudaStreamQuery(stream_);
     if (cudaSuccess == err) {
       return true;
@@ -774,27 +796,23 @@ public:
       return false;
     } else {
       CUDA_RUNTIME(err);
-      exit(EXIT_FAILURE);
+      __builtin_unreachable();
     }
   }
 
   void send_h2h() {
-    std::cerr << "send_h2h()\n";
+    state_ = State::Wait;
     nvtxRangePush("RemoteSender::send_h2h");
-    isD2h_ = false;
     assert(hostBuf_);
     MPI_Isend(hostBuf_, bufSize_, MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // RemoteSender::send_h2h
-    nvtxRangePush("RemoteSender::send_h2h done");
   }
-
-  void wait() { MPI_Wait(&req_, MPI_STATUS_IGNORE); }
 };
 
 /*! Recv from a remote domain into a domain
  */
-class RemoteRecver {
+class RemoteRecver : public StatefulRecver {
 private:
   int srcRank_;
   int srcGPU_;
@@ -811,9 +829,14 @@ private:
 
   MPI_Request req_;
 
-  bool isH2h_; // in d2h phase
-
   std::vector<Message> inbox_;
+
+  enum class State {
+    None,
+    H2H,
+    H2D
+  };
+  State state_;
 
 public:
   RemoteRecver() : devBuf_(nullptr) {}
@@ -821,7 +844,7 @@ public:
                const LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
-        stream_(domain.gpu()), isH2h_(false) {
+        stream_(domain.gpu()), state_(State::None) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
@@ -833,7 +856,7 @@ public:
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
    */
-  void prepare(std::vector<Message> &inbox) {
+  virtual void prepare(std::vector<Message> &inbox) override {
     inbox_ = inbox;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
@@ -856,9 +879,36 @@ public:
     // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
+  virtual void recv() override {
+    recv_h2h();
+  }
+
+  virtual bool active() override {
+    return State::H2H != state_;
+  }
+
+
+ virtual bool next_ready() override {
+   assert(State::H2H == state_);
+   return h2h_done();
+ }
+
+  virtual void next() override {
+    if (State::H2H == state_) {
+      recv_h2d();
+    } else {
+      assert(0);
+      __builtin_unreachable();
+    }
+  }
+
+  virtual void wait() override { 
+    assert(State::H2D == state_);
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+
   void recv_h2d() {
+    state_ = State::H2D;
     nvtxRangePush("RemoteRecver::recv_h2d");
-    isH2h_ = false;
 
     // copy to device buffer
     CUDA_RUNTIME(cudaMemcpyAsync(devBuf_, hostBuf_, bufSize_, cudaMemcpyDefault,
@@ -887,9 +937,12 @@ public:
     nvtxRangePop(); // RemoteRecver::recv_h2d
   }
 
-  bool is_h2h() const { return isH2h_; }
+  bool is_h2h() const { 
+    return State::H2H == state_; 
+  }
 
   bool h2h_done() {
+    assert(State::H2H == state_);
     int flag;
     MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
     if (flag) {
@@ -900,16 +953,285 @@ public:
   }
 
   void recv_h2h() {
+    state_ = State::H2H;
     nvtxRangePush("RemoteRecver::recv_h2h");
-    isH2h_ = true;
     MPI_Irecv(hostBuf_, bufSize_, MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // RemoteRecver::recv_h2h
   }
 
-  /*! wait for recv_h2d
+
+};
+
+/*! Send from one domain to a remote domain
+ */
+class CudaAwareMpiSender : public StatefulSender {
+private:
+  int srcRank_;
+  int srcGPU_;
+  int dstRank_;
+  int dstGPU_;
+
+  const LocalDomain *domain_;
+
+  char *devBuf_;
+  size_t bufSize_;
+
+  RcStream stream_;
+  MPI_Request req_;
+
+  enum class State {
+    None,
+    Pack,
+    Send,
+  };
+  State state_;
+
+  std::vector<Message> outbox_;
+
+public:
+  CudaAwareMpiSender() : devBuf_(nullptr) {}
+  CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
+                     const LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()),
+        state_(State::None) {}
+
+  ~CudaAwareMpiSender() { CUDA_RUNTIME(cudaFree(devBuf_)); }
+
+  virtual void prepare(std::vector<Message> &outbox) override {
+    outbox_ = outbox;
+
+    // sort messages by direction vector
+    std::sort(outbox_.begin(), outbox_.end());
+
+    // compute total size
+    bufSize_ = 0;
+    for (auto &msg : outbox_) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+    assert(bufSize_);
+
+    // allocate device & host buffers
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+  }
+
+  virtual void send() override {
+    send_pack();
+  }
+
+  virtual bool active() override {
+    return State::Send != state_;
+  }
+
+ virtual bool next_ready() override {
+   assert(State::Pack == state_);
+   return pack_done();
+ }
+
+  virtual void next() override {
+    if (State::Pack == state_) {
+      send_d2d();
+    } else {
+      assert(0);
+      __builtin_unreachable();
+    }
+  }
+
+  virtual void wait() override { 
+    assert(State::Send == state_);
+    MPI_Wait(&req_, MPI_STATUS_IGNORE); }
+
+  void send_pack() {
+    assert(devBuf_);
+    nvtxRangePush("CudaAwareMpiSender::send_pack");
+    state_ = State::Pack;
+
+    const Dim3 rawSz = domain_->raw_size();
+
+    // pack data into device buffer
+    size_t bufOffset = 0;
+    for (auto &msg : outbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      assert(stream_.device() == domain_->gpu());
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        const char *src = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
+                                                0, pos, extent, elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    nvtxRangePop(); // CudaAwareMpiSender::send_pack
+  }
+
+  bool is_pack() const noexcept { return state_ == State::Pack; }
+
+  bool pack_done() {
+    cudaError_t err = cudaStreamQuery(stream_);
+    if (cudaSuccess == err) {
+      return true;
+    } else if (cudaErrorNotReady == err) {
+      return false;
+    } else {
+      CUDA_RUNTIME(err);
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  void send_d2d() {
+    nvtxRangePush("CudaAwareMpiSender::send_d2d");
+    state_ = State::Send;
+    assert(devBuf_);
+    MPI_Isend(devBuf_, bufSize_, MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
+              &req_);
+    nvtxRangePop(); // CudaAwareMpiSender::send_d2d
+  }
+
+
+};
+
+class CudaAwareMpiRecver : StatefulRecver {
+private:
+  int srcRank_;
+  int srcGPU_;
+  int dstRank_;
+  int dstGPU_;
+
+  const LocalDomain *domain_;
+
+  char *devBuf_;
+  size_t bufSize_;
+
+  RcStream stream_;
+
+  MPI_Request req_;
+
+  std::vector<Message> inbox_;
+
+  enum class State {
+    None,
+    Recv,
+    Unpack,
+  };
+  State state_; // flattening
+
+public:
+  CudaAwareMpiRecver() : devBuf_(nullptr) {}
+  CudaAwareMpiRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
+                     const LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()),
+        state_(State::None) {}
+
+  ~CudaAwareMpiRecver() { CUDA_RUNTIME(cudaFree(devBuf_)); }
+
+  /*! Prepare to send a set of messages whose direction vectors are store in
+   * outbox
    */
-  void wait() { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+  void prepare(std::vector<Message> &inbox) {
+    inbox_ = inbox;
+    // sort messages by direction vector
+    std::sort(inbox_.begin(), inbox_.end());
+
+    // compute total size
+    bufSize_ = 0;
+    for (auto &msg : inbox) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    // allocate device & host buffers
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    // fprintf(stderr, "CudaAwareMpiRecver::prepare r%dg%d -> r%dg%d %luB\n",
+    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+  }
+
+  virtual void recv() override {
+    recv_d2d();
+  }
+
+  virtual bool active() override {
+    assert(State::None != state_);
+    return State::Unpack != state_;
+  }
+
+  virtual bool next_ready() override {
+    return d2d_done();
+  }
+
+  virtual void next() override {
+    if (State::Recv == state_) {
+      recv_unpack();
+    } else {
+      assert(0);
+      __builtin_unreachable();
+    }
+  }
+
+  virtual void wait() override { 
+    assert(State::Unpack == state_);
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+
+  void recv_unpack() {
+    nvtxRangePush("CudaAwareMpiRecver::recv_unpack");
+    state_ = State::Unpack;
+
+    const Dim3 rawSz = domain_->raw_size();
+
+    // pack data into device buffer
+    size_t bufOffset = 0;
+    for (auto &msg : inbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimBlock =
+          make_block_dim(extent, 1024 /* threads per block */);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      assert(stream_.device() == domain_->gpu());
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        char *dst = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
+                                                  &devBuf_[bufOffset], elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+    nvtxRangePop(); // CudaAwareMpiRecver::recv_unpack
+  }
+
+  bool is_d2d() const { return state_ == State::Recv; }
+
+  bool d2d_done() {
+    int flag;
+    MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
+    if (flag) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  void recv_d2d() {
+    nvtxRangePush("CudaAwareMpiRecver::recv_d2d");
+    state_ = State::Recv;
+    assert(devBuf_);
+    MPI_Irecv(devBuf_, bufSize_, MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
+              &req_);
+    nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
+  }
+
+
 };
 
 /*! A data sender that should work as long as MPI and CUDA are installed

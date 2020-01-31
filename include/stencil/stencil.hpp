@@ -78,9 +78,9 @@ private:
 
   MethodFlags flags_;
 
-  std::vector<std::map<Dim3, RemoteSender>>
+  std::vector<std::map<Dim3, StatefulSender *>>
       remoteSenders_; // remoteSender_[domain][dstIdx] = sender
-  std::vector<std::map<Dim3, RemoteRecver>>
+  std::vector<std::map<Dim3, StatefulRecver *>>
       remoteRecvers_; // remoteRecver_[domain][srcIdx] = recver
 
   // kernel sender for same-domain sends
@@ -384,14 +384,16 @@ public:
         const int dstRank = nap_->get_rank(dstIdx);
         const int dstGPU = nap_->get_gpu(dstIdx);
         remoteSenders_[di].emplace(
-            dstIdx, RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]));
+            dstIdx, (StatefulSender *)new RemoteSender(rank_, di, dstRank,
+                                                       dstGPU, domains_[di]));
       }
       for (auto &kv : remoteInboxes[di]) {
         const Dim3 srcIdx = kv.first;
         const int srcRank = nap_->get_rank(srcIdx);
         const int srcGPU = nap_->get_gpu(srcIdx);
         remoteRecvers_[di].emplace(
-            srcIdx, RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]));
+            srcIdx, (StatefulRecver *)new RemoteRecver(srcRank, srcGPU, rank_,
+                                                       di, domains_[di]));
       }
     }
     nvtxRangePop(); // create remote
@@ -477,12 +479,12 @@ public:
       for (auto &kv : remoteSenders_[di]) {
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
-        sender.prepare(remoteOutboxes[di][dstIdx]);
+        sender->prepare(remoteOutboxes[di][dstIdx]);
       }
       for (auto &kv : remoteRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
         auto &recver = kv.second;
-        recver.prepare(remoteInboxes[di][srcIdx]);
+        recver->prepare(remoteInboxes[di][srcIdx]);
       }
     }
     nvtxRangePop(); // prep remote
@@ -505,8 +507,8 @@ public:
     nvtxRangePush("DD::exchange: remote send d2h");
     for (auto &domSenders : remoteSenders_) {
       for (auto &kv : domSenders) {
-        RemoteSender &sender = kv.second;
-        sender.send_d2h();
+        StatefulSender *sender = kv.second;
+        sender->send();
       }
     }
     nvtxRangePop();
@@ -516,8 +518,8 @@ public:
     nvtxRangePush("DD::exchange: remote recv h2h");
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
-        RemoteRecver &recver = kv.second;
-        recver.recv_h2h();
+        StatefulRecver *recver = kv.second;
+        recver->recv();
       }
     }
     nvtxRangePop();
@@ -567,13 +569,13 @@ public:
       for (auto &domRecvers : remoteRecvers_) {
         for (auto &kv : domRecvers) {
           const Dim3 srcIdx = kv.first;
-          RemoteRecver &recver = kv.second;
-          if (recver.is_h2h()) {
+          StatefulRecver *recver = kv.second;
+          if (recver->active()) {
             pending = true;
-            if (recver.h2h_done()) {
+            if (recver->next_ready()) {
               std::cerr << "rank=" << rank_ << " src=" << srcIdx
                         << " recv_h2d\n";
-              recver.recv_h2d();
+              recver->next();
               goto senders; // try to overlap recv_h2d with send_h2h
             }
           }
@@ -584,13 +586,13 @@ public:
       for (auto &domSenders : remoteSenders_) {
         for (auto &kv : domSenders) {
           const Dim3 dstIdx = kv.first;
-          RemoteSender &sender = kv.second;
-          if (sender.is_d2h()) {
+          StatefulSender *sender = kv.second;
+          if (sender->active()) {
             pending = true;
-            if (sender.d2h_done()) {
+            if (sender->next_ready()) {
               std::cerr << "rank=" << rank_ << " dst=" << dstIdx
                         << " send_h2h\n";
-              sender.send_h2h();
+              sender->next();
               goto recvers; // try to overlap recv_h2d with send_h2h
             }
           }
@@ -632,14 +634,14 @@ public:
     // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
-        RemoteRecver &recver = kv.second;
-        recver.wait();
+        StatefulRecver *recver = kv.second;
+        recver->wait();
       }
     }
     for (auto &domSenders : remoteSenders_) {
       for (auto &kv : domSenders) {
-        RemoteSender &sender = kv.second;
-        sender.wait();
+        StatefulSender *sender = kv.second;
+        sender->wait();
       }
     }
     nvtxRangePop(); // remote wait

@@ -23,12 +23,12 @@ if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
       test_distributed_domain.cu
       test_cuda_mpi_colocatedtx.cu
       test_cuda_mpi_cudaipc.cu
+      test_cuda_aware_mpi.cu
     )
     target_include_directories(test_cuda_mpi SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda_mpi stencil)
-    add_test(NAME test_cuda_mpi COMMAND mpirun -n 2 cuda-memcheck test_cuda_mpi -a)
+    add_test(NAME test_cuda_mpi COMMAND ${MPIEXEC_EXECUTABLE} -n 2 cuda-memcheck test_cuda_mpi -a)
 endif()
-
 
 add_executable(test_cpu test_cpu_main.cpp
   test_cpu_array.cpp
