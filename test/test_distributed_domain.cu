@@ -68,18 +68,24 @@ TEST_CASE("exchange") {
   size_t radius = 1;
   typedef float TestType1;
 
-  INFO("create");
+  INFO("ctor");
   DistributedDomain dd(10, 10, 10);
   dd.set_radius(radius);
   auto dh1 = dd.add_data<TestType1>();
+  INFO("realize");
   dd.realize();
 
+  CUDA_RUNTIME(cudaDeviceSynchronize());
+
+  INFO("barrier");
   MPI_Barrier(MPI_COMM_WORLD);
 
   INFO("init");
   dim3 dimGrid(2, 2, 2);
   dim3 dimBlock(8, 8, 8);
   for (auto &d : dd.domains()) {
+    REQUIRE(d.get_curr(dh1) != nullptr);
+    std::cerr << d.raw_size() << "\n";
     CUDA_RUNTIME(cudaSetDevice(d.gpu()));
     init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), d.raw_size());
     CUDA_RUNTIME(cudaDeviceSynchronize());
@@ -89,6 +95,7 @@ TEST_CASE("exchange") {
 
   INFO("exchange");
   dd.exchange();
+  CUDA_RUNTIME(cudaDeviceSynchronize());
 
   // test exchange
 }

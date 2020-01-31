@@ -4,6 +4,55 @@
 
 #include <climits>
 
+enum class MsgKind {
+  ColocatedEvt = 0,
+  ColocatedMem = 1,
+  ColocatedDev = 2,
+  Other = 3
+};
+
+/*!
+  Construct an MPI tag from a payload and a direction vector for a kind of
+  message tags must be non-negative, so MSB must be 0, leaving 31 bits
+
+  data index in buts 0-15     (16 bits)
+  gpu id in bits 16-23        ( 8 bits)
+  direction vec in bits 24-30 ( 7 bits)
+   0 -> 0b00
+   1 -> 0b01
+  -1 -> 0b10
+
+*/
+template <MsgKind kind>
+static int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
+  int ret = 0;
+
+  // bit 31 is 0
+
+  // bits 29-30 encode message kind
+  int kindInt = static_cast<int>(kind);
+  assert(kindInt < 4);
+  assert(kindInt >= 0);
+  ret |= (kindInt << 29);
+
+  // bits 23-28 encode direction vector
+  assert(dir.x >= -1 && dir.x <= 1);
+  assert(dir.y >= -1 && dir.y <= 1);
+  assert(dir.z >= -1 && dir.z <= 1);
+  int dirBits = 0;
+  dirBits |= dir.x == 0 ? 0b00 : (dir.x == 1 ? 0b01 : 0b10);
+  dirBits |= (dir.y == 0 ? 0b00 : (dir.y == 1 ? 0b01 : 0b10)) << 2;
+  dirBits |= (dir.z == 0 ? 0b00 : (dir.z == 1 ? 0b01 : 0b10)) << 4;
+  ret |= (dirBits << 23);
+
+  // bits 0-22 are the payload
+  assert(payload < (1 << 21));
+  ret |= (payload & 0x3FFFFF);
+
+  assert(ret >= 0);
+  return ret;
+}
+
 /*!
   Construct an MPI tag from a gpu id, a direction vector, and a stencil data
   field index
@@ -88,8 +137,6 @@ static int make_tag(int gpu, Dim3 dir) {
 
   return t;
 }
-
-
 
 /*! An asynchronous sender, to be paired with a Recver
  */

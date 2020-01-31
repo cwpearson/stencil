@@ -20,17 +20,33 @@ TEST_CASE("partition") {
 
     for (int i = 0; i < ranks; ++i) {
       REQUIRE(part->rank_idx(i) < part->rank_dim());
-      REQUIRE(part->rank_idx(i) >= 0);
+      REQUIRE(part->rank_idx(i).all_ge(0));
       REQUIRE(part->get_rank(part->rank_idx(i)) == i);
     }
 
     for (int i = 0; i < gpus; ++i) {
       REQUIRE(part->gpu_idx(i) < part->gpu_dim());
-      REQUIRE(part->gpu_idx(i) >= 0);
+      REQUIRE(part->gpu_idx(i).all_ge(0));
       REQUIRE(part->get_gpu(part->gpu_idx(i)) == i);
     }
 
     REQUIRE(Dim3(5, 5, 5) == part->local_domain_size(Dim3(0,0,0)));
+
+    delete part;
+  }
+
+  SECTION("10x3x1 into 4x1") {
+
+    Dim3 sz(10, 3, 1);
+    int ranks = 4;
+    int gpus = 1;
+
+    Partition *part = new PFP(sz, ranks, gpus);
+
+    REQUIRE(Dim3(3, 3, 1) == part->local_domain_size(Dim3(0,0,0)));
+    REQUIRE(Dim3(3, 3, 1) == part->local_domain_size(Dim3(1,0,0)));
+    REQUIRE(Dim3(2, 3, 1) == part->local_domain_size(Dim3(2,0,0)));
+    REQUIRE(Dim3(2, 3, 1) == part->local_domain_size(Dim3(3,0,0)));
 
     delete part;
   }

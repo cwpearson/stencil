@@ -32,7 +32,7 @@ public:
   RcStream(int dev) : count_(new size_t), dev_(dev) {
     *count_ = 1;
     CUDA_RUNTIME(cudaSetDevice(dev_));
-    CUDA_RUNTIME(cudaStreamCreate(&stream_));
+    CUDA_RUNTIME(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking));
   }
 
   RcStream() : RcStream(0) {}

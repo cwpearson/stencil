@@ -15,11 +15,38 @@
 
 #include "stencil/dim3.hpp"
 #include "stencil/direction_map.hpp"
-#include "stencil/gpu_topo.hpp"
+#include "stencil/gpu_topology.hpp"
 #include "stencil/local_domain.cuh"
+#include "stencil/mpi_topology.hpp"
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
 #include "stencil/tx.hpp"
+
+enum class MethodFlags {
+  None = 0,
+  CudaMpi = 1,
+  CudaAwareMpi = 2,
+  CudaMpiColocated = 4,
+  CudaMemcpyPeer = 8,
+  CudaKernel = 16,
+  All = 1 + 2 + 4 + 8 + 16
+};
+static_assert(sizeof(MethodFlags) == sizeof(int));
+
+inline MethodFlags operator|(MethodFlags a, MethodFlags b) {
+  return static_cast<MethodFlags>(static_cast<int>(a) | static_cast<int>(b));
+}
+
+inline MethodFlags &operator|=(MethodFlags &a, MethodFlags b) {
+  a = a | b;
+  return a;
+}
+
+inline MethodFlags operator&(MethodFlags a, MethodFlags b) {
+  return static_cast<MethodFlags>(static_cast<int>(a) & static_cast<int>(b));
+}
+
+inline bool any(MethodFlags a) noexcept { return a != MethodFlags::None; }
 
 class DistributedDomain {
 private:
@@ -28,8 +55,14 @@ private:
   int rank_;
   int worldSize_;
 
-  // the GPUs this MPI rank will use
+  // the GPUs this distributed domain will use
   std::vector<int> gpus_;
+
+  // MPI-related topology information
+  MpiTopology mpiTopology_;
+
+  // GPU-related topology information
+  GpuTopology gpuTopology_;
 
   // the stencil radius
   size_t radius_;
@@ -40,139 +73,98 @@ private:
   // the index of the domain in the distributed domain
   std::vector<Dim3> domainIdx_;
 
-  // information about mapping of computation domain to workers
-  Partition *partition_;
-
-  // senders/recvers for each direction in each domain
-  // domainDirSenders[domainIdx].at(dir)
-  // a sender/recver pair is associated with the send direction
-  std::vector<DirectionMap<HaloSender *>> domainDirSender_;
-  std::vector<DirectionMap<HaloRecver *>> domainDirRecver_;
-
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
 
-  // MPI ranks co-located with me
-  std::set<int64_t> colocated_;
+  MethodFlags flags_;
 
-  std::vector<std::vector<bool>> peerAccess_; //<! which GPUs have peer access
+  std::vector<std::map<Dim3, RemoteSender>>
+      remoteSenders_; // remoteSender_[domain][dstIdx] = sender
+  std::vector<std::map<Dim3, RemoteRecver>>
+      remoteRecvers_; // remoteRecver_[domain][srcIdx] = recver
+
+  // kernel sender for same-domain sends
+  PeerAccessSender peerAccessSender_;
+
+  // cudaMemcpyPeerAsync sender for local exchanges
+  PeerCopySender peerCopySender_;
+
+  std::vector<std::map<Dim3, ColocatedHaloSender>>
+      coloSenders_; // vec[domain][dstIdx] = sender
+  std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
 public:
-  DistributedDomain(size_t x, size_t y, size_t z) : size_(x, y, z) {
+  DistributedDomain(size_t x, size_t y, size_t z)
+      : size_(x, y, z), flags_(MethodFlags::All) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
-    int deviceCount;
-    CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
 
     // create a communicator for ranks on the same node
-    MPI_Barrier(MPI_COMM_WORLD); // to stabilize co-located timing
+    MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
-    MPI_Comm shmcomm;
-    MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
-                        &shmcomm);
-    int shmrank, shmsize;
-    MPI_Comm_rank(shmcomm, &shmrank);
-    MPI_Comm_size(shmcomm, &shmsize);
-    printf("DistributedDomain::ctor(): shmcomm rank %d/%d\n", shmrank, shmsize);
-
-
-    // Give every rank a list of co-located ranks
-    std::vector<int> colocated(shmsize);
-    MPI_Allgather(&rank_, 1, MPI_INT, colocated.data(), 1, MPI_INT, shmcomm);
-    for (auto &r : colocated) {
-      colocated_.insert(r);
-    }
+    mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
     double elapsed = MPI_Wtime() - start;
-    printf("time.colocate [%d] %fs\n", rank_, elapsed);
-    assert(colocated_.count(rank_) == 1 && "should be colocated with self");
-    printf(
-        "DistributedDomain::ctor(): rank %d colocated with %lu other ranks\n",
-        rank_, colocated_.size() - 1);
+    printf("time.mpi_topo [%d] %fs\n", rank_, elapsed);
 
+    std::cout << "[" << rank_ << "] colocated with "
+              << mpiTopology_.colocated_size() << " ranks\n";
 
-    // if fewer ranks than GPUs, round-robin GPUs to ranks
-    if (shmsize <= deviceCount) {
-      for (int gpu = 0; gpu < deviceCount; ++gpu) {
-        if (gpu % shmsize == shmrank) {
-          gpus_.push_back(gpu);
-        }
-      }
-    } else { // if more ranks, share gpus among ranks
-      gpus_.push_back(shmrank % deviceCount);
-    }
-
-    for (const auto gpu : gpus_) {
-      printf("rank %d/%d local=%d using gpu %d\n", rank_, worldSize_, shmrank,
-             gpu);
-    }
-
-
-    start = MPI_Wtime();
-
-    // Try to enable peer access between all GPUs
-    nvtxRangePush("peer_en");
-
-    // can't use gpus_.size() because we don't own all the GPUs
-    peerAccess_ =
-        std::vector<std::vector<bool>>(deviceCount, std::vector<bool>(deviceCount, false));
-
-    for (int src = 0; src < deviceCount; ++src) {
-      for (int dst = 0; dst < deviceCount; ++dst) {
-        if (src == dst) {
-          peerAccess_[src][dst] = true;
-          std::cout << src << " -> " << dst << " peer access\n";
-        } else {
-          CUDA_RUNTIME(cudaSetDevice(src))
-          cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
-          if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
-            peerAccess_[src][dst] = true;
-            std::cout << src << " -> " << dst << " peer access\n";
-          } else if (cudaErrorInvalidDevice) {
-            peerAccess_[src][dst] = false;
-          } else {
-            assert(0);
-            peerAccess_[src][dst] = false;
+    // Determine GPUs this DistributedDomain is reposible for
+    if (gpus_.empty()) {
+      int deviceCount;
+      CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
+      // if fewer colocated ranks than GPUs, round-robin GPUs to ranks
+      if (mpiTopology_.colocated_size() <= deviceCount) {
+        for (int id = 0; id < deviceCount; ++id) {
+          if (id % mpiTopology_.colocated_size() ==
+              mpiTopology_.colocated_rank()) {
+            gpus_.push_back(id);
           }
         }
+      } else { // if more ranks, share gpus among ranks
+        gpus_.push_back(mpiTopology_.colocated_rank() % deviceCount);
       }
     }
+    assert(!gpus_.empty());
+
+    // create a list of cuda device IDs in use by the ranks on this node
+    // TODO: assumes all ranks use the same number of GPUs
+    MPI_Barrier(MPI_COMM_WORLD);
+    start = MPI_Wtime();
+    std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
+    MPI_Allgather(gpus_.data(), gpus_.size(), MPI_INT, nodeCudaIds.data(),
+                  gpus_.size(), MPI_INT, mpiTopology_.colocated_comm());
+    elapsed = MPI_Wtime() - start;
+    printf("time.node_gpus [%d] %fs\n", rank_, elapsed);
+    {
+      std::set<int> unique(nodeCudaIds.begin(), nodeCudaIds.end());
+      // nodeCudaIds = std::vector<int>(unique.begin(), unique.end());
+      std::cout << "[" << rank_ << "] colocated with ranks using gpus";
+      for (auto &e : nodeCudaIds) {
+        std::cout << " " << e;
+      }
+      std::cout << "\n";
+    }
+
+    // determine topology info for used GPUs
+    MPI_Barrier(MPI_COMM_WORLD);
+    start = MPI_Wtime();
+    gpuTopology_ = GpuTopology(nodeCudaIds);
+    elapsed = MPI_Wtime() - start;
+    printf("time.gpu_topo [%d] %fs\n", rank_, elapsed);
+
+    start = MPI_Wtime();
+    // Try to enable peer access between all GPUs
+    nvtxRangePush("peer_en");
+    gpuTopology_.enable_peer();
     nvtxRangePop();
     elapsed = MPI_Wtime() - start;
     printf("time.peer [%d] %fs\n", rank_, elapsed);
 
-
-    start = MPI_Wtime();
-    nvtxRangePush("gpu_topo");
-    Mat2D dist = get_gpu_distance_matrix();
-    nvtxRangePop();
-    if (0 == rank_) {
-      std::cerr << "gpu distance matrix: \n";
-      for (auto &r : dist) {
-        for (auto &c : r) {
-          std::cerr << c << " ";
-        }
-        std::cerr << "\n";
-      }
-    }
-    elapsed = MPI_Wtime() - start;
-    printf("time.topo [%d] %fs\n", rank_, elapsed);
-
-    // determine decomposition information
-    start = MPI_Wtime();
-    nvtxRangePush("partition");
-    partition_ = new PFP(size_, worldSize_, gpus_.size());
-    nvtxRangePop();
-    elapsed = MPI_Wtime() - start;
-    printf("time.partition [%d] %fs\n", rank_, elapsed);
-
     MPI_Barrier(MPI_COMM_WORLD);
-    if (0 == rank_) {
-      std::cerr << "split " << size_ << " into " << partition_->rank_dim()
-                << "x" << partition_->gpu_dim() << "\n";
-    }
   }
 
-  ~DistributedDomain() { delete partition_; }
+  ~DistributedDomain() {}
 
   std::vector<LocalDomain> &domains() { return domains_; }
 
@@ -183,16 +175,42 @@ public:
     return DataHandle<T>(dataElemSize_.size() - 1);
   }
 
+  /* Choose comm methods from MethodFlags. Call before realize()
+
+    d.set_methods(MethodFlags::Any);
+    d.set_methods(MethodFlags::CudaAwareMpi | MethodFlags::Kernel);
+  */
+  void set_methods(MethodFlags flags) noexcept { flags_ = flags; }
+
+  /*! return true if any provided methods are enabled
+   */
+  bool any_methods(MethodFlags methods) const noexcept {
+    return (methods & flags_) != MethodFlags::None;
+  }
+
+  /* Choose GPUs for this rank. Call before realize()
+   */
+  void set_gpus(const std::vector<int> &cudaIds) { gpus_ = cudaIds; }
+
   void realize(bool useUnified = false) {
 
-    // create local domains
+    // compute domain placement
+    nvtxRangePush("node-aware placement");
+    std::cerr << "[" << rank_ << "] do NAP\n";
+    NodeAwarePlacement *nap_ = new NodeAwarePlacement(
+        size_, worldSize_, mpiTopology_, gpuTopology_, radius_, gpus_);
+    nvtxRangePop();
+
     double start = MPI_Wtime();
-    for (int i = 0; i < gpus_.size(); i++) {
+    for (int domId = 0; domId < gpus_.size(); domId++) {
 
-      Dim3 idx = partition_->dom_idx(rank_, i);
-      Dim3 ldSize = partition_->local_domain_size(idx);
+      Dim3 idx = nap_->dom_idx(rank_, domId);
+      Dim3 ldSize = nap_->domain_size(idx);
 
-      LocalDomain ld(ldSize, gpus_[i]);
+      // placement algorithm should agree what my GPU is
+      assert(nap_->get_cuda(idx) == gpus_[domId]);
+
+      LocalDomain ld(ldSize, gpus_[domId]);
       ld.radius_ = radius_;
       for (size_t dataIdx = 0; dataIdx < dataElemSize_.size(); ++dataIdx) {
         ld.add_data(dataElemSize_[dataIdx]);
@@ -200,189 +218,278 @@ public:
 
       domains_.push_back(ld);
 
-      printf("rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, i,
-             gpus_[i], idx.x, idx.y, idx.z);
-      domainIdx_.push_back(idx);
+      printf("rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, domId,
+             gpus_[domId], idx.x, idx.y, idx.z);
     }
 
     // realize local domains
     for (auto &d : domains_) {
-      if (useUnified)
-        d.realize_unified();
-      else
-        d.realize();
-      printf("DistributedDomain.realize(): finished creating LocalDomain\n");
+      d.realize();
     }
     double elapsed = MPI_Wtime() - start;
     printf("time.local_realize [%d] %fs\n", rank_, elapsed);
 
-    // initialize null senders recvers for each domain
-    domainDirSender_.resize(gpus_.size());
-    domainDirRecver_.resize(gpus_.size());
-    for (size_t domainIdx = 0; domainIdx < domains_.size(); ++domainIdx) {
-      for (int z = 0; z < 3; ++z) {
-        for (int y = 0; y < 3; ++y) {
-          for (int x = 0; x < 3; ++x) {
-            domainDirSender_[domainIdx].at(x, y, z) = nullptr;
-            domainDirRecver_[domainIdx].at(x, y, z) = nullptr;
-          }
-        }
-      }
-    }
-
-    const Dim3 gpuDim = partition_->gpu_dim();
-    const Dim3 rankDim = partition_->rank_dim();
-
-    // create communication plan
     start = MPI_Wtime();
     nvtxRangePush("comm plan");
+
+    // outbox for same-GPU exchanges
+    std::vector<Message> peerAccessOutbox;
+
+    // outbox for same-rank exchanges
+    std::vector<Message> peerCopyOutbox;
+
+    // outbox for co-located domains in different ranks
+    // one outbox for each co-located domain
+    std::vector<std::map<Dim3, std::vector<Message>>> coloOutboxes;
+    std::vector<std::map<Dim3, std::vector<Message>>> coloInboxes;
+    // coloOutboxed[di][dstRank] = messages
+
+    // inbox for each remote domain my domains recv from
+    std::vector<std::map<Dim3, std::vector<Message>>>
+        remoteInboxes; // remoteOutboxes_[domain][srcIdx] = messages
+    // outbox for each remote domain my domains send to
+    std::vector<std::map<Dim3, std::vector<Message>>>
+        remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
+
+    const Dim3 globalDim = nap_->gpu_dim() * nap_->rank_dim();
+
+    std::cerr << "plan\n";
+    // plan messages
+    nvtxRangePush("DistributedDomain::realize() plan messages");
+    remoteOutboxes.resize(gpus_.size());
+    remoteInboxes.resize(gpus_.size());
+    coloOutboxes.resize(gpus_.size());
+    coloInboxes.resize(gpus_.size());
     for (size_t di = 0; di < domains_.size(); ++di) {
-      assert(domains_.size() == domainIdx_.size());
-
-      auto &myDomain = domains_[di];
-      const Dim3 myIdx = domainIdx_[di];
-      const int myGPU = di; // logical GPU number, not device ID
-      assert(rank_ == partition_->get_rank(myIdx));
-
-      auto &dirSender = domainDirSender_[di];
-      auto &dirRecver = domainDirRecver_[di];
-
-      // send/recv pairs for faces
-      for (const auto xDir : {-1, 0, 1}) {
-        for (const auto yDir : {-1, 0, 1}) {
-          for (const auto zDir : {-1, 0, 1}) {
-            Dim3 dirVec(xDir, yDir, zDir);
-            if (dirVec == Dim3(0, 0, 0)) {
-              continue; // don't send in no direction
+      const Dim3 myIdx = nap_->dom_idx(rank_, di);
+      const int myDev = domains_[di].gpu();
+      assert(myDev == nap_->get_cuda(myIdx));
+      for (int z = -1; z < 1; ++z) {
+        for (int y = -1; y < 1; ++y) {
+          for (int x = -1; x < 1; ++x) {
+            const Dim3 dir(x, y, z);
+            if (Dim3(0, 0, 0) == dir) {
+              continue; // no message
             }
 
-            // who i am sending to for this dirVec
-            Dim3 dstIdx = (myIdx + dirVec).wrap(rankDim * gpuDim);
-
-            // who is sending to me for this dirVec
-            Dim3 srcIdx = (myIdx - dirVec).wrap(rankDim * gpuDim);
-
-            // logical GPU number, not device ID
-            int srcGPU = partition_->get_gpu(srcIdx);
-            int dstGPU = partition_->get_gpu(dstIdx);
-            int srcRank = partition_->get_rank(srcIdx);
-            int dstRank = partition_->get_rank(dstIdx);
-
-            std::cout << myIdx << " -> " << dstIdx << " dirVec=" << dirVec
-                      << " r" << rank_ << ",g" << myGPU << " -> r" << dstRank
-                      << ",g" << dstGPU << "\n";
-
-            // determine how to send face in that direction
-            HaloSender *sender = nullptr;
-
+            const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
+            const int dstRank = nap_->get_rank(dstIdx);
+            const int dstGPU = nap_->get_gpu(dstIdx);
+            const int dstDev = nap_->get_cuda(dstIdx);
+            Message sMsg(dir, di, dstGPU);
             if (rank_ == dstRank) {
-              int myCudaId = myDomain.gpu();
-              int dstCudaId = domains_[dstGPU].gpu();
-              if (peerAccess_[myCudaId][dstCudaId]) {
-                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                          << " send same rank and peer access\n";
-                sender = new RegionCopier(domains_[dstGPU], myDomain, dirVec);
+              const int myDev = domains_[di].gpu();
+              const int dstDev = domains_[dstGPU].gpu();
+              if ((myDev == dstDev) && any_methods(MethodFlags::CudaKernel)) {
+                peerAccessOutbox.push_back(sMsg);
+              } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
+                peerCopyOutbox.push_back(sMsg);
+              } else if (any_methods(MethodFlags::CudaMpi)) {
+                assert(di < remoteOutboxes.size());
+                remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
+                remoteOutboxes[di][dstIdx].push_back(sMsg);
               } else {
-                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                          << " send same rank\n";
-                sender =
-                    new PackMemcpyCopier(domains_[dstGPU], myDomain, dirVec);
+                std::cerr << "No method available to send required message\n";
+                exit(EXIT_FAILURE);
               }
-            } else if (colocated_.count(dstRank)) { // both domains on this node
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " send colocated\n";
-              sender = new RegionSender(myDomain, rank_, myGPU, dstRank, dstGPU,
-                                        dirVec);
-            } else { // domains on different nodes
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " send diff nodes\n";
-              sender = new RegionSender(myDomain, rank_, myGPU, dstRank, dstGPU,
-                                        dirVec);
+            } else if (any_methods(MethodFlags::CudaMpiColocated) &&
+                       mpiTopology_.colocated(dstRank) &&
+                       gpuTopology_.peer(myDev, dstDev)) {
+              assert(di < coloOutboxes.size());
+              coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
+              coloOutboxes[di][dstIdx].push_back(sMsg);
+            } else if (any_methods(MethodFlags::CudaMpi)) {
+              remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
+              remoteOutboxes[di][dstIdx].push_back(sMsg);
+            } else {
+              std::cerr << "No method available to send required message\n";
+              exit(EXIT_FAILURE);
             }
 
-            std::cout << myIdx << " <- " << srcIdx << " dirVec=" << dirVec
-                      << " r" << rank_ << ",g" << myGPU << " <- r" << srcRank
-                      << ",g" << srcGPU << "\n";
-
-            // determine how to receive a face from that direction
-            HaloRecver *recver = nullptr;
+            const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
+            const int srcRank = nap_->get_rank(srcIdx);
+            const int srcGPU = nap_->get_gpu(srcIdx);
+            const int srcDev = nap_->get_cuda(srcIdx);
+            Message rMsg(dir, srcGPU, di);
             if (rank_ == srcRank) {
-              int srcCudaId = domains_[srcGPU].gpu();
-              int myCudaId = myDomain.gpu();
-              if (peerAccess_[srcCudaId][myCudaId]) {
-                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                          << " recv same rank and peer access\n";
-                recver = nullptr; // no recver needed for RegionCopier
+              const int myDev = domains_[di].gpu();
+              const int srcDev = domains_[srcGPU].gpu();
+              if ((myDev == srcDev) && any_methods(MethodFlags::CudaKernel)) {
+                // no recver needed for same GPU
+              } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
+                // no recver needed for same rank
+              } else if (any_methods(MethodFlags::CudaMpi)) {
+                remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
+                remoteInboxes[di][srcIdx].push_back(rMsg);
               } else {
-                std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                          << " recv same rank\n";
-                recver = nullptr; // no recver needed for PackMemcpyCopier
+                std::cerr << "No method available to recv required message\n";
+                exit(EXIT_FAILURE);
               }
-            } else if (colocated_.count(srcRank)) { // both domains on this node
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " recv colocated\n";
-              recver = new RegionRecver(myDomain, srcRank, srcGPU, rank_, myGPU,
-                                        dirVec);
-            } else { // domains on different nodes
-              std::cerr << "DistributedDomain.realize(): dir=" << dirVec
-                        << " recv diff nodes\n";
-              recver = new RegionRecver(myDomain, srcRank, srcGPU, rank_, myGPU,
-                                        dirVec);
+            } else if (any_methods(MethodFlags::CudaMpiColocated) &&
+                       mpiTopology_.colocated(srcRank) &&
+                       gpuTopology_.peer(srcDev, myDev)) {
+              coloInboxes[di].emplace(srcIdx, std::vector<Message>());
+              coloInboxes[di][srcIdx].push_back(rMsg);
+            } else if (any_methods(MethodFlags::CudaMpi)) {
+              remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
+              remoteInboxes[di][srcIdx].push_back(rMsg);
+            } else {
+              std::cerr << "No method available to recv required message\n";
+              exit(EXIT_FAILURE);
             }
-
-            if (sender) {
-              sender->allocate();
-            }
-            if (recver) {
-              recver->allocate();
-            }
-            dirSender.at_dir(dirVec.x, dirVec.y, dirVec.z) = sender;
-            dirRecver.at_dir(dirVec.x, dirVec.y, dirVec.z) = recver;
           }
         }
       }
     }
+    nvtxRangePop(); // plan
+
+    if (rank_ == 0) {
+      // summarize communication plan
+      std::cerr << "rank=" << rank_ << " peerAccess=" << peerAccessOutbox.size()
+                << "\n";
+      std::cerr << "rank=" << rank_ << " peerCopy=" << peerCopyOutbox.size()
+                << "\n";
+      for (auto &obxs : coloOutboxes) {
+        for (auto &kv : obxs) {
+          const Dim3 dstIdx = kv.first;
+          auto &box = kv.second;
+          std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx
+                    << " colo=" << box.size() << "\n";
+        }
+      }
+      for (auto &obxs : remoteOutboxes) {
+        for (auto &kv : obxs) {
+          const Dim3 dstIdx = kv.first;
+          auto &box = kv.second;
+          std::cerr << "rank=" << rank_ << " dstIdx=" << dstIdx
+                    << " remote=" << box.size() << "\n";
+        }
+      }
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+    // create remote sender/recvers
+    nvtxRangePush("DistributedDomain::realize: create remote");
+    // per-domain senders and messages
+    remoteSenders_.resize(gpus_.size());
+    remoteRecvers_.resize(gpus_.size());
+
+    std::cerr << "create remote\n";
+    // create all required remote senders/recvers
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      const Dim3 myIdx = nap_->dom_idx(rank_, di);
+      for (auto &kv : remoteOutboxes[di]) {
+        const Dim3 dstIdx = kv.first;
+        const int dstRank = nap_->get_rank(dstIdx);
+        const int dstGPU = nap_->get_gpu(dstIdx);
+        remoteSenders_[di].emplace(
+            dstIdx, RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]));
+      }
+      for (auto &kv : remoteInboxes[di]) {
+        const Dim3 srcIdx = kv.first;
+        const int srcRank = nap_->get_rank(srcIdx);
+        const int srcGPU = nap_->get_gpu(srcIdx);
+        remoteRecvers_[di].emplace(
+            srcIdx, RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]));
+      }
+    }
+    nvtxRangePop(); // create remote
+
+    std::cerr << "create colocated\n";
+    // create colocated sender/recvers
+    nvtxRangePush("DistributedDomain::realize: create colocated");
+    // per-domain senders and messages
+    coloSenders_.resize(gpus_.size());
+    coloRecvers_.resize(gpus_.size());
+
+    // create all required colocated senders/recvers
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      const Dim3 myIdx = nap_->dom_idx(rank_, di);
+      for (auto &kv : coloOutboxes[di]) {
+        const Dim3 dstIdx = kv.first;
+        const int dstRank = nap_->get_rank(dstIdx);
+        const int dstGPU = nap_->get_gpu(dstIdx);
+        coloSenders_[di].emplace(
+            dstIdx,
+            ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
+      }
+      for (auto &kv : coloInboxes[di]) {
+        const Dim3 srcIdx = kv.first;
+        const int srcRank = nap_->get_rank(srcIdx);
+        const int srcGPU = nap_->get_gpu(srcIdx);
+        coloRecvers_[di].emplace(
+            srcIdx,
+            ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
+      }
+    }
+    nvtxRangePop(); // create colocated
+
+    // prepare senders and receivers
+    std::cerr << "DistributedDomain::realize: prepare peerAccessSender\n";
+    nvtxRangePush("DistributedDomain::realize: prep peerAccessSender");
+    peerAccessSender_.prepare(peerAccessOutbox, domains_);
+    nvtxRangePop();
+    std::cerr << "DistributedDomain::realize: prepare peerCopySender\n";
+    nvtxRangePush("DistributedDomain::realize: prep peerCopySender");
+    peerCopySender_.prepare(peerCopyOutbox, domains_);
+    nvtxRangePop();
+    std::cerr << "DistributedDomain::realize: prepare colocatedHaloSender\n";
+    assert(coloSenders_.size() == coloRecvers_.size());
+    for (size_t di = 0; di < coloSenders_.size(); ++di) {
+      for (auto &kv : coloSenders_[di]) {
+        const Dim3 dstIdx = kv.first;
+        auto &sender = kv.second;
+        std::cerr << "start_prepare for colo to " << dstIdx << "\n";
+        sender.start_prepare(coloOutboxes[di][dstIdx]);
+      }
+      for (auto &kv : coloRecvers_[di]) {
+        const Dim3 srcIdx = kv.first;
+        auto &recver = kv.second;
+        std::cerr << "start_prepare for colo from " << srcIdx << "\n";
+        recver.start_prepare(coloInboxes[di][srcIdx]);
+      }
+    }
+    for (size_t di = 0; di < coloSenders_.size(); ++di) {
+      for (auto &kv : coloSenders_[di]) {
+        const Dim3 dstIdx = kv.first;
+        auto &sender = kv.second;
+        const int srcDev = domains_[di].gpu();
+        const int dstDev = nap_->get_cuda(dstIdx);
+        std::cerr << srcDev << " " << dstDev << "\n";
+        std::cerr << "rank=" << rank_ << " finish_prepare for colo to "
+                  << dstIdx << "\n";
+        sender.finish_prepare();
+      }
+      for (auto &kv : coloRecvers_[di]) {
+        const Dim3 srcIdx = kv.first;
+        auto &recver = kv.second;
+        std::cerr << "rank=" << rank_ << " finish_prepare for colo from "
+                  << srcIdx << "\n";
+        recver.finish_prepare();
+      }
+    }
+    nvtxRangePop(); // prep colocated
+    std::cerr << "DistributedDomain::realize: prepare remoteSender\n";
+    nvtxRangePush("DistributedDomain::realize: prep remote");
+    assert(remoteSenders_.size() == remoteRecvers_.size());
+    for (size_t di = 0; di < remoteSenders_.size(); ++di) {
+      for (auto &kv : remoteSenders_[di]) {
+        const Dim3 dstIdx = kv.first;
+        auto &sender = kv.second;
+        sender.prepare(remoteOutboxes[di][dstIdx]);
+      }
+      for (auto &kv : remoteRecvers_[di]) {
+        const Dim3 srcIdx = kv.first;
+        auto &recver = kv.second;
+        recver.prepare(remoteInboxes[di][srcIdx]);
+      }
+    }
+    nvtxRangePop(); // prep remote
+
     nvtxRangePop(); // comm plan
     elapsed = MPI_Wtime() - start;
     printf("time.plan [%d] %fs\n", rank_, elapsed);
-  }
-
-  /* issue async sends for a domain
-   */
-  void send(const size_t domainIdx) {
-    double start = MPI_Wtime();
-    assert(domainIdx < domainDirSender_.size());
-    auto &dirSenders = domainDirSender_[domainIdx];
-    for (int z = 0; z < 3; ++z) {
-      for (int y = 0; y < 3; ++y) {
-        for (int x = 0; x < 3; ++x) {
-          if (auto sender = dirSenders.at(x, y, z)) {
-            sender->send();
-          }
-        }
-      }
-    }
-    double elapsed = MPI_Wtime() - start;
-    printf("time.issue_send [%d] [%lu] %fs\n", rank_, domainIdx, elapsed);
-  }
-
-  /* issue async recvs for a domain
-   */
-  void recv(const size_t domainIdx) {
-    double start = MPI_Wtime();
-    assert(domainIdx < domainDirRecver_.size());
-    auto &dirRecvers = domainDirRecver_[domainIdx];
-    for (int z = 0; z < 3; ++z) {
-      for (int y = 0; y < 3; ++y) {
-        for (int x = 0; x < 3; ++x) {
-          if (auto recver = dirRecvers.at(x, y, z)) {
-            recver->recv();
-          }
-        }
-      }
-    }
-    double elapsed = MPI_Wtime() - start;
-    printf("time.issue_recv [%d] [%lu] %fs\n", rank_, domainIdx, elapsed);
   }
 
   /*!
@@ -393,56 +500,156 @@ public:
 
     double start = MPI_Wtime();
 
-    // the sends and recvs for each domain issued async
-    std::vector<std::future<void>> sends(domains_.size());
-    std::vector<std::future<void>> recvs(domains_.size());
-
-    // issue all sends
-    nvtxRangePush("issue sends");
-    for (size_t idx = 0; idx < domainDirSender_.size(); ++idx) {
-      sends[idx] =
-          std::async(std::launch::async, &DistributedDomain::send, this, idx);
+    // start remote send d2h
+    fprintf(stderr, "rank=%d send remote d2h\n", rank_);
+    nvtxRangePush("DD::exchange: remote send d2h");
+    for (auto &domSenders : remoteSenders_) {
+      for (auto &kv : domSenders) {
+        RemoteSender &sender = kv.second;
+        sender.send_d2h();
+      }
     }
-    nvtxRangePop(); // issue sends
+    nvtxRangePop();
 
-    // issue all recvs
-    nvtxRangePush("issue recvs");
-    for (size_t idx = 0; idx < domainDirSender_.size(); ++idx) {
-      recvs[idx] =
-          std::async(std::launch::async, &DistributedDomain::recv, this, idx);
+    // start remote recv h2h
+    fprintf(stderr, "rank=%d recv remote h2h\n", rank_);
+    nvtxRangePush("DD::exchange: remote recv h2h");
+    for (auto &domRecvers : remoteRecvers_) {
+      for (auto &kv : domRecvers) {
+        RemoteRecver &recver = kv.second;
+        recver.recv_h2h();
+      }
     }
-    nvtxRangePop(); // issue recvs
+    nvtxRangePop();
 
-    // wait for all sends and recvs to be issued
-    for (size_t idx = 0; idx < domainDirSender_.size(); ++idx) {
-      sends[idx].wait();
-      recvs[idx].wait();
+    // start colocated Senders
+    fprintf(stderr, "rank=%d start colo send\n", rank_);
+    nvtxRangePush("DD::exchange: colo send");
+    for (auto &domSenders : coloSenders_) {
+      for (auto &kv : domSenders) {
+        ColocatedHaloSender &sender = kv.second;
+        sender.send();
+      }
     }
+    nvtxRangePop();
 
-    // wait for all sends and recvs
-    nvtxRangePush("wait");
-    for (size_t domainIdx = 0; domainIdx < domains_.size(); ++domainIdx) {
-      auto &dirSender = domainDirSender_[domainIdx];
-      auto &dirRecver = domainDirRecver_[domainIdx];
-      for (int z = 0; z < 3; ++z) {
-        for (int y = 0; y < 3; ++y) {
-          for (int x = 0; x < 3; ++x) {
-            if (auto recver = dirRecver.at(x, y, z)) {
-              recver->wait();
+    // start colocated recvers
+    fprintf(stderr, "rank=%d start colo recv\n", rank_);
+    nvtxRangePush("DD::exchange: colo recv");
+    for (auto &domRecvers : coloRecvers_) {
+      for (auto &kv : domRecvers) {
+        ColocatedHaloRecver &recver = kv.second;
+        recver.recv();
+      }
+    }
+    nvtxRangePop();
+
+    // send same-rank messages
+    fprintf(stderr, "rank=%d send peer copy\n", rank_);
+    nvtxRangePush("DD::exchange: peer copy send");
+    peerCopySender_.send();
+    nvtxRangePop();
+
+    // send local messages
+    fprintf(stderr, "rank=%d send peer access\n", rank_);
+    nvtxRangePush("DD::exchange: peer access send");
+    peerAccessSender_.send();
+    nvtxRangePop();
+
+    // poll senders and recvers to move onto next step until all are done
+    fprintf(stderr, "rank=%d start poll\n", rank_);
+    nvtxRangePush("DD::exchange: poll");
+    bool pending = true;
+    while (pending) {
+      pending = false;
+    recvers:
+      // move recvers from h2h to h2d
+      for (auto &domRecvers : remoteRecvers_) {
+        for (auto &kv : domRecvers) {
+          const Dim3 srcIdx = kv.first;
+          RemoteRecver &recver = kv.second;
+          if (recver.is_h2h()) {
+            pending = true;
+            if (recver.h2h_done()) {
+              std::cerr << "rank=" << rank_ << " src=" << srcIdx
+                        << " recv_h2d\n";
+              recver.recv_h2d();
+              goto senders; // try to overlap recv_h2d with send_h2h
             }
-            if (auto sender = dirSender.at(x, y, z)) {
-              sender->wait();
+          }
+        }
+      }
+    senders:
+      // move senders from d2h to h2h
+      for (auto &domSenders : remoteSenders_) {
+        for (auto &kv : domSenders) {
+          const Dim3 dstIdx = kv.first;
+          RemoteSender &sender = kv.second;
+          if (sender.is_d2h()) {
+            pending = true;
+            if (sender.d2h_done()) {
+              std::cerr << "rank=" << rank_ << " dst=" << dstIdx
+                        << " send_h2h\n";
+              sender.send_h2h();
+              goto recvers; // try to overlap recv_h2d with send_h2h
             }
           }
         }
       }
     }
-    nvtxRangePop(); // wait
+    nvtxRangePop();
+
+    // wait for sends
+    fprintf(stderr, "rank=%d wait for sameRankSender\n", rank_);
+    nvtxRangePush("peerAccessSender.wait()");
+    peerAccessSender_.wait();
+    nvtxRangePop();
+
+    nvtxRangePush("peerCopySender.wait()");
+    peerCopySender_.wait();
+    nvtxRangePop();
+
+    // wait for colocated
+    nvtxRangePush("colocated.wait()");
+    std::cerr << "colocated senders wait\n";
+    for (auto &domSenders : coloSenders_) {
+      for (auto &kv : domSenders) {
+        ColocatedHaloSender &sender = kv.second;
+        sender.wait();
+      }
+    }
+    std::cerr << "colocated recvers wait\n";
+    for (auto &domRecvers : coloRecvers_) {
+      for (auto &kv : domRecvers) {
+        ColocatedHaloRecver &recver = kv.second;
+        recver.wait();
+      }
+    }
+    nvtxRangePop(); // colocated wait
+
+    nvtxRangePush("remote wait");
+    // wait for remote senders and recvers
+    // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
+    for (auto &domRecvers : remoteRecvers_) {
+      for (auto &kv : domRecvers) {
+        RemoteRecver &recver = kv.second;
+        recver.wait();
+      }
+    }
+    for (auto &domSenders : remoteSenders_) {
+      for (auto &kv : domSenders) {
+        RemoteSender &sender = kv.second;
+        sender.wait();
+      }
+    }
+    nvtxRangePop(); // remote wait
 
     double elapsed = MPI_Wtime() - start;
     printf("time.exchange [%d] %fs\n", rank_, elapsed);
 
     // wait for all ranks to be done
+    nvtxRangePush("barrier");
     MPI_Barrier(MPI_COMM_WORLD);
+    nvtxRangePop(); // barrier
   }
 };

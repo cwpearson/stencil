@@ -27,6 +27,11 @@ Depending on availability, the following compiler defines exist:
 | CUDA | `STENCIL_USE_CUDA=1` | `STENCIL_USE_CUDA=0` |
 | libnuma | `STENCIL_USE_NUMA=1` | `STENCIL_USE_NUMA=0` |
 
+## Requirements
+Tested on
+
+* CUDA 10.1 / 10.2
+* OpenMPI 2.1
 
 ## Tests
 
@@ -60,10 +65,16 @@ mpirun -n 4 src/astaroth-sim
 ```
 ## Profiling with nsys
 
+With the default profiling settings, we sometimes see a crash on Nsight Systems 2019.3.7 on amd64.
+Restrict profiling to CUDA, NVTX, and OS calls.
+
 ```
-nsys profile mpirun -n <int> src/astaroth-sim
+nsys profile -t cuda,nvtx,osrt mpirun -n <int> src/astaroth-sim
 ```
 
+Nsight Systems 2019.5.2 allows `-t mpi`, but on amd64 it causes the importer to hang.
+
+Use the Nsight Systems application to view the resulting `qdrep` file.
 
 ## Profiling with nvprof
 
@@ -74,6 +85,13 @@ mpirun -n <int> nvprof -o timeline_%p.nvvp ...
 To mount a remote directory (where there are nvprof files to load):
 ```
 sshfs -o IdentityFile=/path/to/id_rsa user@host:/path /mount/location
+```
+## Choosing a Different MPI
+
+```
+cd build
+rm -rf *
+cmake -DCMAKE_PREFIX_PATH=path/to/mpi ..
 ```
 
 ## MCA Parameters
@@ -88,30 +106,44 @@ Checking for CUDA-Aware MPI support:
 ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ```
 
+## Bulding OpenMPI with CUDA Support
+
+```
+./configure --prefix="blah" --with-cuda=/path/to/cuda
+```
 
 ## Design Goals
-  * v1 (prototype)
-    * joint stencils over multiple data types (Astaroth)
-    * user-defined stencil kernels (Astaroth)
-    * edge communication (Astaroth)
-    * corner communication (Astaroth)
-    * face communication (Astaroth)
-    * overlap MPI and CUDA
-  * v2
-    * Remove requirement of CUDA
-    * data placement in heterogeneous environments
-    * direct GPU-GPU communication
-      * https://blogs.fau.de/wittmann/2013/02/mpi-node-local-rank-determination/
-      * https://stackoverflow.com/questions/9022496/how-to-determine-mpi-rank-process-number-local-to-a-socket-node   
-    * N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
-  * future
-    * CPU stencil (HPCG)
-    * halo size (performance)
-      * fewer, larger messages
-      * less frequent barriers
-    * pitched arrays (performance)
-    * optimized communication (performance)
-    * Stop decomposition early
+  * v1 (AsHES)
+    * [x] joint stencils over multiple data types (Astaroth)
+    * [x] uneven partitioning
+    * [x] edge communication (Astaroth)
+    * [x] corner communication (Astaroth)
+    * [x] face communication (Astaroth)
+    * [x] overlap MPI and CUDA
+    * [x] Same-GPU halo exchange with kernels
+    * [x] Same-rank halo exchange with kernels
+    * [x] Same-rank halo exchange with `cudaMemcpyPeer`
+    * [x] co-located MPI rank halo exchange with with `cudaIpc...` and `cudaMemcpyPeer`
+    * [x] automatic data placement in heterogeneous environments
+    * [x] Control which GPUs a distributed domain should use
+      * `DistributedDomain::use_gpus(const std::vector<int> &gpus)` 
+    * [x] Control which exchange method should be used
+    * [ ] `cudaMemcpy3D` and family for data transfers & allocations
+      * supports pitched arrays
+    * [ ] Autodetect CUDA-Aware MPI support
+      * testing at build time with `ompi_info`
+      * `MPI_T_cvar_read` / `MPI_T_cvar_get_info` ?
+  * future work
+    * [ ] Remove requirement of CUDA (HPCG)
+    * [ ] support uneven radius
+    * [ ] Indexing object passed to kernels
+      * could allow halo allocations to be stored non-contiguously
+    * [ ] N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
+      * would prevent the use of `cudaMemcpy3D` and family
+    * [ ] selectable halo multiplier
+      * fewer, larger messages and less frequent barriers
+      * larger halo allocations
+    * [ ] pitched arrays
 
 
 ## Interesting Things
@@ -125,7 +157,7 @@ The underlying stream is released when the reference count drops to zero.
 
 ### GPU Distance Matrix
 
-`include/stencil/gpu_topo.hpp`
+`include/stencil/gpu_topology.hpp`
 
 The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
 This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.

@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <future>
+#include <iomanip>
 #include <sstream>
 
 #include <mpi.h>
@@ -21,6 +22,895 @@
 
 // #define ANY_LOUD
 // #define REGION_LOUD
+// #define REMOTE_LOUD
+
+inline void print_bytes(const char *obj, size_t n) {
+  std::cerr << std::hex << std::setfill('0'); // needs to be set only once
+  auto *ptr = reinterpret_cast<const unsigned char *>(obj);
+  for (int i = 0; i < n; i++, ptr++) {
+    if (i % sizeof(uint64_t) == 0) {
+      std::cerr << std::endl;
+    }
+    std::cerr << std::setw(2) << static_cast<unsigned>(*ptr) << " ";
+  }
+  std::cerr << std::endl;
+}
+
+static int nextPowerOfTwo(int x) {
+  x--;
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  x |= x >> 8;
+  x |= x >> 16;
+  x++;
+  return x;
+}
+
+static Dim3 make_block_dim(const Dim3 extent, int threads) {
+  Dim3 ret;
+  ret.x = min(threads, nextPowerOfTwo(extent.x));
+  threads /= ret.x;
+  ret.y = min(threads, nextPowerOfTwo(extent.y));
+  threads /= ret.y;
+  ret.z = min(threads, nextPowerOfTwo(extent.z));
+  assert(ret.x < 1024);
+  assert(ret.y < 1024);
+  assert(ret.z < 1024);
+  assert(ret.x * ret.y * ret.z < 1024);
+  std::cerr << extent << " " << ret << "\n";
+  return ret;
+}
+
+class Message {
+private:
+public:
+  Dim3 dir_;
+  int srcGPU_;
+  int dstGPU_;
+  Message(Dim3 dir, int srcGPU, int dstGPU)
+      : dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
+
+  bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
+};
+
+/* Send messages to local domains with a kernel
+ */
+class PeerAccessSender {
+private:
+  std::vector<Message> outbox_;
+
+  // one stream per source device
+  std::vector<RcStream> streams_;
+
+  std::vector<const LocalDomain *> domains_;
+
+public:
+  PeerAccessSender() {}
+
+  ~PeerAccessSender() {}
+
+  void prepare(std::vector<Message> &outbox,
+               const std::vector<LocalDomain> &domains) {
+    outbox_ = outbox;
+
+    for (auto &e : domains) {
+      domains_.push_back(&e);
+    }
+
+    // create a stream per device
+    for (auto &msg : outbox_) {
+      int srcDev = domains_[msg.srcGPU_]->gpu();
+      int dstDev = domains_[msg.dstGPU_]->gpu();
+      if (srcDev >= streams_.size()) {
+        streams_.resize(srcDev + 1);
+      }
+      if (dstDev >= streams_.size()) {
+        streams_.resize(dstDev + 1);
+      }
+    }
+    for (size_t i = 0; i < streams_.size(); ++i) {
+      streams_[i] = RcStream(i);
+    }
+  }
+
+  void send() {
+
+    nvtxRangePush("PeerSender::send");
+
+    // translate data with kernel
+    for (auto &msg : outbox_) {
+      const LocalDomain *srcDomain = domains_[msg.srcGPU_];
+      const LocalDomain *dstDomain = domains_[msg.dstGPU_];
+      const Dim3 dstSz = dstDomain->raw_size();
+      const Dim3 srcSz = srcDomain->raw_size();
+      const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
+      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
+      const Dim3 extent = srcDomain->halo_extent(msg.dir_);
+      RcStream &stream = streams_[srcDomain->gpu()];
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      assert(stream.device() == srcDomain->gpu());
+      CUDA_RUNTIME(cudaSetDevice(stream.device()));
+      assert(srcDomain->num_data() == dstDomain->num_data());
+      for (size_t i = 0; i < srcDomain->num_data(); ++i) {
+        const char *src = srcDomain->curr_data(i);
+        char *dst = dstDomain->curr_data(i);
+        const size_t elemSz = srcDomain->elem_size(i);
+        assert(dstDomain->elem_size(i) == elemSz);
+        translate<<<dimGrid, dimBlock, 0, stream>>>(
+            dst, dstPos, dstSz, src, srcPos, srcSz, extent, elemSz);
+      }
+    }
+
+    nvtxRangePop(); // PeerSender::send
+  }
+
+  void wait() {
+    for (auto &s : streams_) {
+      CUDA_RUNTIME(cudaStreamSynchronize(s));
+    }
+  }
+};
+
+/* Send messages between local domains by pack, cudaMemcpyPeerAsync, unpack
+ */
+class PeerCopySender {
+private:
+  std::vector<Message> outbox_;
+  std::vector<const LocalDomain *> domains_;
+
+  // one stream per source and destination operations
+  std::vector<std::vector<RcStream>> srcStreams_;
+  std::vector<std::vector<RcStream>> dstStreams_;
+
+  // event to sync src and dst streams
+  std::vector<std::vector<cudaEvent_t>> events_;
+
+  // packed buffers per (source, destination) domain pair
+  std::vector<std::vector<void *>> srcBufs_; // src device buffers
+  std::vector<std::vector<void *>> dstBufs_; // dst device buffers
+
+  // buffer sizes
+  std::vector<std::vector<size_t>> bufSizes_;
+
+public:
+  PeerCopySender() {}
+
+  ~PeerCopySender() {}
+
+  void prepare(std::vector<Message> &outbox,
+               const std::vector<LocalDomain> &domains) {
+    outbox_ = outbox;
+    std::sort(outbox_.begin(), outbox_.end());
+
+    for (auto &e : domains) {
+      domains_.push_back(&e);
+    }
+
+    // compute send and recv device buffer sizes
+    bufSizes_ = std::vector<std::vector<size_t>>(
+        domains_.size(), std::vector<size_t>(domains_.size(), 0));
+    for (auto &msg : outbox_) {
+      const auto *domain = domains_[msg.srcGPU_];
+      for (size_t n = 0; n < domain->num_data(); ++n) {
+        bufSizes_[msg.srcGPU_][msg.dstGPU_] += domain->halo_bytes(msg.dir_, n);
+      }
+    }
+
+    // initialize streams, events, and buffers
+    srcStreams_.resize(domains_.size());
+    dstStreams_.resize(domains_.size());
+    for (size_t i = 0; i < srcStreams_.size(); ++i) {
+      srcStreams_[i].resize(domains_.size());
+      dstStreams_[i].resize(domains_.size());
+    }
+    events_ = std::vector<std::vector<cudaEvent_t>>(
+        domains_.size(), std::vector<cudaEvent_t>(domains.size()));
+    srcBufs_ = std::vector<std::vector<void *>>(
+        domains_.size(), std::vector<void *>(domains_.size(), nullptr));
+    dstBufs_ = std::vector<std::vector<void *>>(
+        domains_.size(), std::vector<void *>(domains_.size(), nullptr));
+    for (size_t i = 0; i < srcStreams_.size(); ++i) {
+      for (size_t j = 0; j < srcStreams_[i].size(); ++j) {
+        const int srcDev = domains_[i]->gpu();
+        const int dstDev = domains_[j]->gpu();
+        srcStreams_[i][j] = RcStream(srcDev);
+        dstStreams_[i][j] = RcStream(dstDev);
+        CUDA_RUNTIME(cudaSetDevice(srcDev));
+        CUDA_RUNTIME(cudaEventCreate(&events_[i][j]));
+        CUDA_RUNTIME(cudaSetDevice(srcDev));
+        CUDA_RUNTIME(cudaMalloc(&srcBufs_[i][j], bufSizes_[i][j]));
+        CUDA_RUNTIME(cudaSetDevice(dstDev));
+        CUDA_RUNTIME(cudaMalloc(&dstBufs_[i][j], bufSizes_[i][j]));
+      }
+    }
+  }
+
+  void send() {
+
+    nvtxRangePush("PeerCopySender::send");
+
+    // offsets for pack and unpack
+    std::vector<std::vector<size_t>> bufOffsets(
+        domains_.size(), std::vector<size_t>(domains_.size(), 0));
+
+    // insert packs and copies into src stream, and unpacks into dst stream
+    for (auto &msg : outbox_) {
+      const int i = msg.srcGPU_;
+      const int j = msg.dstGPU_;
+      assert(i < domains_.size());
+      assert(j < domains_.size());
+      const LocalDomain *srcDomain = domains_[i];
+      const LocalDomain *dstDomain = domains_[j];
+      const int srcDev = srcDomain->gpu();
+      const int dstDev = dstDomain->gpu();
+      assert(i < srcStreams_.size());
+      assert(j < srcStreams_[i].size());
+      assert(i < dstStreams_.size());
+      assert(j < dstStreams_[i].size());
+      RcStream &srcStream = srcStreams_[i][j];
+      RcStream &dstStream = dstStreams_[i][j];
+      assert(i < events_.size());
+      assert(j < events_[i].size());
+      assert(i < events_.size());
+      assert(j < events_[i].size());
+      cudaEvent_t event = events_[i][j];
+      const Dim3 dstSz = dstDomain->raw_size();
+      const Dim3 srcSz = srcDomain->raw_size();
+      const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
+      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
+      const Dim3 extent = srcDomain->halo_extent(msg.dir_);
+      char *srcBuf = (char *)srcBufs_[i][j];
+      char *dstBuf = (char *)dstBufs_[i][j];
+
+      assert(srcBuf);
+      assert(dstBuf);
+
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+
+      // insert packs
+      assert(srcStream.device() == srcDomain->gpu());
+      CUDA_RUNTIME(cudaSetDevice(srcStream.device()));
+      assert(srcDomain->num_data() == dstDomain->num_data());
+      size_t bufOffset = bufOffsets[i][j];
+      for (size_t n = 0; n < srcDomain->num_data(); ++n) {
+        const size_t elemSz = srcDomain->elem_size(n);
+        const char *src = srcDomain->curr_data(n);
+        pack<<<dimGrid, dimBlock, 0, srcStream>>>(
+            &srcBuf[bufOffset], src, srcSz, 0, srcPos, extent, elemSz);
+        bufOffset += srcDomain->halo_bytes(msg.dir_, n);
+      }
+      // insert copy
+      CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf, dstDev, srcBuf, srcDev,
+                                       bufSizes_[i][j], srcStream));
+      CUDA_RUNTIME(cudaEventRecord(event, srcStream));
+
+      // insert unpacks
+      CUDA_RUNTIME(cudaSetDevice(dstStream.device()));
+      bufOffset = bufOffsets[i][j];
+      for (size_t n = 0; n < dstDomain->num_data(); ++n) {
+        const size_t elemSz = dstDomain->elem_size(n);
+        char *dst = dstDomain->curr_data(n);
+        CUDA_RUNTIME(cudaStreamWaitEvent(dstStream, event, 0 /*flags*/));
+        unpack<<<dimGrid, dimBlock, 0, dstStream>>>(
+            dst, dstSz, 0, dstPos, extent, &dstBuf[bufOffset], elemSz);
+        bufOffset += dstDomain->halo_bytes(msg.dir_, n);
+      }
+      bufOffsets[i][j] = bufOffset;
+    }
+
+    nvtxRangePop(); // PeerCopySender::send
+  }
+
+  void wait() {
+    for (auto &v : srcStreams_) {
+      for (auto &stream : v) {
+        cudaStreamSynchronize(stream);
+      }
+    }
+    for (auto &v : dstStreams_) {
+      for (auto &stream : v) {
+        cudaStreamSynchronize(stream);
+      }
+    }
+  }
+};
+
+/*! Send data between CUDA devices in colocated ranks
+ */
+class ColocatedDeviceSender {
+private:
+  int srcRank_;
+  int srcGPU_; // domain ID
+  int srcDev_; // cuda ID
+  int dstRank_;
+  int dstGPU_; // domain ID
+
+  void *dstBuf_; // buffer on dst device in another process
+  size_t bufSize_;
+
+  int dstDev_; // cuda ID
+
+  cudaEvent_t event_;
+  cudaIpcMemHandle_t memHandle_;
+  cudaIpcEventHandle_t evtHandle_;
+
+  MPI_Request evtReq_;
+  MPI_Request memReq_;
+  MPI_Request idReq_;
+
+public:
+  ColocatedDeviceSender() : dstBuf_(nullptr), event_(0) {}
+  ColocatedDeviceSender(int srcRank, int srcGPU, // domain ID
+                        int dstRank, int dstGPU, // domain ID
+                        int srcDev)              // cuda ID
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        srcDev_(srcDev), dstBuf_(nullptr), bufSize_(0), event_(0) {}
+
+  ~ColocatedDeviceSender() {
+    if (dstBuf_) {
+      CUDA_RUNTIME(cudaSetDevice(srcDev_));
+      CUDA_RUNTIME(cudaIpcCloseMemHandle(dstBuf_));
+    }
+    dstBuf_ = nullptr;
+    if (event_) {
+      CUDA_RUNTIME(cudaEventDestroy(event_));
+    }
+  }
+
+  void start_prepare(size_t numBytes) {
+    const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+
+    // fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to
+    // r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
+
+    // create an event and associated handle
+    CUDA_RUNTIME(cudaSetDevice(srcDev_));
+    CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess |
+                                              cudaEventDisableTiming));
+    CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
+
+    MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_,
+              make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
+              &evtReq_);
+
+    // Recieve the IPC mem handle
+    MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_,
+              make_tag<MsgKind::ColocatedMem>(payload), MPI_COMM_WORLD,
+              &memReq_);
+    // Retrieve the destination device id
+    MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_,
+              make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD,
+              &idReq_);
+
+    // compute the required buffer size
+    bufSize_ = numBytes;
+  }
+
+  void finish_prepare() {
+    // block until we have recved the device ID
+    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
+    // fprintf(stderr, "ColoDevSend::finish_prepare: srcDev=%d dstDev=%d (r%dg%d
+    // to r%dg%d)\n", srcDev_, dstDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
+
+    // wait for recv mem handle
+    MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
+
+    // convert to a pointer
+    CUDA_RUNTIME(cudaSetDevice(srcDev_));
+    CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_,
+                                      cudaIpcMemLazyEnablePeerAccess));
+
+    // block until we have sent event handle
+    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
+  }
+
+  void send(const void *devPtr, RcStream &stream) {
+    assert(srcDev_ == stream.device());
+    assert(dstBuf_);
+    assert(devPtr);
+    assert(dstDev_ >= 0);
+    assert(srcDev_ >= 0);
+    assert(bufSize_ > 0);
+    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_,
+                                     bufSize_, stream));
+    // record the event
+    CUDA_RUNTIME(cudaEventRecord(event_, stream));
+  }
+
+  void wait() { CUDA_RUNTIME(cudaEventSynchronize(event_)); }
+};
+
+class ColocatedDeviceRecver {
+private:
+  int srcRank_;
+  int srcGPU_;
+  int dstGPU_; // domain ID
+  int dstDev_; // cuda ID
+
+  cudaEvent_t event_;
+
+  cudaIpcMemHandle_t memHandle_;
+  cudaIpcEventHandle_t evtHandle_;
+  MPI_Request memReq_;
+  MPI_Request idReq_;
+  MPI_Request evtReq_;
+
+public:
+  ColocatedDeviceRecver() : event_(0) {}
+  ColocatedDeviceRecver(int srcRank, int srcGPU, int dstRank,
+                        int dstGPU, // domain ID
+                        int dstDev  // cuda ID
+                        )
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), dstDev_(dstDev),
+        event_(0) {}
+  ~ColocatedDeviceRecver() {
+    if (event_) {
+      CUDA_RUNTIME(cudaEventDestroy(event_));
+    }
+  }
+
+  /*! prepare to recieve devPtr
+   */
+  void start_prepare(void *devPtr, const size_t numBytes) {
+    // fprintf(stderr, "ColoDevRecv::start_prepare: send mem on %d(%d) to
+    // r%dg%d\n", dstDev_, dstGPU_, srcRank_, srcGPU_);
+
+    int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+
+    // recv the event handle
+    MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_,
+              make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
+              &evtReq_);
+
+    // get an a memory handle
+    CUDA_RUNTIME(cudaSetDevice(dstDev_));
+    CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
+
+    // Send the mem handle to the ColocatedSender
+    MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_,
+              make_tag<MsgKind::ColocatedMem>(payload), MPI_COMM_WORLD,
+              &memReq_);
+    // Send the CUDA device id to the ColocatedSender
+    MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_,
+              make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD,
+              &idReq_);
+  }
+
+  void finish_prepare() {
+
+    // wait to recv the event
+    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
+
+    // convert event handle to event
+    CUDA_RUNTIME(cudaSetDevice(dstDev_));
+    CUDA_RUNTIME(cudaIpcOpenEventHandle(&event_, evtHandle_));
+
+    // wait to send the mem handle and the CUDA device ID
+    MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
+    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
+  }
+
+  /*! have stream wait for data to arrive
+   */
+  void wait(RcStream &stream) {
+    assert(event_);
+    assert(stream.device() == dstDev_);
+
+    // wait for ColocatedDeviceSender cudaMemcpyPeerAsync to be done
+    CUDA_RUNTIME(cudaStreamWaitEvent(stream, event_, 0 /*flags*/));
+  }
+};
+
+class ColocatedHaloSender {
+private:
+  const LocalDomain *domain_;
+
+  char *srcBuf_; // buffer in this process
+  size_t bufSize_;
+
+  std::vector<Message> outbox_;
+
+  RcStream stream_;
+  ColocatedDeviceSender sender_;
+
+public:
+  ColocatedHaloSender() : srcBuf_(nullptr) {}
+  ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
+                      const LocalDomain &domain)
+      : domain_(&domain), srcBuf_(nullptr), bufSize_(0), stream_(domain.gpu()),
+        sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
+
+  ~ColocatedHaloSender() { CUDA_RUNTIME(cudaFree(srcBuf_)); }
+
+  void start_prepare(const std::vector<Message> &outbox) {
+    outbox_ = outbox;
+
+    // compute the required buffer size
+    bufSize_ = 0;
+    for (auto &msg : outbox_) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    // prepare sender
+    sender_.start_prepare(bufSize_);
+
+    // sort the messages
+    std::sort(outbox_.begin(), outbox_.end());
+
+    // allocate a buffer
+    // fprintf(stderr, "ColoHaloSend:start_prepare: alloc on %d\n",
+    // domain_->gpu());
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(cudaMalloc(&srcBuf_, bufSize_));
+  }
+
+  void finish_prepare() { sender_.finish_prepare(); }
+
+  void send() noexcept {
+    // pack data into device buffer
+    const Dim3 rawSz = domain_->raw_size();
+    size_t bufOffset = 0;
+
+    for (auto &msg : outbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      assert(stream_.device() == domain_->gpu());
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        const char *src = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        pack<<<dimGrid, dimBlock, 0, stream_>>>(&srcBuf_[bufOffset], src, rawSz,
+                                                0, pos, extent, elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    // insert send into stream
+    sender_.send(srcBuf_, stream_);
+  }
+
+  void wait() noexcept { sender_.wait(); }
+};
+
+class ColocatedHaloRecver {
+private:
+  int srcRank_;
+  int srcGPU_;
+  int dstGPU_;
+
+  const LocalDomain *domain_;
+  std::vector<Message> inbox_;
+
+  RcStream stream_;
+
+  char *devBuf_;
+  size_t bufSize_;
+
+  ColocatedDeviceRecver recver_;
+
+public:
+  ColocatedHaloRecver() : devBuf_(nullptr), domain_(nullptr) {}
+  ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
+                      const LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
+        stream_(domain.gpu()), devBuf_(nullptr), bufSize_(0),
+        recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
+
+  ~ColocatedHaloRecver() { CUDA_RUNTIME(cudaFree(devBuf_)); }
+
+  void start_prepare(const std::vector<Message> &inbox) {
+    inbox_ = inbox;
+    std::sort(inbox_.begin(), inbox_.end());
+
+    // compute the buffer size
+    bufSize_ = 0;
+    for (auto &msg : inbox_) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    // allocate a buffer
+    // fprintf(stderr, "ColoHaloRecv:start_prepare: alloc on %d for r%dg%d\n",
+    // domain_->gpu(),srcRank_, srcGPU_);
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    assert(devBuf_);
+
+    // prepare to recieve
+    recver_.start_prepare(devBuf_, bufSize_);
+  }
+
+  void finish_prepare() { recver_.finish_prepare(); }
+
+  void recv() {
+    assert(stream_.device() == domain_->gpu());
+    recver_.wait(stream_);
+
+    // add unpacks to stream
+    const Dim3 rawSz = domain_->raw_size();
+
+    // pack data into device buffer
+    size_t bufOffset = 0;
+    for (auto &msg : inbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      assert(stream_.device() == domain_->gpu());
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        char *dst = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
+                                                  &devBuf_[bufOffset], elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+  }
+
+  void wait() noexcept {
+    assert(stream_.device() == domain_->gpu());
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+  }
+};
+
+/*! Send from one domain to a remote domain
+ */
+class RemoteSender {
+private:
+  int srcRank_;
+  int srcGPU_;
+  int dstRank_;
+  int dstGPU_;
+
+  const LocalDomain *domain_;
+
+  char *devBuf_;
+  char *hostBuf_;
+  size_t bufSize_;
+
+  RcStream stream_;
+  MPI_Request req_;
+
+  bool isD2h_; // in d2h phase
+
+  std::vector<Message> outbox_;
+
+public:
+  RemoteSender() : devBuf_(nullptr) {}
+  RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
+               const LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
+        stream_(domain.gpu()), isD2h_(false) {}
+
+  ~RemoteSender() {
+    CUDA_RUNTIME(cudaFree(devBuf_));
+    CUDA_RUNTIME(cudaFreeHost(hostBuf_));
+  }
+
+  /*! Prepare to send a set of messages whose direction vectors are store in
+   * outbox
+   */
+  void prepare(std::vector<Message> &outbox) {
+    outbox_ = outbox;
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+
+#ifdef REMOTE_LOUD
+    std::cerr << "RemoteSender::prepare(): " << outbox_.size() << " messages\n";
+#endif
+
+    // sort messages by direction vector
+    std::sort(outbox_.begin(), outbox_.end());
+
+    // compute total size
+    bufSize_ = 0;
+    for (auto &msg : outbox_) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+    assert(bufSize_);
+
+// allocate device & host buffers
+#ifdef REMOTE_LOUD
+    std::cerr << "RemoteSender::prepare: alloc " << bufSize_ << "\n";
+#endif
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    assert(devBuf_);
+    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
+    assert(hostBuf_);
+
+    // fprintf(stderr, "RemoteSender::prepare r%dg%d -> r%dg%d %luB\n",
+    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+  }
+
+  void send_d2h() {
+    nvtxRangePush("RemoteSender::send_d2h");
+    isD2h_ = true;
+
+    const Dim3 rawSz = domain_->raw_size();
+
+    // pack data into device buffer
+    size_t bufOffset = 0;
+    for (auto &msg : outbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      assert(stream_.device() == domain_->gpu());
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        const char *src = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
+                                                0, pos, extent, elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    // copy to host buffer
+    assert(hostBuf_);
+    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, devBuf_, bufSize_, cudaMemcpyDefault,
+                                 stream_));
+    nvtxRangePop(); // RemoteSender::send_d2h
+  }
+
+  bool is_d2h() { return isD2h_; }
+
+  bool d2h_done() {
+    cudaError_t err = cudaStreamQuery(stream_);
+    if (cudaSuccess == err) {
+      return true;
+    } else if (cudaErrorNotReady == err) {
+      return false;
+    } else {
+      CUDA_RUNTIME(err);
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  void send_h2h() {
+    std::cerr << "send_h2h()\n";
+    nvtxRangePush("RemoteSender::send_h2h");
+    isD2h_ = false;
+    assert(hostBuf_);
+    MPI_Isend(hostBuf_, bufSize_, MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
+              &req_);
+    nvtxRangePop(); // RemoteSender::send_h2h
+    nvtxRangePush("RemoteSender::send_h2h done");
+  }
+
+  void wait() { MPI_Wait(&req_, MPI_STATUS_IGNORE); }
+};
+
+/*! Recv from a remote domain into a domain
+ */
+class RemoteRecver {
+private:
+  int srcRank_;
+  int srcGPU_;
+  int dstRank_;
+  int dstGPU_;
+
+  const LocalDomain *domain_;
+
+  char *devBuf_;
+  char *hostBuf_;
+  size_t bufSize_;
+
+  RcStream stream_;
+
+  MPI_Request req_;
+
+  bool isH2h_; // in d2h phase
+
+  std::vector<Message> inbox_;
+
+public:
+  RemoteRecver() : devBuf_(nullptr) {}
+  RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
+               const LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
+        stream_(domain.gpu()), isH2h_(false) {
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+  }
+
+  ~RemoteRecver() {
+    CUDA_RUNTIME(cudaFree(devBuf_));
+    CUDA_RUNTIME(cudaFreeHost(hostBuf_));
+  }
+
+  /*! Prepare to send a set of messages whose direction vectors are store in
+   * outbox
+   */
+  void prepare(std::vector<Message> &inbox) {
+    inbox_ = inbox;
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+
+    // sort messages by direction vector
+    std::sort(inbox_.begin(), inbox_.end());
+
+    // compute total size
+    bufSize_ = 0;
+    for (auto &msg : inbox) {
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        bufSize_ += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+
+    // allocate device & host buffers
+    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
+    assert(hostBuf_);
+    // fprintf(stderr, "RemoteRecver::prepare r%dg%d -> r%dg%d %luB\n",
+    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+  }
+
+  void recv_h2d() {
+    nvtxRangePush("RemoteRecver::recv_h2d");
+    isH2h_ = false;
+
+    // copy to device buffer
+    CUDA_RUNTIME(cudaMemcpyAsync(devBuf_, hostBuf_, bufSize_, cudaMemcpyDefault,
+                                 stream_));
+
+    const Dim3 rawSz = domain_->raw_size();
+
+    // pack data into device buffer
+    size_t bufOffset = 0;
+    for (auto &msg : inbox_) {
+      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
+      const Dim3 extent = domain_->halo_extent(msg.dir_);
+      const dim3 dimBlock =
+          make_block_dim(extent, 1024 /* threads per block */);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
+      assert(stream_.device() == domain_->gpu());
+      for (size_t i = 0; i < domain_->num_data(); ++i) {
+        char *dst = domain_->curr_data(i);
+        const size_t elemSz = domain_->elem_size(i);
+        unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
+                                                  &devBuf_[bufOffset], elemSz);
+        bufOffset += domain_->halo_bytes(msg.dir_, i);
+      }
+    }
+    nvtxRangePop(); // RemoteRecver::recv_h2d
+  }
+
+  bool is_h2h() const { return isH2h_; }
+
+  bool h2h_done() {
+    int flag;
+    MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
+    if (flag) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  void recv_h2h() {
+    nvtxRangePush("RemoteRecver::recv_h2h");
+    isH2h_ = true;
+    MPI_Irecv(hostBuf_, bufSize_, MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
+              &req_);
+    nvtxRangePop(); // RemoteRecver::recv_h2h
+  }
+
+  /*! wait for recv_h2d
+   */
+  void wait() { CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+};
 
 /*! A data sender that should work as long as MPI and CUDA are installed
 1) cudaMemcpy from srcGPU to srcRank
@@ -504,9 +1394,7 @@ public:
     assert(dir_.z >= -1 && dir.z <= 1);
   }
 
-  ~RegionSender() {
-    CUDA_RUNTIME(cudaFree(devBuf_));
-  }
+  ~RegionSender() { CUDA_RUNTIME(cudaFree(devBuf_)); }
 
   virtual void allocate() override {
     assert(nullptr == devBuf_);
@@ -621,9 +1509,7 @@ public:
     assert(dir_.z >= -1 && dir.z <= 1);
   }
 
-  ~RegionRecver() {
-    CUDA_RUNTIME(cudaFree(devBuf_));
-  }
+  ~RegionRecver() { CUDA_RUNTIME(cudaFree(devBuf_)); }
 
   virtual void allocate() override {
     assert(nullptr == devBuf_);
