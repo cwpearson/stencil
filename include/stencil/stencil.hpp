@@ -30,7 +30,11 @@ enum class MethodFlags {
   CudaMpiColocated = 4,
   CudaMemcpyPeer = 8,
   CudaKernel = 16,
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
   All = 1 + 2 + 4 + 8 + 16
+#else
+  All = 1 + 4 + 8 + 16
+#endif
 };
 static_assert(sizeof(MethodFlags) == sizeof(int));
 
@@ -422,7 +426,7 @@ public:
         const int dstRank = nap_->get_rank(dstIdx);
         const int dstGPU = nap_->get_gpu(dstIdx);
         if (0 == remoteSenders_[di].count(dstIdx)) {
-          StatefulSender *sender;
+          StatefulSender *sender = nullptr;
           if (any_methods(MethodFlags::CudaAwareMpi)) {
             sender = new CudaAwareMpiSender(rank_, di, dstRank, dstGPU,
                                             domains_[di]);
@@ -438,7 +442,7 @@ public:
         const int srcRank = nap_->get_rank(srcIdx);
         const int srcGPU = nap_->get_gpu(srcIdx);
         if (0 == remoteRecvers_[di].count(srcIdx)) {
-          StatefulRecver *recver;
+          StatefulRecver *recver = nullptr;
           if (any_methods(MethodFlags::CudaAwareMpi)) {
             recver = new CudaAwareMpiRecver(srcRank, srcGPU, rank_, di,
                                             domains_[di]);
