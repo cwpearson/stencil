@@ -121,8 +121,8 @@ public:
         if (src == dst) {
           peer_[src][dst] = true;
           peer_[dst][src] = true;
-          std::cout << src << " -> " << dst << " peer access\n";
-          std::cout << dst << " -> " << src << " peer access\n";
+          std::cerr << src << " -> " << dst << " peer access\n";
+          std::cerr << dst << " -> " << src << " peer access\n";
         } else {
           int canAccess;
           CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));

@@ -18,7 +18,7 @@ public:
       MPI_Comm_split_type(comm_, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
                           &shmComm_);
 
-      printf("MpiTopology: shmcomm rank %d/%d\n", colocated_rank(),
+      fprintf(stderr, "MpiTopology: shmcomm rank %d/%d\n", colocated_rank(),
              colocated_size());
 
       // Give every rank a list of co-located ranks

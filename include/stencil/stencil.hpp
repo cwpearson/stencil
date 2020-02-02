@@ -104,14 +104,22 @@ public:
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
 
-    // create a communicator for ranks on the same node
+#if STENCIL_PRINT_TIMINGS == 1
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
+#endif
     mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
+#if STENCIL_PRINT_TIMINGS == 1
     double elapsed = MPI_Wtime() - start;
-    printf("time.mpi_topo [%d] %fs\n", rank_, elapsed);
+    double maxElapsed = -1;
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.mpi_topo %fs\n", maxElapsed);
+    }
+#endif
 
-    std::cout << "[" << rank_ << "] colocated with "
+    std::cerr << "[" << rank_ << "] colocated with "
               << mpiTopology_.colocated_size() << " ranks\n";
 
     // Determine GPUs this DistributedDomain is reposible for
@@ -132,41 +140,65 @@ public:
     }
     assert(!gpus_.empty());
 
-    // create a list of cuda device IDs in use by the ranks on this node
-    // TODO: assumes all ranks use the same number of GPUs
+// create a list of cuda device IDs in use by the ranks on this node
+// TODO: assumes all ranks use the same number of GPUs
+#if STENCIL_PRINT_TIMINGS == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
+#endif
     std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
     MPI_Allgather(gpus_.data(), gpus_.size(), MPI_INT, nodeCudaIds.data(),
                   gpus_.size(), MPI_INT, mpiTopology_.colocated_comm());
+#if STENCIL_PRINT_TIMINGS == 1
     elapsed = MPI_Wtime() - start;
-    printf("time.node_gpus [%d] %fs\n", rank_, elapsed);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.node_gpus %fs\n", maxElapsed);
+    }
+#endif
     {
       std::set<int> unique(nodeCudaIds.begin(), nodeCudaIds.end());
       // nodeCudaIds = std::vector<int>(unique.begin(), unique.end());
-      std::cout << "[" << rank_ << "] colocated with ranks using gpus";
+      std::cerr << "[" << rank_ << "] colocated with ranks using gpus";
       for (auto &e : nodeCudaIds) {
-        std::cout << " " << e;
+        std::cerr << " " << e;
       }
-      std::cout << "\n";
+      std::cerr << "\n";
     }
 
     // determine topology info for used GPUs
+#if STENCIL_PRINT_TIMINGS == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
+#endif
     gpuTopology_ = GpuTopology(nodeCudaIds);
+#if STENCIL_PRINT_TIMINGS == 1
     elapsed = MPI_Wtime() - start;
-    printf("time.gpu_topo [%d] %fs\n", rank_, elapsed);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.gpu_topo %fs\n", maxElapsed);
+    }
+#endif
 
+#if STENCIL_PRINT_TIMINGS == 1
+    MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
+#endif
     // Try to enable peer access between all GPUs
     nvtxRangePush("peer_en");
     gpuTopology_.enable_peer();
     nvtxRangePop();
+#if STENCIL_PRINT_TIMINGS == 1
     elapsed = MPI_Wtime() - start;
-    printf("time.peer [%d] %fs\n", rank_, elapsed);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.peer_en %fs\n", maxElapsed);
+    }
+#endif
 
-    MPI_Barrier(MPI_COMM_WORLD);
   }
 
   ~DistributedDomain() {
@@ -211,13 +243,29 @@ public:
   void realize(bool useUnified = false) {
 
     // compute domain placement
+#if STENCIL_PRINT_TIMINGS == 1
+    MPI_Barrier(MPI_COMM_WORLD);
+    double start = MPI_Wtime();
+#endif
     nvtxRangePush("node-aware placement");
     std::cerr << "[" << rank_ << "] do NAP\n";
     NodeAwarePlacement *nap_ = new NodeAwarePlacement(
         size_, worldSize_, mpiTopology_, gpuTopology_, radius_, gpus_);
     nvtxRangePop();
+#if STENCIL_PRINT_TIMINGS == 1
+    double maxElapsed = -1;
+    double elapsed = MPI_Wtime() - start;
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.nap %fs\n", maxElapsed);
+    }
+#endif
 
-    double start = MPI_Wtime();
+#if STENCIL_PRINT_TIMINGS == 1
+    MPI_Barrier(MPI_COMM_WORLD);
+    start = MPI_Wtime();
+#endif
     for (int domId = 0; domId < gpus_.size(); domId++) {
 
       Dim3 idx = nap_->dom_idx(rank_, domId);
@@ -234,18 +282,26 @@ public:
 
       domains_.push_back(ld);
 
-      printf("rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, domId,
+      fprintf(stderr, "rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, domId,
              gpus_[domId], idx.x, idx.y, idx.z);
     }
-
     // realize local domains
     for (auto &d : domains_) {
       d.realize();
     }
-    double elapsed = MPI_Wtime() - start;
-    printf("time.local_realize [%d] %fs\n", rank_, elapsed);
+#if STENCIL_PRINT_TIMINGS == 1
+    elapsed = MPI_Wtime() - start;
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.realize %fs\n", maxElapsed);
+    }
+#endif
 
+#if STENCIL_PRINT_TIMINGS == 1
+    MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
+#endif
     nvtxRangePush("comm plan");
 
     // outbox for same-GPU exchanges
@@ -362,16 +418,25 @@ public:
       }
     }
     nvtxRangePop(); // plan
+#if STENCIL_PRINT_TIMINGS == 1
+    elapsed = MPI_Wtime() - start;
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.plan %fs\n", maxElapsed);
+    }
+#endif
 
     // summarize communication plan
     std::string planFileName = "plan_" + std::to_string(rank_) + ".txt";
     std::ofstream planFile(planFileName, std::ofstream::out);
-    
-    planFile << "rank=" << rank_ <<"\n\n";
+
+    planFile << "rank=" << rank_ << "\n\n";
 
     planFile << "domains\n";
     for (size_t di = 0; di < domains_.size(); ++di) {
-      planFile << di << ":" << domains_[di].gpu() << ":" << nap_->dom_idx(rank_, di) << "\n";
+      planFile << di << ":" << domains_[di].gpu() << ":"
+               << nap_->dom_idx(rank_, di) << "\n";
     }
     planFile << "\n";
 
@@ -386,14 +451,15 @@ public:
       planFile << m.dir_ << "\n";
     }
     planFile << "\n";
-             
+
     for (auto &obxs : coloOutboxes) {
       for (auto &kv : obxs) {
         const Dim3 dstIdx = kv.first;
         auto &box = kv.second;
         planFile << "colo to dstIdx=" << dstIdx << "\n";
         for (auto &m : box) {
-          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_ << ")\n";
+          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_
+                   << ")\n";
         }
       }
     }
@@ -403,21 +469,25 @@ public:
         auto &box = kv.second;
         planFile << "remote to dstIdx=" << dstIdx << "\n";
         for (auto &m : box) {
-          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_ << ")\n";
+          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_
+                   << ")\n";
         }
       }
     }
     planFile.close();
 
+#if STENCIL_PRINT_TIMINGS == 1
     MPI_Barrier(MPI_COMM_WORLD);
-
+    start = MPI_Wtime();
+#endif
     // create remote sender/recvers
+    std::cerr << "create remote\n";
     nvtxRangePush("DistributedDomain::realize: create remote");
     // per-domain senders and messages
     remoteSenders_.resize(gpus_.size());
     remoteRecvers_.resize(gpus_.size());
 
-    std::cerr << "create remote\n";
+    
     // create all required remote senders/recvers
     for (size_t di = 0; di < domains_.size(); ++di) {
       const Dim3 myIdx = nap_->dom_idx(rank_, di);
@@ -485,6 +555,7 @@ public:
     }
     nvtxRangePop(); // create colocated
 
+
     // prepare senders and receivers
     std::cerr << "DistributedDomain::realize: prepare peerAccessSender\n";
     nvtxRangePush("DistributedDomain::realize: prep peerAccessSender");
@@ -495,6 +566,7 @@ public:
     peerCopySender_.prepare(peerCopyOutbox, domains_);
     nvtxRangePop();
     std::cerr << "DistributedDomain::realize: prepare colocatedHaloSender\n";
+    nvtxRangePush("DistributedDomain::realize: prep colocated");
     assert(coloSenders_.size() == coloRecvers_.size());
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
@@ -547,18 +619,25 @@ public:
     }
     nvtxRangePop(); // prep remote
 
-    nvtxRangePop(); // comm plan
+#if STENCIL_PRINT_TIMINGS == 1
     elapsed = MPI_Wtime() - start;
-    printf("time.plan [%d] %fs\n", rank_, elapsed);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.create %fs\n", maxElapsed);
+    }
+#endif
   }
 
   /*!
   do a halo exchange and return
   */
   void exchange() {
-    MPI_Barrier(MPI_COMM_WORLD); // stabilize time
 
+#if STENCIL_PRINT_TIMINGS == 1
+    MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
+#endif
 
     // start remote send d2h
     fprintf(stderr, "rank=%d send remote d2h\n", rank_);
@@ -657,7 +736,7 @@ public:
         }
       }
     }
-    nvtxRangePop();
+    nvtxRangePop(); // DD::exchange: poll
 
     // wait for sends
     fprintf(stderr, "rank=%d wait for sameRankSender\n", rank_);
@@ -667,7 +746,7 @@ public:
 
     nvtxRangePush("peerCopySender.wait()");
     peerCopySender_.wait();
-    nvtxRangePop();
+    nvtxRangePop(); // peerCopySender.wait()
 
     // wait for colocated
     nvtxRangePush("colocated.wait()");
@@ -704,8 +783,15 @@ public:
     }
     nvtxRangePop(); // remote wait
 
+#if STENCIL_PRINT_TIMINGS == 1
+    double maxElapsed = -1;
     double elapsed = MPI_Wtime() - start;
-    printf("time.exchange [%d] %fs\n", rank_, elapsed);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
+               MPI_COMM_WORLD);
+    if (0 == rank_) {
+      printf("time.exchange %fs\n", maxElapsed);
+    }
+#endif
 
     // wait for all ranks to be done
     nvtxRangePush("barrier");
