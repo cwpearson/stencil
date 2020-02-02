@@ -276,9 +276,9 @@ public:
       const Dim3 myIdx = nap_->dom_idx(rank_, di);
       const int myDev = domains_[di].gpu();
       assert(myDev == nap_->get_cuda(myIdx));
-      for (int z = -1; z < 1; ++z) {
-        for (int y = -1; y < 1; ++y) {
-          for (int x = -1; x < 1; ++x) {
+      for (int z = -1; z <= 1; ++z) {
+        for (int y = -1; y <= 1; ++y) {
+          for (int x = -1; x <= 1; ++x) {
             const Dim3 dir(x, y, z);
             if (Dim3(0, 0, 0) == dir) {
               continue; // no message
