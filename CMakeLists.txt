@@ -59,8 +59,10 @@ elseif (CMAKE_BUILD_TYPE MATCHES Release)
 endif()
 
 if (USE_CUDA_AWARE_MPI)
+  message(STATUS "Using CUDA-Aware MPI")
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA_AWARE_MPI=1)
 else()
+	message(STATUS "NOT using CUDA-Aware MPI (USE_CUDA_AWARE_MPI=ON to enable)")
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA_AWARE_MPI=0)
 endif()
 
