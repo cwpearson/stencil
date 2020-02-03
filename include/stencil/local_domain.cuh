@@ -27,14 +27,18 @@ private:
   size_t radius_;
 
   //!< backing info for the actual data I have
-  std::vector<char *> currDataPtrs_;
-  std::vector<char *> nextDataPtrs_;
+  // host versions
+  std::vector<void *> currDataPtrs_;
+  std::vector<void *> nextDataPtrs_;
   std::vector<size_t> dataElemSize_;
+  // device versions
+  void **devCurrDataPtrs_;
+  size_t *devDataElemSize_;
 
   int dev_; // CUDA device
 
 public:
-  LocalDomain(Dim3 sz, int dev) : sz_(sz), dev_(dev) {}
+  LocalDomain(Dim3 sz, int dev) : sz_(sz), dev_(dev), devCurrDataPtrs_(nullptr), devDataElemSize_(nullptr) {}
 
   ~LocalDomain() {
 
@@ -42,10 +46,13 @@ public:
     for (auto p : currDataPtrs_) {
       CUDA_RUNTIME(cudaFree(p));
     }
+    CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
 
     for (auto p : nextDataPtrs_) {
       CUDA_RUNTIME(cudaFree(p));
     }
+
+    CUDA_RUNTIME(cudaFree(devDataElemSize_));
   }
 
   /*
@@ -102,12 +109,20 @@ public:
     return dataElemSize_[idx];
   }
 
-  char *curr_data(size_t idx) const {
+  size_t *dev_elem_sizes() const {
+    return devDataElemSize_;
+  }
+
+  void *curr_data(size_t idx) const {
     assert(idx < currDataPtrs_.size());
     return currDataPtrs_[idx];
   }
 
-  char *next_data(size_t idx) const {
+  void ** dev_curr_datas() const {
+    return devCurrDataPtrs_;
+  }
+
+  void *next_data(size_t idx) const {
     assert(idx < nextDataPtrs_.size());
     return nextDataPtrs_[idx];
   }
@@ -338,11 +353,11 @@ public:
   int gpu() const { return dev_; }
 
   void realize() {
-
     assert(currDataPtrs_.size() == nextDataPtrs_.size());
     assert(dataElemSize_.size() == nextDataPtrs_.size());
 
     // allocate each data region
+    CUDA_RUNTIME(cudaSetDevice(dev_));
     for (size_t i = 0; i < num_data(); ++i) {
       size_t elemSz = dataElemSize_[i];
 
@@ -351,7 +366,6 @@ public:
                          elemSz;
       char *c = nullptr;
       char *n = nullptr;
-      CUDA_RUNTIME(cudaSetDevice(dev_));
       CUDA_RUNTIME(cudaMalloc(&c, elemBytes));
       CUDA_RUNTIME(cudaMalloc(&n, elemBytes));
       assert(uintptr_t(c) % elemSz == 0 && "allocation should be aligned");
@@ -359,29 +373,12 @@ public:
       currDataPtrs_[i] = c;
       nextDataPtrs_[i] = n;
     }
+
+    CUDA_RUNTIME(cudaMalloc(&devCurrDataPtrs_, currDataPtrs_.size() * sizeof(currDataPtrs_[0])));
+    CUDA_RUNTIME(cudaMalloc(&devDataElemSize_, dataElemSize_.size() * sizeof(dataElemSize_[0])));
+    CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(), currDataPtrs_.size() * sizeof(currDataPtrs_[0]), cudaMemcpyHostToDevice));
+    CUDA_RUNTIME(cudaMemcpy(devDataElemSize_, dataElemSize_.data(), dataElemSize_.size() * sizeof(dataElemSize_[0]), cudaMemcpyHostToDevice));
   }
 
-  void realize_unified() {
-
-    assert(currDataPtrs_.size() == nextDataPtrs_.size());
-    assert(dataElemSize_.size() == nextDataPtrs_.size());
-
-    // allocate each data region
-    for (size_t i = 0; i < num_data(); ++i) {
-      size_t elemSz = dataElemSize_[i];
-
-      size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
-                          (sz_.z + 2 * radius_)) *
-                         elemSz;
-      char *c = nullptr;
-      char *n = nullptr;
-      CUDA_RUNTIME(cudaSetDevice(dev_));
-      CUDA_RUNTIME(cudaMalloc(&c, elemBytes));
-      CUDA_RUNTIME(cudaMalloc(&n, elemBytes));
-      assert(uintptr_t(c) % elemSz == 0 && "allocation should be aligned");
-      assert(uintptr_t(n) % elemSz == 0 && "allocation should be aligned");
-      currDataPtrs_[i] = c;
-      nextDataPtrs_[i] = n;
-    }
-  }
+  
 };
