@@ -5,10 +5,9 @@
 // pitch calculations
 // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html#group__CUDART__MEMORY_1g32bd7a39135594788a542ae72217775c
 
-static __global__ void pack(void *__restrict__ dst,
-                            const void *__restrict__ src, const Dim3 srcSize,
-                            const size_t srcPitch, const Dim3 srcPos,
-                            const Dim3 srcExtent, const size_t elemSize) {
+__device__ static void grid_pack(void *__restrict__ dst, const void *__restrict__ src,
+                          const Dim3 srcSize, const Dim3 srcPos,
+                          const Dim3 srcExtent, const size_t elemSize) {
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -41,6 +40,26 @@ static __global__ void pack(void *__restrict__ dst,
         }
       }
     }
+  }
+}
+
+static __global__ void pack(void *__restrict__ dst,
+                            const void *__restrict__ src, const Dim3 srcSize,
+                            const size_t srcPitch, const Dim3 srcPos,
+                            const Dim3 srcExtent, const size_t elemSize) {
+  grid_pack(dst, src, srcSize, srcPos, srcExtent, elemSize);
+}
+
+/*! same as calling pack(dsts[i]...srcs[i]...elemSizes[i])
+ */
+static __global__ void
+multi_pack(void *__restrict__ *__restrict__ dsts,       // n dst pointers
+          const void *__restrict__ *__restrict__ srcs, // n src pointers
+          const Dim3 srcSize, const Dim3 srcPos, const Dim3 srcExtent,
+          const size_t *__restrict__ elemSizes, // n elem sizes
+          const size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    grid_pack(dsts[i], srcs[i], srcSize, srcPos, srcExtent, elemSizes[i]);
   }
 }
 
@@ -83,11 +102,8 @@ static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
   }
 }
 
-// take the 3D region src[srcPos...srcPos+extent] and translate it to the 3D
-// region dst[dstPos...dstPos+extent]
-// srcSize and dstSize may not be the same
-static __global__ void
-translate(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
+static __device__ void
+translate_grid(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
           const void *__restrict__ src, const Dim3 srcPos, const Dim3 srcSize,
           const Dim3 extent, // the extent of the region to be copied
           const size_t elemSize) {
@@ -121,5 +137,28 @@ translate(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
         memcpy(&cDst[lo * elemSize], &cSrc[li * elemSize], elemSize);
       }
     }
+  }
+}
+
+// take the 3D region src[srcPos...srcPos+extent] and translate it to the 3D
+// region dst[dstPos...dstPos+extent]
+// srcSize and dstSize may not be the same
+static __global__ void
+translate(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
+          const void *__restrict__ src, const Dim3 srcPos, const Dim3 srcSize,
+          const Dim3 extent, // the extent of the region to be copied
+          const size_t elemSize) {
+
+  translate_grid(dst, dstPos, dstSize, src, srcPos, srcSize, extent, elemSize);
+}
+
+static __global__ void
+multi_translate(void *__restrict__ *__restrict__ dsts, const Dim3 dstPos, const Dim3 dstSize,
+          void *__restrict__ *__restrict__ const srcs, const Dim3 srcPos, const Dim3 srcSize,
+          const Dim3 extent, // the extent of the region to be copied
+          size_t * const __restrict__ elemSizes,
+          const size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+  translate_grid(dsts[i], dstPos, dstSize, srcs[i], srcPos, srcSize, extent, elemSizes[i]);
   }
 }
