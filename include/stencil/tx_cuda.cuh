@@ -120,25 +120,12 @@ public:
       assert(stream.device() == srcDomain->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream.device()));
       assert(srcDomain->num_data() == dstDomain->num_data());
-      /*
-      for (size_t i = 0; i < srcDomain->num_data(); ++i) {
-        const void *src = srcDomain->curr_data(i);
-        void *dst = dstDomain->curr_data(i);
-        const size_t elemSz = srcDomain->elem_size(i);
-        assert(dstDomain->elem_size(i) == elemSz);
-        translate<<<dimGrid, dimBlock, 0, stream>>>(
-            dst, dstPos, dstSz, src, srcPos, srcSz, extent, elemSz);
-        CUDA_RUNTIME(cudaGetLastError());
-      }
-      */
-      
-     
+
       multi_translate<<<dimGrid, dimBlock, 0, stream>>>(
           dstDomain->dev_curr_datas(), dstPos, dstSz,
           srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
           srcDomain->dev_elem_sizes(), srcDomain->num_data());
       CUDA_RUNTIME(cudaGetLastError());
-      
     }
 
     nvtxRangePop(); // PeerSender::send
@@ -506,6 +493,7 @@ public:
 class ColocatedHaloSender {
 private:
   const LocalDomain *domain_;
+  int srcRank_;
 
   char *srcBuf_; // buffer in this process
   size_t bufSize_;
@@ -515,6 +503,8 @@ private:
   RcStream stream_;
   ColocatedDeviceSender sender_;
 
+  std::vector<size_t *> msgPackOffsets_;
+
 public:
   ColocatedHaloSender() : srcBuf_(nullptr) {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
@@ -522,30 +512,49 @@ public:
       : domain_(&domain), srcBuf_(nullptr), bufSize_(0), stream_(domain.gpu()),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
-  ~ColocatedHaloSender() { CUDA_RUNTIME(cudaFree(srcBuf_)); }
+  ~ColocatedHaloSender() {
+    CUDA_RUNTIME(cudaFree(srcBuf_));
+    for (auto *p : msgPackOffsets_) {
+      CUDA_RUNTIME(cudaFree(p));
+    }
+  }
 
   void start_prepare(const std::vector<Message> &outbox) {
     outbox_ = outbox;
 
-    // compute the required buffer size
+    // sort the messages
+    std::sort(outbox_.begin(), outbox_.end());
+
+    // compute the required buffer size and offsets
     bufSize_ = 0;
-    for (auto &msg : outbox_) {
+    std::vector<std::vector<size_t>> msgPackOffsets;
+    for (const auto &msg : outbox_) {
+      std::vector<size_t> packOffsets;
       for (size_t i = 0; i < domain_->num_data(); ++i) {
+        packOffsets.push_back(bufSize_);
         bufSize_ += domain_->halo_bytes(msg.dir_, i);
       }
+      msgPackOffsets.push_back(packOffsets);
     }
 
     // prepare sender
     sender_.start_prepare(bufSize_);
 
-    // sort the messages
-    std::sort(outbox_.begin(), outbox_.end());
-
-    // allocate a buffer
-    // fprintf(stderr, "ColoHaloSend:start_prepare: alloc on %d\n",
-    // domain_->gpu());
+    // allocate a buffer for the packing
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     CUDA_RUNTIME(cudaMalloc(&srcBuf_, bufSize_));
+
+    // Allocate space for the offsets needed for each message
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    for (auto &offsets : msgPackOffsets) {
+      size_t *p = nullptr;
+      CUDA_RUNTIME(cudaMalloc(&p, offsets.size() * sizeof(offsets[0])));
+      CUDA_RUNTIME(cudaMemcpy(p, offsets.data(),
+                              offsets.size() * sizeof(offsets[0]),
+                              cudaMemcpyHostToDevice));
+      msgPackOffsets_.push_back(p);
+    }
+    assert(msgPackOffsets_.size() == outbox_.size());
   }
 
   void finish_prepare() { sender_.finish_prepare(); }
@@ -553,22 +562,21 @@ public:
   void send() noexcept {
     // pack data into device buffer
     const Dim3 rawSz = domain_->raw_size();
-    size_t bufOffset = 0;
+    // size_t bufOffset = 0;
 
-    for (auto &msg : outbox_) {
+    for (size_t mi = 0; mi < outbox_.size(); ++mi) {
+      const Message &msg = outbox_[mi];
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
       const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream_.device() == domain_->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        const void *src = domain_->curr_data(i);
-        const size_t elemSz = domain_->elem_size(i);
-        pack<<<dimGrid, dimBlock, 0, stream_>>>(&srcBuf_[bufOffset], src, rawSz,
-                                                0, pos, extent, elemSz);
-        bufOffset += domain_->halo_bytes(msg.dir_, i);
-      }
+
+      multi_pack<<<dimGrid, dimBlock, 0, stream_>>>(
+          srcBuf_, msgPackOffsets_[mi], domain_->dev_curr_datas(), rawSz, pos,
+          extent, domain_->dev_elem_sizes(), domain_->num_data(), bufSize_);
+      CUDA_RUNTIME(cudaGetLastError());
     }
 
     // insert send into stream
@@ -927,8 +935,7 @@ public:
     for (auto &msg : inbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock =
-          make_block_dim(extent, 512 /* threads per block */);
+      const dim3 dimBlock = make_block_dim(extent, 512 /* threads per block */);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       assert(stream_.device() == domain_->gpu());
@@ -1188,8 +1195,7 @@ public:
     for (auto &msg : inbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock =
-          make_block_dim(extent, 512 /* threads per block */);
+      const dim3 dimBlock = make_block_dim(extent, 512 /* threads per block */);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       assert(stream_.device() == domain_->gpu());
