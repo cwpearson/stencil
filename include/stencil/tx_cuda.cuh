@@ -115,19 +115,30 @@ public:
       const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
       RcStream &stream = streams_[srcDomain->gpu()];
-      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream.device() == srcDomain->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream.device()));
       assert(srcDomain->num_data() == dstDomain->num_data());
+      /*
       for (size_t i = 0; i < srcDomain->num_data(); ++i) {
-        const char *src = srcDomain->curr_data(i);
-        char *dst = dstDomain->curr_data(i);
+        const void *src = srcDomain->curr_data(i);
+        void *dst = dstDomain->curr_data(i);
         const size_t elemSz = srcDomain->elem_size(i);
         assert(dstDomain->elem_size(i) == elemSz);
         translate<<<dimGrid, dimBlock, 0, stream>>>(
             dst, dstPos, dstSz, src, srcPos, srcSz, extent, elemSz);
+        CUDA_RUNTIME(cudaGetLastError());
       }
+      */
+      
+     
+      multi_translate<<<dimGrid, dimBlock, 0, stream>>>(
+          dstDomain->dev_curr_datas(), dstPos, dstSz,
+          srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
+          srcDomain->dev_elem_sizes(), srcDomain->num_data());
+      CUDA_RUNTIME(cudaGetLastError());
+      
     }
 
     nvtxRangePop(); // PeerSender::send
@@ -254,7 +265,7 @@ public:
       assert(srcBuf);
       assert(dstBuf);
 
-      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
 
       // insert packs
@@ -264,9 +275,10 @@ public:
       size_t bufOffset = bufOffsets[i][j];
       for (size_t n = 0; n < srcDomain->num_data(); ++n) {
         const size_t elemSz = srcDomain->elem_size(n);
-        const char *src = srcDomain->curr_data(n);
+        const void *src = srcDomain->curr_data(n);
         pack<<<dimGrid, dimBlock, 0, srcStream>>>(
             &srcBuf[bufOffset], src, srcSz, 0, srcPos, extent, elemSz);
+        CUDA_RUNTIME(cudaGetLastError());
         bufOffset += srcDomain->halo_bytes(msg.dir_, n);
       }
       // insert copy
@@ -279,7 +291,7 @@ public:
       bufOffset = bufOffsets[i][j];
       for (size_t n = 0; n < dstDomain->num_data(); ++n) {
         const size_t elemSz = dstDomain->elem_size(n);
-        char *dst = dstDomain->curr_data(n);
+        void *dst = dstDomain->curr_data(n);
         CUDA_RUNTIME(cudaStreamWaitEvent(dstStream, event, 0 /*flags*/));
         unpack<<<dimGrid, dimBlock, 0, dstStream>>>(
             dst, dstSz, 0, dstPos, extent, &dstBuf[bufOffset], elemSz);
@@ -546,12 +558,12 @@ public:
     for (auto &msg : outbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream_.device() == domain_->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        const char *src = domain_->curr_data(i);
+        const void *src = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
         pack<<<dimGrid, dimBlock, 0, stream_>>>(&srcBuf_[bufOffset], src, rawSz,
                                                 0, pos, extent, elemSz);
@@ -629,12 +641,12 @@ public:
     for (auto &msg : inbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       assert(stream_.device() == domain_->gpu());
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        char *dst = domain_->curr_data(i);
+        void *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
         unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
                                                   &devBuf_[bufOffset], elemSz);
@@ -764,12 +776,12 @@ public:
     for (auto &msg : outbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream_.device() == domain_->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        const char *src = domain_->curr_data(i);
+        const void *src = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
         pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
                                                 0, pos, extent, elemSz);
@@ -830,11 +842,7 @@ private:
 
   std::vector<Message> inbox_;
 
-  enum class State {
-    None,
-    H2H,
-    H2D
-  };
+  enum class State { None, H2H, H2D };
   State state_;
 
 public:
@@ -878,20 +886,17 @@ public:
     // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
-  virtual void recv() override {
-    recv_h2h();
-  }
+  virtual void recv() override { recv_h2h(); }
 
   virtual bool active() override {
     assert(State::None != state_);
     return State::H2D != state_;
   }
 
-
- virtual bool next_ready() override {
-   assert(State::H2H == state_);
-   return h2h_done();
- }
+  virtual bool next_ready() override {
+    assert(State::H2H == state_);
+    return h2h_done();
+  }
 
   virtual void next() override {
     if (State::H2H == state_) {
@@ -902,9 +907,10 @@ public:
     }
   }
 
-  virtual void wait() override { 
+  virtual void wait() override {
     assert(State::H2D == state_);
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+  }
 
   void recv_h2d() {
     state_ = State::H2D;
@@ -922,12 +928,12 @@ public:
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
       const dim3 dimBlock =
-          make_block_dim(extent, 1024 /* threads per block */);
+          make_block_dim(extent, 512 /* threads per block */);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       assert(stream_.device() == domain_->gpu());
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        char *dst = domain_->curr_data(i);
+        void *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
         unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
                                                   &devBuf_[bufOffset], elemSz);
@@ -937,9 +943,7 @@ public:
     nvtxRangePop(); // RemoteRecver::recv_h2d
   }
 
-  bool is_h2h() const { 
-    return State::H2H == state_; 
-  }
+  bool is_h2h() const { return State::H2H == state_; }
 
   bool h2h_done() {
     assert(State::H2H == state_);
@@ -959,8 +963,6 @@ public:
               &req_);
     nvtxRangePop(); // RemoteRecver::recv_h2h
   }
-
-
 };
 
 /*! Send from one domain to a remote domain
@@ -1019,18 +1021,14 @@ public:
     CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
   }
 
-  virtual void send() override {
-    send_pack();
-  }
+  virtual void send() override { send_pack(); }
 
-  virtual bool active() override {
-    return State::Send != state_;
-  }
+  virtual bool active() override { return State::Send != state_; }
 
- virtual bool next_ready() override {
-   assert(State::Pack == state_);
-   return pack_done();
- }
+  virtual bool next_ready() override {
+    assert(State::Pack == state_);
+    return pack_done();
+  }
 
   virtual void next() override {
     if (State::Pack == state_) {
@@ -1041,9 +1039,10 @@ public:
     }
   }
 
-  virtual void wait() override { 
+  virtual void wait() override {
     assert(State::Send == state_);
-    MPI_Wait(&req_, MPI_STATUS_IGNORE); }
+    MPI_Wait(&req_, MPI_STATUS_IGNORE);
+  }
 
   void send_pack() {
     assert(devBuf_);
@@ -1057,12 +1056,12 @@ public:
     for (auto &msg : outbox_) {
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 1024 /*threads per block*/);
+      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream_.device() == domain_->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        const char *src = domain_->curr_data(i);
+        const void *src = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
         pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
                                                 0, pos, extent, elemSz);
@@ -1095,8 +1094,6 @@ public:
               &req_);
     nvtxRangePop(); // CudaAwareMpiSender::send_d2d
   }
-
-
 };
 
 class CudaAwareMpiRecver : public StatefulRecver {
@@ -1157,18 +1154,14 @@ public:
     // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
   }
 
-  virtual void recv() override {
-    recv_d2d();
-  }
+  virtual void recv() override { recv_d2d(); }
 
   virtual bool active() override {
     assert(State::None != state_);
     return State::Unpack != state_;
   }
 
-  virtual bool next_ready() override {
-    return d2d_done();
-  }
+  virtual bool next_ready() override { return d2d_done(); }
 
   virtual void next() override {
     if (State::Recv == state_) {
@@ -1179,9 +1172,10 @@ public:
     }
   }
 
-  virtual void wait() override { 
+  virtual void wait() override {
     assert(State::Unpack == state_);
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_)); }
+    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+  }
 
   void recv_unpack() {
     nvtxRangePush("CudaAwareMpiRecver::recv_unpack");
@@ -1195,12 +1189,12 @@ public:
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
       const dim3 dimBlock =
-          make_block_dim(extent, 1024 /* threads per block */);
+          make_block_dim(extent, 512 /* threads per block */);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       CUDA_RUNTIME(cudaSetDevice(stream_.device()));
       assert(stream_.device() == domain_->gpu());
       for (size_t i = 0; i < domain_->num_data(); ++i) {
-        char *dst = domain_->curr_data(i);
+        void *dst = domain_->curr_data(i);
         const size_t elemSz = domain_->elem_size(i);
         unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
                                                   &devBuf_[bufOffset], elemSz);
@@ -1230,8 +1224,6 @@ public:
               &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
   }
-
-
 };
 
 /*! A data sender that should work as long as MPI and CUDA are installed
@@ -1540,7 +1532,7 @@ public:
     assert(senders_.size() == domain_->num_data());
     const Dim3 rawSz = domain_->raw_size();
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
-      const char *src = domain_->curr_data(idx);
+      const void *src = domain_->curr_data(idx);
       const size_t elemSize = domain_->elem_size(idx);
       RcStream stream = streams_[idx];
 
@@ -1644,7 +1636,7 @@ public:
 
     const Dim3 rawSz = domain_->raw_size();
 
-    char *dst = domain_->curr_data(dataIdx);
+    void *dst = domain_->curr_data(dataIdx);
     RcStream stream = streams_[dataIdx];
 
     // unpack from buffer into halo
@@ -1754,7 +1746,7 @@ public:
     nvtxRangePush("RegionSender::send_impl() pack");
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     for (size_t idx = 0; idx < domain_->num_data(); ++idx) {
-      const char *src = domain_->curr_data(idx);
+      const void *src = domain_->curr_data(idx);
       const size_t elemSize = domain_->elem_size(idx);
 
       pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
@@ -1870,7 +1862,7 @@ public:
 
       const Dim3 rawSz = domain_->raw_size();
 
-      char *dst = domain_->curr_data(idx);
+      void *dst = domain_->curr_data(idx);
 
       // unpack from buffer into halo
       dim3 dimGrid(20, 20, 20);
@@ -1929,8 +1921,8 @@ private:
 
     assert(srcDomain_->num_data() == dstDomain_->num_data());
 
-    char *dst = dstDomain_->curr_data(dataIdx);
-    char *src = srcDomain_->curr_data(dataIdx);
+    void *dst = dstDomain_->curr_data(dataIdx);
+    void *src = srcDomain_->curr_data(dataIdx);
 
     size_t elemSize = srcDomain_->elem_size(dataIdx);
     assert(elemSize == dstDomain_->elem_size(dataIdx));
@@ -2013,7 +2005,7 @@ private:
     size_t bufOffset = 0;
     nvtxRangePush("packs");
     for (size_t idx = 0; idx < srcDomain_->num_data(); ++idx) {
-      char *src = srcDomain_->curr_data(idx);
+      void *src = srcDomain_->curr_data(idx);
 
       const size_t elemSize = srcDomain_->elem_size(idx);
       assert(elemSize == dstDomain_->elem_size(idx));
@@ -2040,7 +2032,7 @@ private:
     bufOffset = 0;
     nvtxRangePush("unpacks");
     for (size_t idx = 0; idx < dstDomain_->num_data(); ++idx) {
-      char *dst = dstDomain_->curr_data(idx);
+      void *dst = dstDomain_->curr_data(idx);
 
       const size_t elemSize = srcDomain_->elem_size(idx);
 
