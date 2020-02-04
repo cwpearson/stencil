@@ -32,7 +32,9 @@ int main(int argc, char **argv) {
   MPI_Init(&argc, &argv);
 
   int size;
+  int rank;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   double kernelMillis = 50;
   size_t x = 64;
@@ -81,6 +83,10 @@ int main(int argc, char **argv) {
   }
   if (MethodFlags::None == methods) {
     methods = MethodFlags::All;
+  }
+
+  if (0 == rank) {
+    std::cout << "domain: " << x << "," << y << "," << z << "\n";
   }
 
   {
