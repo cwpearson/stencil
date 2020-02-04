@@ -132,7 +132,7 @@ public:
             if (cudaSuccess == err ||
                 cudaErrorPeerAccessAlreadyEnabled == err) {
               peer_[src][dst] = true;
-              std::cout << src << " -> " << dst << " peer access\n";
+              std::cerr << src << " -> " << dst << " peer access\n";
             } else if (cudaErrorInvalidDevice) {
               peer_[src][dst] = false;
             } else {
@@ -175,5 +175,3 @@ public:
     return ret;
   }
 };
-
-
