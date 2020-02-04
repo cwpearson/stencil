@@ -45,14 +45,14 @@ int main(int argc, char **argv) {
   CUDA_RUNTIME(cudaGetDeviceProperties(&prop, 0));
   if (std::string("Tesla V100-SXM2-32GB") == prop.name) {
     kernelMillis = 20.1;
-    x = 512 * pow(size, 0.333);
-    y = 512 * pow(size, 0.333);
-    z = 512 * pow(size, 0.333);
+    x = 512 * pow(size, 0.33333) + 0.5; // round to nearest
+    y = 512 * pow(size, 0.33333) + 0.5;
+    z = 512 * pow(size, 0.33333) + 0.5;
   } else if (std::string("Tesla P100-SXM2-16GB") == prop.name) {
     kernelMillis = 34.1;
-    x = 512 * pow(size, 0.333);
-    y = 512 * pow(size, 0.333);
-    z = 512 * pow(size, 0.333);
+    x = 512 * pow(size, 0.33333) + 0.5;
+    y = 512 * pow(size, 0.33333) + 0.5;
+    z = 512 * pow(size, 0.33333) + 0.5;
   } else {
     std::cerr << "WARN: unknown GPU " << prop.name << ", using " << kernelMillis
               << "ms for kernel\n";
@@ -106,7 +106,7 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    for (size_t iter = 0; iter < 3; ++iter) {
+    for (size_t iter = 0; iter < 5; ++iter) {
       std::cerr << "exchange\n";
       nvtxRangePush("exchange");
       dd.exchange();
