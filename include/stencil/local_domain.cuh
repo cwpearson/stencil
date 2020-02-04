@@ -38,7 +38,9 @@ private:
   int dev_; // CUDA device
 
 public:
-  LocalDomain(Dim3 sz, int dev) : sz_(sz), dev_(dev), devCurrDataPtrs_(nullptr), devDataElemSize_(nullptr) {}
+  LocalDomain(Dim3 sz, int dev)
+      : sz_(sz), dev_(dev), devCurrDataPtrs_(nullptr),
+        devDataElemSize_(nullptr) {}
 
   ~LocalDomain() {
 
@@ -109,18 +111,14 @@ public:
     return dataElemSize_[idx];
   }
 
-  size_t *dev_elem_sizes() const {
-    return devDataElemSize_;
-  }
+  size_t *dev_elem_sizes() const { return devDataElemSize_; }
 
   void *curr_data(size_t idx) const {
     assert(idx < currDataPtrs_.size());
     return currDataPtrs_[idx];
   }
 
-  void ** dev_curr_datas() const {
-    return devCurrDataPtrs_;
-  }
+  void **dev_curr_datas() const { return devCurrDataPtrs_; }
 
   void *next_data(size_t idx) const {
     assert(idx < nextDataPtrs_.size());
@@ -344,8 +342,11 @@ public:
     return dataElemSize_[idx] * corner_extent().flatten();
   }
 
+  // return the 3d size of the compute domain, in terms of elements
+  Dim3 size() const noexcept { return sz_; }
+
   // return the 3d size of the actual allocation, in terms of elements
-  Dim3 raw_size() const {
+  Dim3 raw_size() const noexcept {
     return Dim3(sz_.x + 2 * radius_, sz_.y + 2 * radius_, sz_.z + 2 * radius_);
   }
 
@@ -374,11 +375,15 @@ public:
       nextDataPtrs_[i] = n;
     }
 
-    CUDA_RUNTIME(cudaMalloc(&devCurrDataPtrs_, currDataPtrs_.size() * sizeof(currDataPtrs_[0])));
-    CUDA_RUNTIME(cudaMalloc(&devDataElemSize_, dataElemSize_.size() * sizeof(dataElemSize_[0])));
-    CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(), currDataPtrs_.size() * sizeof(currDataPtrs_[0]), cudaMemcpyHostToDevice));
-    CUDA_RUNTIME(cudaMemcpy(devDataElemSize_, dataElemSize_.data(), dataElemSize_.size() * sizeof(dataElemSize_[0]), cudaMemcpyHostToDevice));
+    CUDA_RUNTIME(cudaMalloc(&devCurrDataPtrs_,
+                            currDataPtrs_.size() * sizeof(currDataPtrs_[0])));
+    CUDA_RUNTIME(cudaMalloc(&devDataElemSize_,
+                            dataElemSize_.size() * sizeof(dataElemSize_[0])));
+    CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(),
+                            currDataPtrs_.size() * sizeof(currDataPtrs_[0]),
+                            cudaMemcpyHostToDevice));
+    CUDA_RUNTIME(cudaMemcpy(devDataElemSize_, dataElemSize_.data(),
+                            dataElemSize_.size() * sizeof(dataElemSize_[0]),
+                            cudaMemcpyHostToDevice));
   }
-
-  
 };
