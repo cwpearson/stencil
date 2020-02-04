@@ -36,6 +36,19 @@ int main(int argc, char **argv) {
   MPI_Comm_size(MPI_COMM_WORLD, &size);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
+  int devCount;
+  CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
+
+  int numSubdoms;
+  {
+    MpiTopology topo(MPI_COMM_WORLD);
+    numSubdoms = size / topo.colocated_size() * devCount;
+  }
+
+  if (0 == rank) {
+  std::cout << "assuming " << numSubdoms << " subdomains\n";
+  }
+
   double kernelMillis = 50;
   size_t x = 64;
   size_t y = 64;
@@ -45,14 +58,14 @@ int main(int argc, char **argv) {
   CUDA_RUNTIME(cudaGetDeviceProperties(&prop, 0));
   if (std::string("Tesla V100-SXM2-32GB") == prop.name) {
     kernelMillis = 20.1;
-    x = 512 * pow(size, 0.33333) + 0.5; // round to nearest
-    y = 512 * pow(size, 0.33333) + 0.5;
-    z = 512 * pow(size, 0.33333) + 0.5;
+    x = 512 * pow(numSubdoms, 0.33333) + 0.5; // round to nearest
+    y = 512 * pow(numSubdoms, 0.33333) + 0.5;
+    z = 512 * pow(numSubdoms, 0.33333) + 0.5;
   } else if (std::string("Tesla P100-SXM2-16GB") == prop.name) {
     kernelMillis = 34.1;
-    x = 512 * pow(size, 0.33333) + 0.5;
-    y = 512 * pow(size, 0.33333) + 0.5;
-    z = 512 * pow(size, 0.33333) + 0.5;
+    x = 512 * pow(numSubdoms, 0.33333) + 0.5;
+    y = 512 * pow(numSubdoms, 0.33333) + 0.5;
+    z = 512 * pow(numSubdoms, 0.33333) + 0.5;
   } else {
     std::cerr << "WARN: unknown GPU " << prop.name << ", using " << kernelMillis
               << "ms for kernel\n";
