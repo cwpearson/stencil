@@ -302,7 +302,6 @@ public:
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
-    nvtxRangePush("comm plan");
 
     // outbox for same-GPU exchanges
     std::vector<Message> peerAccessOutbox;
@@ -325,7 +324,7 @@ public:
 
     const Dim3 globalDim = nap_->gpu_dim() * nap_->rank_dim();
 
-    std::cerr << "plan\n";
+    std::cerr << "comm plan\n";
     // plan messages
     nvtxRangePush("DistributedDomain::realize() plan messages");
     remoteOutboxes.resize(gpus_.size());
