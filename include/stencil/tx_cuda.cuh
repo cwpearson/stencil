@@ -142,202 +142,142 @@ public:
  */
 class PeerCopySender {
 private:
+  size_t srcGPU_;
+  size_t dstGPU_;
+  const LocalDomain *srcDomain_;
+  const LocalDomain *dstDomain_;
+
   std::vector<Message> outbox_;
-  std::vector<const LocalDomain *> domains_;
 
   // one stream per source and destination operations
-  std::vector<std::vector<RcStream>> srcStreams_;
-  std::vector<std::vector<RcStream>> dstStreams_;
+  RcStream srcStream_;
+  RcStream dstStream_;
 
   // event to sync src and dst streams
-  std::vector<std::vector<cudaEvent_t>> events_;
+  cudaEvent_t event_;
 
-  // packed buffers per (source, destination) domain pair
-  std::vector<std::vector<void *>> srcBufs_; // src device buffers
-  std::vector<std::vector<void *>> dstBufs_; // dst device buffers
+  // packed buffers
+  void *srcBuf_; // src device buffer
+  void *dstBuf_; // dst device buffer
 
   // buffer sizes
-  std::vector<std::vector<size_t>> bufSizes_;
+  size_t bufSize_;
+
+  // offsets for each multi-pack on the device
+  std::vector<size_t *> msgPackOffsets_;
 
 public:
-  PeerCopySender() {}
+  PeerCopySender(size_t srcGPU, size_t dstGPU, const LocalDomain &srcDomain,
+                 LocalDomain &dstDomain)
+      : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain),
+        dstDomain_(&dstDomain), srcStream_(srcDomain.gpu()),
+        dstStream_(dstDomain.gpu()) {}
 
   ~PeerCopySender() {}
 
-  void prepare(std::vector<Message> &outbox,
-               const std::vector<LocalDomain> &domains) {
+  void prepare(std::vector<Message> &outbox) {
     outbox_ = outbox;
     std::sort(outbox_.begin(), outbox_.end());
 
-    for (auto &e : domains) {
-      domains_.push_back(&e);
+    CUDA_RUNTIME(cudaSetDevice(srcDomain_->gpu()));
+
+    // create event
+    CUDA_RUNTIME(cudaEventCreate(&event_));
+
+    // compute buffer offsets for each message, and total buffer size
+    std::vector<std::vector<size_t>> msgPackOffsets;
+    bufSize_ = 0;
+    for (const auto &msg : outbox_) {
+      assert(msg.srcGPU_ == srcGPU_);
+      assert(msg.dstGPU_ == dstGPU_);
+      size_t offset = 0;
+      std::vector<size_t> packOffsets;
+      for (size_t i = 0; i < srcDomain_->num_data(); ++i) {
+        packOffsets.push_back(offset);
+        size_t newBytes = srcDomain_->halo_bytes(msg.dir_, i);
+        offset += newBytes;
+        bufSize_ += newBytes;
+      }
+      msgPackOffsets.push_back(packOffsets);
     }
 
-    // compute send and recv device buffer sizes
-    bufSizes_ = std::vector<std::vector<size_t>>(
-        domains_.size(), std::vector<size_t>(domains_.size(), 0));
-    for (auto &msg : outbox_) {
-      const auto *domain = domains_[msg.srcGPU_];
-      for (size_t n = 0; n < domain->num_data(); ++n) {
-        bufSizes_[msg.srcGPU_][msg.dstGPU_] += domain->halo_bytes(msg.dir_, n);
-      }
+    // store multi_pack and multi_unpack offets on GPU
+    for (auto &offsets : msgPackOffsets) {
+      size_t *p = nullptr;
+      CUDA_RUNTIME(cudaMalloc(&p, offsets.size() * sizeof(offsets[0])));
+      CUDA_RUNTIME(cudaMemcpy(p, offsets.data(),
+                              offsets.size() * sizeof(offsets[0]),
+                              cudaMemcpyHostToDevice));
+      msgPackOffsets_.push_back(p);
     }
+    assert(msgPackOffsets_.size() == outbox_.size());
 
-    // initialize streams, events, and buffers
-    srcStreams_.resize(domains_.size());
-    dstStreams_.resize(domains_.size());
-    for (size_t i = 0; i < srcStreams_.size(); ++i) {
-      srcStreams_[i].resize(domains_.size());
-      dstStreams_[i].resize(domains_.size());
-    }
-    events_ = std::vector<std::vector<cudaEvent_t>>(
-        domains_.size(), std::vector<cudaEvent_t>(domains.size()));
-    srcBufs_ = std::vector<std::vector<void *>>(
-        domains_.size(), std::vector<void *>(domains_.size(), nullptr));
-    dstBufs_ = std::vector<std::vector<void *>>(
-        domains_.size(), std::vector<void *>(domains_.size(), nullptr));
-    for (size_t i = 0; i < srcStreams_.size(); ++i) {
-      for (size_t j = 0; j < srcStreams_[i].size(); ++j) {
-        const int srcDev = domains_[i]->gpu();
-        const int dstDev = domains_[j]->gpu();
-        srcStreams_[i][j] = RcStream(srcDev);
-        dstStreams_[i][j] = RcStream(dstDev);
-        CUDA_RUNTIME(cudaSetDevice(srcDev));
-        CUDA_RUNTIME(cudaEventCreate(&events_[i][j]));
-        CUDA_RUNTIME(cudaSetDevice(srcDev));
-        CUDA_RUNTIME(cudaMalloc(&srcBufs_[i][j], bufSizes_[i][j]));
-        CUDA_RUNTIME(cudaSetDevice(dstDev));
-        CUDA_RUNTIME(cudaMalloc(&dstBufs_[i][j], bufSizes_[i][j]));
-      }
-    }
+    // initialize pack buffers
+    CUDA_RUNTIME(cudaSetDevice(srcDomain_->gpu()));
+    CUDA_RUNTIME(cudaMalloc(&srcBuf_, bufSize_));
+    CUDA_RUNTIME(cudaSetDevice(dstDomain_->gpu()));
+    CUDA_RUNTIME(cudaMalloc(&dstBuf_, bufSize_));
   }
 
   void send() {
-
     nvtxRangePush("PeerCopySender::send");
+    assert(srcBuf_);
+    assert(dstBuf_);
 
-    // offsets for pack
-    std::vector<std::vector<size_t>> bufOffsets(
-        domains_.size(), std::vector<size_t>(domains_.size(), 0));
+    const Dim3 dstSz = dstDomain_->raw_size();
+    const Dim3 srcSz = srcDomain_->raw_size();
 
     // pack the data for each message into the src streams
-    for (auto &msg : outbox_) {
-      const int i = msg.srcGPU_;
-      const int j = msg.dstGPU_;
-      assert(i < domains_.size());
-      assert(j < domains_.size());
-      const LocalDomain *srcDomain = domains_[i];
-      const LocalDomain *dstDomain = domains_[j];
-      const int srcDev = srcDomain->gpu();
-      const int dstDev = dstDomain->gpu();
-      assert(i < srcStreams_.size());
-      assert(j < srcStreams_[i].size());
-      assert(i < dstStreams_.size());
-      assert(j < dstStreams_[i].size());
-      RcStream &srcStream = srcStreams_[i][j];
-      RcStream &dstStream = dstStreams_[i][j];
-      assert(i < events_.size());
-      assert(j < events_[i].size());
-      assert(i < events_.size());
-      assert(j < events_[i].size());
-      cudaEvent_t event = events_[i][j];
-      const Dim3 dstSz = dstDomain->raw_size();
-      const Dim3 srcSz = srcDomain->raw_size();
-      const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
-      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
-      const Dim3 extent = srcDomain->halo_extent(msg.dir_);
-      char *srcBuf = (char *)srcBufs_[i][j];
-      char *dstBuf = (char *)dstBufs_[i][j];
-
-      assert(srcBuf);
-      assert(dstBuf);
+    for (size_t mi = 0; mi < outbox_.size(); ++mi) {
+      const auto &msg = outbox_[mi];
+      const Dim3 pos = srcDomain_->halo_pos(msg.dir_, false /*interior*/);
+      const Dim3 extent = srcDomain_->halo_extent(msg.dir_);
 
       const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
 
       // insert packs
-      assert(srcStream.device() == srcDomain->gpu());
-      CUDA_RUNTIME(cudaSetDevice(srcStream.device()));
-      assert(srcDomain->num_data() == dstDomain->num_data());
-      size_t bufOffset = bufOffsets[i][j];
-      for (size_t n = 0; n < srcDomain->num_data(); ++n) {
-        const size_t elemSz = srcDomain->elem_size(n);
-        const void *src = srcDomain->curr_data(n);
-        pack<<<dimGrid, dimBlock, 0, srcStream>>>(
-            &srcBuf[bufOffset], src, srcSz, 0, srcPos, extent, elemSz);
-        CUDA_RUNTIME(cudaGetLastError());
-        bufOffset += srcDomain->halo_bytes(msg.dir_, n);
-      }
-      // the next message involving the same src/dst starts in the same place
-      // this one left off
-      bufOffsets[i][j] = bufOffset;
+      assert(srcStream_.device() == srcDomain_->gpu());
+      assert(srcDomain_->num_data() == dstDomain_->num_data());
+      CUDA_RUNTIME(cudaSetDevice(srcDomain_->gpu()));
+
+      multi_pack<<<dimGrid, dimBlock, 0, srcStream_>>>(
+          srcBuf_, msgPackOffsets_[mi], srcDomain_->dev_curr_datas(), srcSz,
+          pos, extent, srcDomain_->dev_elem_sizes(), srcDomain_->num_data());
+      CUDA_RUNTIME(cudaGetLastError());
     }
 
-    // copy from each src to each dst
-    for (size_t i = 0; i < domains_.size(); ++i) {
-      for (size_t j = 0; j < domains_.size(); ++j) {
-        const LocalDomain *srcDomain = domains_[i];
-        const LocalDomain *dstDomain = domains_[j];
-        const int srcDev = srcDomain->gpu();
-        const int dstDev = dstDomain->gpu();
-        void *srcBuf = srcBufs_[i][j];
-        void *dstBuf = dstBufs_[i][j];
-        RcStream &srcStream = srcStreams_[i][j];
-        cudaEvent_t event = events_[i][j];
-        CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf, dstDev, srcBuf, srcDev,
-                                         bufSizes_[i][j], srcStream));
-        CUDA_RUNTIME(cudaEventRecord(event, srcStream));
-      }
-    }
-
-    // zero offsets for unpack
-    bufOffsets = std::vector<std::vector<size_t>>(
-        domains_.size(), std::vector<size_t>(domains_.size(), 0));
+    // copy from src device to dst device
+    const int dstDev = dstDomain_->gpu();
+    const int srcDev = srcDomain_->gpu();
+    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev, srcBuf_, srcDev, bufSize_,
+                                     srcStream_));
+    CUDA_RUNTIME(cudaEventRecord(event_, srcStream_));
 
     // insert unpacks
-    for (auto &msg : outbox_) {
-      const int i = msg.srcGPU_;
-      const int j = msg.dstGPU_;
-      const LocalDomain *dstDomain = domains_[j];
-      const int dstDev = dstDomain->gpu();
-      RcStream &srcStream = srcStreams_[i][j];
-      RcStream &dstStream = dstStreams_[i][j];
-
-      cudaEvent_t event = events_[i][j];
-      const Dim3 dstSz = dstDomain->raw_size();
-      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
-      const Dim3 extent = dstDomain->halo_extent(msg.dir_);
-      char *dstBuf = (char *)dstBufs_[i][j];
-      CUDA_RUNTIME(cudaSetDevice(dstStream.device()));
+    for (size_t mi = 0; mi < outbox_.size(); ++mi) {
+      const Message &msg = outbox_[mi];
+      const Dim3 pos = dstDomain_->halo_pos(msg.dir_, true /*exterior*/);
+      const Dim3 extent = dstDomain_->halo_extent(msg.dir_);
 
       const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
 
-      size_t bufOffset = bufOffsets[i][j];
-      for (size_t n = 0; n < dstDomain->num_data(); ++n) {
-        const size_t elemSz = dstDomain->elem_size(n);
-        void *dst = dstDomain->curr_data(n);
-        CUDA_RUNTIME(cudaStreamWaitEvent(dstStream, event, 0 /*flags*/));
-        unpack<<<dimGrid, dimBlock, 0, dstStream>>>(
-            dst, dstSz, 0, dstPos, extent, &dstBuf[bufOffset], elemSz);
-        bufOffset += dstDomain->halo_bytes(msg.dir_, n);
-      }
+      CUDA_RUNTIME(cudaSetDevice(dstDomain_->gpu()));
+      CUDA_RUNTIME(cudaStreamWaitEvent(dstStream_, event_, 0 /*flags*/));
+      multi_unpack<<<dimGrid, dimBlock, 0, dstStream_>>>(
+          dstDomain_->dev_curr_datas(), dstSz, pos, extent, dstBuf_,
+          msgPackOffsets_[mi], dstDomain_->dev_elem_sizes(),
+          dstDomain_->num_data());
+      CUDA_RUNTIME(cudaGetLastError());
     }
 
     nvtxRangePop(); // PeerCopySender::send
   }
 
   void wait() {
-    for (auto &v : srcStreams_) {
-      for (auto &stream : v) {
-        cudaStreamSynchronize(stream);
-      }
-    }
-    for (auto &v : dstStreams_) {
-      for (auto &stream : v) {
-        cudaStreamSynchronize(stream);
-      }
-    }
+    cudaStreamSynchronize(srcStream_);
+    cudaStreamSynchronize(dstStream_);
   }
 };
 
@@ -560,8 +500,6 @@ public:
 
   void start_prepare(const std::vector<Message> &outbox) {
     outbox_ = outbox;
-
-    // sort the messages
     std::sort(outbox_.begin(), outbox_.end());
 
     // compute the required buffer size and offsets

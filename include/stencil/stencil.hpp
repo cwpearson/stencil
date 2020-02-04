@@ -83,6 +83,9 @@ private:
 
   MethodFlags flags_;
 
+  // PeerCopySenders for same-rank exchanges
+  std::vector<std::map<size_t, PeerCopySender>> peerCopySenders_;
+
   std::vector<std::map<Dim3, StatefulSender *>>
       remoteSenders_; // remoteSender_[domain][dstIdx] = sender
   std::vector<std::map<Dim3, StatefulRecver *>>
@@ -90,9 +93,6 @@ private:
 
   // kernel sender for same-domain sends
   PeerAccessSender peerAccessSender_;
-
-  // cudaMemcpyPeerAsync sender for local exchanges
-  PeerCopySender peerCopySender_;
 
   std::vector<std::map<Dim3, ColocatedHaloSender>>
       coloSenders_; // vec[domain][dstIdx] = sender
@@ -198,7 +198,6 @@ public:
       printf("time.peer_en %fs\n", maxElapsed);
     }
 #endif
-
   }
 
   ~DistributedDomain() {
@@ -282,8 +281,8 @@ public:
 
       domains_.push_back(ld);
 
-      fprintf(stderr, "rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, domId,
-             gpus_[domId], idx.x, idx.y, idx.z);
+      fprintf(stderr, "rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
+              domId, gpus_[domId], idx.x, idx.y, idx.z);
     }
     // realize local domains
     for (auto &d : domains_) {
@@ -306,8 +305,9 @@ public:
     // outbox for same-GPU exchanges
     std::vector<Message> peerAccessOutbox;
 
-    // outbox for same-rank exchanges
-    std::vector<Message> peerCopyOutbox;
+    // outboxes for same-rank exchanges
+    std::vector<std::vector<std::vector<Message>>> peerCopyOutboxes;
+    // peerCopyOutboxes[di][dj] = peer copy from di to dj
 
     // outbox for co-located domains in different ranks
     // one outbox for each co-located domain
@@ -327,10 +327,15 @@ public:
     std::cerr << "comm plan\n";
     // plan messages
     nvtxRangePush("DistributedDomain::realize() plan messages");
-    remoteOutboxes.resize(gpus_.size());
-    remoteInboxes.resize(gpus_.size());
+    peerCopyOutboxes.resize(gpus_.size());
+    for (auto &v : peerCopyOutboxes) {
+      v.resize(gpus_.size());
+    }
     coloOutboxes.resize(gpus_.size());
     coloInboxes.resize(gpus_.size());
+    remoteOutboxes.resize(gpus_.size());
+    remoteInboxes.resize(gpus_.size());
+
     for (size_t di = 0; di < domains_.size(); ++di) {
       const Dim3 myIdx = nap_->dom_idx(rank_, di);
       const int myDev = domains_[di].gpu();
@@ -354,7 +359,7 @@ public:
               if ((myDev == dstDev) && any_methods(MethodFlags::CudaKernel)) {
                 peerAccessOutbox.push_back(sMsg);
               } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
-                peerCopyOutbox.push_back(sMsg);
+                peerCopyOutboxes[di][dstGPU].push_back(sMsg);
               } else if (any_methods(MethodFlags::CudaMpi |
                                      MethodFlags::CudaAwareMpi)) {
                 assert(di < remoteOutboxes.size());
@@ -435,7 +440,8 @@ public:
     planFile << "domains\n";
     for (size_t di = 0; di < domains_.size(); ++di) {
       planFile << di << ":" << domains_[di].gpu() << ":"
-               << nap_->dom_idx(rank_, di) << " sz=" << domains_[di].size() << "\n";
+               << nap_->dom_idx(rank_, di) << " sz=" << domains_[di].size()
+               << "\n";
     }
     planFile << "\n";
 
@@ -446,13 +452,19 @@ public:
     planFile << "\n";
 
     planFile << "== peerCopy ==\n";
-    for (auto &m : peerCopyOutbox) {
-      size_t numBytes = 0;
-      for (size_t i = 0; i < domains_[m.srcGPU_].num_data(); ++i) {
-	size_t haloBytes = domains_[m.srcGPU_].halo_bytes(m.dir_, i);
-        numBytes += haloBytes;
+    for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
+      for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size();
+           ++dstGPU) {
+        size_t numBytes = 0;
+        for (const auto &msg : peerCopyOutboxes[srcGPU][dstGPU]) {
+          for (size_t i = 0; i < domains_[srcGPU].num_data(); ++i) {
+            size_t haloBytes = domains_[srcGPU].halo_bytes(msg.dir_, i);
+            numBytes += haloBytes;
+          }
+          planFile << srcGPU << "->" << dstGPU << " " << msg.dir_ << " "
+                   << numBytes << "B\n";
+        }
       }
-      planFile << m.srcGPU_ << "->" << m.dstGPU_  << " " << m.dir_ << " " << numBytes << "B\n";
     }
     planFile << "\n";
 
@@ -495,7 +507,6 @@ public:
     remoteSenders_.resize(gpus_.size());
     remoteRecvers_.resize(gpus_.size());
 
-    
     // create all required remote senders/recvers
     for (size_t di = 0; di < domains_.size(); ++di) {
       const Dim3 myIdx = nap_->dom_idx(rank_, di);
@@ -563,6 +574,24 @@ public:
     }
     nvtxRangePop(); // create colocated
 
+    std::cerr << "create peer copy\n";
+    // create colocated sender/recvers
+    nvtxRangePush("DistributedDomain::realize: create PeerCopySender");
+    // per-domain senders and messages
+    peerCopySenders_.resize(gpus_.size());
+
+    // create all required colocated senders/recvers
+    for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
+      for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size();
+           ++dstGPU) {
+        if (!peerCopyOutboxes[srcGPU][dstGPU].empty()) {
+          peerCopySenders_[srcGPU].emplace(
+              dstGPU, PeerCopySender(srcGPU, dstGPU, domains_[srcGPU],
+                                     domains_[dstGPU]));
+        }
+      }
+    }
+    nvtxRangePop(); // create peer copy
 
     // prepare senders and receivers
     std::cerr << "DistributedDomain::realize: prepare peerAccessSender\n";
@@ -571,7 +600,13 @@ public:
     nvtxRangePop();
     std::cerr << "DistributedDomain::realize: prepare peerCopySender\n";
     nvtxRangePush("DistributedDomain::realize: prep peerCopySender");
-    peerCopySender_.prepare(peerCopyOutbox, domains_);
+    for (size_t srcGPU = 0; srcGPU < peerCopySenders_.size(); ++srcGPU) {
+      for (auto &kv : peerCopySenders_[srcGPU]) {
+        const int dstGPU = kv.first;
+        auto &sender = kv.second;
+        sender.prepare(peerCopyOutboxes[srcGPU][dstGPU]);
+      }
+    }
     nvtxRangePop();
     std::cerr << "DistributedDomain::realize: prepare colocatedHaloSender\n";
     nvtxRangePush("DistributedDomain::realize: prep colocated");
@@ -672,7 +707,12 @@ public:
     // send same-rank messages
     fprintf(stderr, "rank=%d send peer copy\n", rank_);
     nvtxRangePush("DD::exchange: peer copy send");
-    peerCopySender_.send();
+    for (auto &src : peerCopySenders_) {
+      for (auto &kv : src) {
+        PeerCopySender &sender = kv.second;
+        sender.send();
+      }
+    }
     nvtxRangePop();
 
     // send local messages
@@ -753,7 +793,12 @@ public:
     nvtxRangePop();
 
     nvtxRangePush("peerCopySender.wait()");
-    peerCopySender_.wait();
+    for (auto &src : peerCopySenders_) {
+      for (auto &kv : src) {
+        PeerCopySender &sender = kv.second;
+        sender.send();
+      }
+    }
     nvtxRangePop(); // peerCopySender.wait()
 
     // wait for colocated
