@@ -115,7 +115,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.mpi_topo %fs\n", maxElapsed);
+      printf("time.mpi_topo %f s\n", maxElapsed);
     }
 #endif
 
@@ -154,7 +154,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.node_gpus %fs\n", maxElapsed);
+      printf("time.node_gpus %f s\n", maxElapsed);
     }
 #endif
     {
@@ -178,7 +178,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.gpu_topo %fs\n", maxElapsed);
+      printf("time.gpu_topo %f s\n", maxElapsed);
     }
 #endif
 
@@ -195,7 +195,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.peer_en %fs\n", maxElapsed);
+      printf("time.peer_en %f s\n", maxElapsed);
     }
 #endif
   }
@@ -257,7 +257,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.nap %fs\n", maxElapsed);
+      printf("time.nap %f s\n", maxElapsed);
     }
 #endif
 
@@ -293,7 +293,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.realize %fs\n", maxElapsed);
+      printf("time.realize %f s\n", maxElapsed);
     }
 #endif
 
@@ -427,7 +427,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.plan %fs\n", maxElapsed);
+      printf("time.plan %f s\n", maxElapsed);
     }
 #endif
 
@@ -667,7 +667,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.create %fs\n", maxElapsed);
+      printf("time.create %f s\n", maxElapsed);
     }
 #endif
   }
@@ -842,7 +842,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.exchange %fs\n", maxElapsed);
+      printf("time.exchange %f s\n", maxElapsed);
     }
 #endif
 
