@@ -5,7 +5,7 @@
 // pitch calculations
 // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__MEMORY.html#group__CUDART__MEMORY_1g32bd7a39135594788a542ae72217775c
 
-__device__ static void grid_pack(void *__restrict__ dst,
+static __device__ void grid_pack(void *__restrict__ dst,
                                  const void *__restrict__ src,
                                  const Dim3 srcSize, const Dim3 srcPos,
                                  const Dim3 srcExtent, const size_t elemSize) {
@@ -68,11 +68,10 @@ multi_pack(void *__restrict__ dst,                      // dst buffer
   }
 }
 
-static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
-                              const size_t dstPitch, const Dim3 dstPos,
-                              const Dim3 dstExtent,
-                              const void *__restrict__ src,
-                              const size_t elemSize) {
+static __device__ void grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
+                                   const Dim3 dstPos, const Dim3 dstExtent,
+                                   const void *__restrict__ src,
+                                   const size_t elemSize) {
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -104,6 +103,27 @@ static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
         }
       }
     }
+  }
+}
+
+static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
+                              const size_t dstPitch, const Dim3 dstPos,
+                              const Dim3 dstExtent,
+                              const void *__restrict__ src,
+                              const size_t elemSize) {
+
+  grid_unpack(dst, dstSize, dstPos, dstExtent, src, elemSize);
+}
+
+/*! same as calling unpack(dsts[i]...srcs[offsets[i]]...elemSizes[i])
+ */
+static __global__ void
+multi_unpack(void **__restrict__ dsts, const Dim3 dstSize, const Dim3 dstPos, const Dim3 dstExtent,
+             const void *__restrict__ const src, const size_t *__restrict__ offsets, 
+             const size_t *__restrict__ elemSizes, const size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    const void *srcp = &(static_cast<const char *>(src)[offsets[i]]);
+    grid_unpack(dsts[i], dstSize, dstPos, dstExtent, srcp, elemSizes[i]);
   }
 }
 
