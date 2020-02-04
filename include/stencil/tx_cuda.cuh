@@ -216,11 +216,11 @@ public:
 
     nvtxRangePush("PeerCopySender::send");
 
-    // offsets for pack and unpack
+    // offsets for pack
     std::vector<std::vector<size_t>> bufOffsets(
         domains_.size(), std::vector<size_t>(domains_.size(), 0));
 
-    // insert packs and copies into src stream, and unpacks into dst stream
+    // pack the data for each message into the src streams
     for (auto &msg : outbox_) {
       const int i = msg.srcGPU_;
       const int j = msg.dstGPU_;
@@ -268,14 +268,52 @@ public:
         CUDA_RUNTIME(cudaGetLastError());
         bufOffset += srcDomain->halo_bytes(msg.dir_, n);
       }
-      // insert copy
-      CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf, dstDev, srcBuf, srcDev,
-                                       bufSizes_[i][j], srcStream));
-      CUDA_RUNTIME(cudaEventRecord(event, srcStream));
+      // the next message involving the same src/dst starts in the same place
+      // this one left off
+      bufOffsets[i][j] = bufOffset;
+    }
 
-      // insert unpacks
+    // copy from each src to each dst
+    for (size_t i = 0; i < domains_.size(); ++i) {
+      for (size_t j = 0; j < domains_.size(); ++j) {
+        const LocalDomain *srcDomain = domains_[i];
+        const LocalDomain *dstDomain = domains_[j];
+        const int srcDev = srcDomain->gpu();
+        const int dstDev = dstDomain->gpu();
+        void *srcBuf = srcBufs_[i][j];
+        void *dstBuf = dstBufs_[i][j];
+        RcStream &srcStream = srcStreams_[i][j];
+        cudaEvent_t event = events_[i][j];
+        CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf, dstDev, srcBuf, srcDev,
+                                         bufSizes_[i][j], srcStream));
+        CUDA_RUNTIME(cudaEventRecord(event, srcStream));
+      }
+    }
+
+    // zero offsets for unpack
+    bufOffsets = std::vector<std::vector<size_t>>(
+        domains_.size(), std::vector<size_t>(domains_.size(), 0));
+
+    // insert unpacks
+    for (auto &msg : outbox_) {
+      const int i = msg.srcGPU_;
+      const int j = msg.dstGPU_;
+      const LocalDomain *dstDomain = domains_[j];
+      const int dstDev = dstDomain->gpu();
+      RcStream &srcStream = srcStreams_[i][j];
+      RcStream &dstStream = dstStreams_[i][j];
+
+      cudaEvent_t event = events_[i][j];
+      const Dim3 dstSz = dstDomain->raw_size();
+      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
+      const Dim3 extent = dstDomain->halo_extent(msg.dir_);
+      char *dstBuf = (char *)dstBufs_[i][j];
       CUDA_RUNTIME(cudaSetDevice(dstStream.device()));
-      bufOffset = bufOffsets[i][j];
+
+      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
+      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+
+      size_t bufOffset = bufOffsets[i][j];
       for (size_t n = 0; n < dstDomain->num_data(); ++n) {
         const size_t elemSz = dstDomain->elem_size(n);
         void *dst = dstDomain->curr_data(n);
@@ -284,7 +322,6 @@ public:
             dst, dstSz, 0, dstPos, extent, &dstBuf[bufOffset], elemSz);
         bufOffset += dstDomain->halo_bytes(msg.dir_, n);
       }
-      bufOffsets[i][j] = bufOffset;
     }
 
     nvtxRangePop(); // PeerCopySender::send
@@ -655,8 +692,6 @@ public:
       msgPackOffsets_.push_back(p);
     }
     assert(msgPackOffsets_.size() == inbox_.size());
-
-
   }
 
   void finish_prepare() { recver_.finish_prepare(); }
@@ -669,7 +704,7 @@ public:
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
-    for (size_t mi = 0; mi < inbox_.size(); ++mi){
+    for (size_t mi = 0; mi < inbox_.size(); ++mi) {
       const Message &msg = inbox_[mi];
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
@@ -679,8 +714,8 @@ public:
       assert(stream_.device() == domain_->gpu());
 
       multi_unpack<<<dimGrid, dimBlock, 0, stream_>>>(
-          domain_->dev_curr_datas(), rawSz, pos, extent, devBuf_, msgPackOffsets_[mi],
-          domain_->dev_elem_sizes(), domain_->num_data());
+          domain_->dev_curr_datas(), rawSz, pos, extent, devBuf_,
+          msgPackOffsets_[mi], domain_->dev_elem_sizes(), domain_->num_data());
       CUDA_RUNTIME(cudaGetLastError());
     }
   }
