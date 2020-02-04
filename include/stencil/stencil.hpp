@@ -796,7 +796,7 @@ public:
     for (auto &src : peerCopySenders_) {
       for (auto &kv : src) {
         PeerCopySender &sender = kv.second;
-        sender.send();
+        sender.wait();
       }
     }
     nvtxRangePop(); // peerCopySender.wait()
