@@ -575,7 +575,7 @@ public:
 
       multi_pack<<<dimGrid, dimBlock, 0, stream_>>>(
           srcBuf_, msgPackOffsets_[mi], domain_->dev_curr_datas(), rawSz, pos,
-          extent, domain_->dev_elem_sizes(), domain_->num_data(), bufSize_);
+          extent, domain_->dev_elem_sizes(), domain_->num_data());
       CUDA_RUNTIME(cudaGetLastError());
     }
 
