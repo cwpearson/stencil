@@ -435,22 +435,28 @@ public:
     planFile << "domains\n";
     for (size_t di = 0; di < domains_.size(); ++di) {
       planFile << di << ":" << domains_[di].gpu() << ":"
-               << nap_->dom_idx(rank_, di) << "\n";
+               << nap_->dom_idx(rank_, di) << " sz=" << domains_[di].size() << "\n";
     }
     planFile << "\n";
 
-    planFile << "peerAccess\n";
+    planFile << "== peerAccess ==\n";
     for (auto &m : peerAccessOutbox) {
       planFile << m.srcGPU_ << "->" << m.dstGPU_ << " " << m.dir_ << "\n";
     }
     planFile << "\n";
 
-    planFile << "peerCopy\n";
+    planFile << "== peerCopy ==\n";
     for (auto &m : peerCopyOutbox) {
-      planFile << m.dir_ << "\n";
+      size_t numBytes = 0;
+      for (size_t i = 0; i < domains_[m.srcGPU_].num_data(); ++i) {
+	size_t haloBytes = domains_[m.srcGPU_].halo_bytes(m.dir_, i);
+        numBytes += haloBytes;
+      }
+      planFile << m.srcGPU_ << "->" << m.dstGPU_  << " " << m.dir_ << " " << numBytes << "B\n";
     }
     planFile << "\n";
 
+    planFile << "== colo ==\n";
     for (auto &obxs : coloOutboxes) {
       for (auto &kv : obxs) {
         const Dim3 dstIdx = kv.first;
@@ -462,6 +468,9 @@ public:
         }
       }
     }
+    planFile << "\n";
+
+    planFile << "== remote ==\n";
     for (auto &obxs : remoteOutboxes) {
       for (auto &kv : obxs) {
         const Dim3 dstIdx = kv.first;
@@ -649,17 +658,6 @@ public:
     }
     nvtxRangePop();
 
-    // start remote recv h2h
-    fprintf(stderr, "rank=%d recv remote h2h\n", rank_);
-    nvtxRangePush("DD::exchange: remote recv h2h");
-    for (auto &domRecvers : remoteRecvers_) {
-      for (auto &kv : domRecvers) {
-        StatefulRecver *recver = kv.second;
-        recver->recv();
-      }
-    }
-    nvtxRangePop();
-
     // start colocated Senders
     fprintf(stderr, "rank=%d start colo send\n", rank_);
     nvtxRangePush("DD::exchange: colo send");
@@ -667,17 +665,6 @@ public:
       for (auto &kv : domSenders) {
         ColocatedHaloSender &sender = kv.second;
         sender.send();
-      }
-    }
-    nvtxRangePop();
-
-    // start colocated recvers
-    fprintf(stderr, "rank=%d start colo recv\n", rank_);
-    nvtxRangePush("DD::exchange: colo recv");
-    for (auto &domRecvers : coloRecvers_) {
-      for (auto &kv : domRecvers) {
-        ColocatedHaloRecver &recver = kv.second;
-        recver.recv();
       }
     }
     nvtxRangePop();
@@ -692,6 +679,28 @@ public:
     fprintf(stderr, "rank=%d send peer access\n", rank_);
     nvtxRangePush("DD::exchange: peer access send");
     peerAccessSender_.send();
+    nvtxRangePop();
+
+    // start colocated recvers
+    fprintf(stderr, "rank=%d start colo recv\n", rank_);
+    nvtxRangePush("DD::exchange: colo recv");
+    for (auto &domRecvers : coloRecvers_) {
+      for (auto &kv : domRecvers) {
+        ColocatedHaloRecver &recver = kv.second;
+        recver.recv();
+      }
+    }
+    nvtxRangePop();
+
+    // start remote recv h2h
+    fprintf(stderr, "rank=%d recv remote h2h\n", rank_);
+    nvtxRangePush("DD::exchange: remote recv h2h");
+    for (auto &domRecvers : remoteRecvers_) {
+      for (auto &kv : domRecvers) {
+        StatefulRecver *recver = kv.second;
+        recver->recv();
+      }
+    }
     nvtxRangePop();
 
     // poll senders and recvers to move onto next step until all are done
