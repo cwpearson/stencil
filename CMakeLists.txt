@@ -68,9 +68,10 @@ else()
 endif()
 
 if (PRINT_TIMINGS)
-  message(STATUS "printing timings")
+  message(STATUS "PRINT_TIMINGS=ON")
   target_compile_definitions(stencil INTERFACE -DSTENCIL_PRINT_TIMINGS=1)
 else()
+  message(STATUS "PRINT_TIMINGS=OFF")
   target_compile_definitions(stencil INTERFACE -DSTENCIL_PRINT_TIMINGS=0)
 endif()
 
