@@ -35,10 +35,10 @@ public:
   virtual ~Unpacker() {}
 };
 
-static __device__ void grid_pack(void *__restrict__ dst,
-                                 const void *__restrict__ src,
-                                 const Dim3 srcSize, const Dim3 srcPos,
-                                 const Dim3 srcExtent, const size_t elemSize) {
+static __device__ void
+dev_packer_grid_pack(void *__restrict__ dst, const void *__restrict__ src,
+                     const Dim3 srcSize, const Dim3 srcPos,
+                     const Dim3 srcExtent, const size_t elemSize) {
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -76,16 +76,16 @@ static __device__ void grid_pack(void *__restrict__ dst,
   }
 }
 
-static __global__ void
-pack_domain(void *dst,             // buffer to pack into
-            void **srcs,           // raw pointer to each quanitity
-            size_t *elemSizes,     // element size for each quantity
-            const size_t nQuants,  // number of quantities
-            const Dim3 rawSz,      // domain size (elements)
-            const Dim3 *positions, // numHalos positions
-            const Dim3 *extents,   // numhalos extents
-            const size_t *offsets, // numHalos * nQuants offsets
-            const size_t numHalos) {
+__global__ static void
+dev_packer_pack_domain(void *dst,             // buffer to pack into
+                       void **srcs,           // raw pointer to each quanitity
+                       size_t *elemSizes,     // element size for each quantity
+                       const size_t nQuants,  // number of quantities
+                       const Dim3 rawSz,      // domain size (elements)
+                       const Dim3 *positions, // numHalos positions
+                       const Dim3 *extents,   // numhalos extents
+                       const size_t *offsets, // numHalos * nQuants offsets
+                       const size_t numHalos) {
   size_t oi = 0; // offset index
   for (size_t mi = 0; mi < numHalos; ++mi) {
     Dim3 pos = positions[mi];
@@ -96,7 +96,7 @@ pack_domain(void *dst,             // buffer to pack into
       const size_t offset = offsets[oi];
       void *dstp = &((char *)dst)[offset];
 
-      grid_pack(dstp, src, rawSz, pos, ext, elemSz);
+      dev_packer_grid_pack(dstp, src, rawSz, pos, ext, elemSz);
     }
   }
 }
@@ -140,7 +140,7 @@ public:
       }
     }
     assert(positions.size() == extents.size());
-    assert(offets.size() == positions.size() * domain_->num_data());
+    assert(offsets.size() == positions.size() * domain_->num_data());
 
     // copy halo info to the GPU
     size_t posBytes = positions.size() * sizeof(positions[0]);
@@ -165,10 +165,11 @@ public:
 
     dim3 dimBlock(16, 8, 4);
     dim3 dimGrid(10, 10, 10);
-    pack_domain<<<dimBlock, dimGrid, 0, stream>>>(
+    dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream>>>(
         devBuf_, domain_->dev_curr_datas(), domain_->dev_elem_sizes(),
         domain_->num_data(), domain_->raw_size(), devPositions_, devExtents_,
         devOffsets_, dirs_.size());
+    CUDA_RUNTIME(cudaGetLastError());
   }
 
   virtual size_t size() override { return size_; }
@@ -176,10 +177,10 @@ public:
   virtual void *data() override { return devBuf_; }
 };
 
-static __device__ void grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
-                                   const Dim3 dstPos, const Dim3 dstExtent,
-                                   const void *__restrict__ src,
-                                   const size_t elemSize) {
+static __device__ void
+dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
+                         const Dim3 dstPos, const Dim3 dstExtent,
+                         const void *__restrict__ src, const size_t elemSize) {
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -214,16 +215,16 @@ static __device__ void grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
   }
 }
 
-static __global__ void
-unpack_domain(void **dsts,           // buffer to pack into
-              void *src,             // raw pointer to each quanitity
-              size_t *elemSizes,     // element size for each quantity
-              const size_t nQuants,  // number of quantities
-              const Dim3 rawSz,      // domain size (elements)
-              const Dim3 *positions, // numHalos positions
-              const Dim3 *extents,   // numhalos extents
-              const size_t *offsets, // numHalos * nQuants offsets
-              const size_t numHalos) {
+__global__ static void
+dev_unpacker_unpack_domain(void **dsts,       // buffer to pack into
+                           void *src,         // raw pointer to each quanitity
+                           size_t *elemSizes, // element size for each quantity
+                           const size_t nQuants,  // number of quantities
+                           const Dim3 rawSz,      // domain size (elements)
+                           const Dim3 *positions, // numHalos positions
+                           const Dim3 *extents,   // numhalos extents
+                           const size_t *offsets, // numHalos * nQuants offsets
+                           const size_t numHalos) {
   size_t oi = 0; // offset index
   for (size_t mi = 0; mi < numHalos; ++mi) {
     Dim3 pos = positions[mi];
@@ -234,7 +235,7 @@ unpack_domain(void **dsts,           // buffer to pack into
       const size_t offset = offsets[oi];
       void *srcp = &((char *)src)[offset];
 
-      grid_unpack(dst, rawSz, pos, ext, srcp, elemSz);
+      dev_unpacker_grid_unpack(dst, rawSz, pos, ext, srcp, elemSz);
     }
   }
 }
@@ -278,7 +279,7 @@ public:
       }
     }
     assert(positions.size() == extents.size());
-    assert(offets.size() == positions.size() * domain_->num_data());
+    assert(offsets.size() == positions.size() * domain_->num_data());
 
     // copy halo info to the GPU
     size_t posBytes = positions.size() * sizeof(positions[0]);
@@ -303,10 +304,11 @@ public:
 
     dim3 dimBlock(16, 8, 4);
     dim3 dimGrid(10, 10, 10);
-    unpack_domain<<<dimBlock, dimGrid, 0, stream>>>(
+    dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream>>>(
         domain_->dev_curr_datas(), devBuf_, domain_->dev_elem_sizes(),
         domain_->num_data(), domain_->raw_size(), devPositions_, devExtents_,
         devOffsets_, dirs_.size());
+    CUDA_RUNTIME(cudaGetLastError());
   }
 
   virtual size_t size() override { return size_; }
