@@ -115,9 +115,8 @@ ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ## ON hal
 
 ```
-cmake .. -DCMAKE_CXX_COMPILER=$HOME/software/clang-8.0.0/bin/clang++
+srun --partition=gpu --time=4:00:00 --ntasks=2 --nodes=2 --ntasks-per-node=1 --sockets-per-node=1 --cores-per-socket=8 --threads-per-core=4 --mem-per-cpu=1200 --wait=0 --export=ALL --gres=gpu:v100:2 --pty /bin/bash
 ```
-
 ## Design Goals
   * v1 (AsHES)
     * [x] joint stencils over multiple data types (Astaroth)
