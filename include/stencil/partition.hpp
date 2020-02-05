@@ -429,6 +429,12 @@ public:
       : size_(domSize), ranks_(ranks), gpuDim_(1, 1, 1), rankDim_(1, 1, 1) {
 
     // TODO: make sure everyone is contributing the same number of GPUs
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    for (auto &dev : rankGpus) {
+      std::cerr << "rank " << rank << " contributing cuda " << dev << "\n";
+    }
 
     domIdx_.resize(ranks_);
     for (auto &v : domIdx_) {
@@ -498,8 +504,6 @@ public:
 
     // each rank on the node reports its global rank
     std::vector<int> nodeRanks(mpiTopo.colocated_size());
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Allgather(&rank, 1, MPI_INT, nodeRanks.data(), 1, MPI_INT,
                   mpiTopo.colocated_comm());
     std::cerr << "NAP: colo global ranks: ";
@@ -653,8 +657,10 @@ public:
 
 
     // gather up per-rank and global information about what cuda device is used for each domain
-    std::vector<Dim3> localDomIdx, allDomIdx(rankGpus.size() * mpiTopo.size());
-    std::vector<int> localDomId, allDomId(rankGpus.size() * mpiTopo.size());
+    std::vector<Dim3> localDomIdx;
+    std::vector<Dim3> allDomIdx(rankGpus.size() * mpiTopo.size());
+    std::vector<int> localDomId;
+    std::vector<int> allDomId(rankGpus.size() * mpiTopo.size());
     std::vector<int> allCudaId(rankGpus.size() * mpiTopo.size());
 
     std::cerr << "found best placement\n";
@@ -666,17 +672,15 @@ public:
       const Dim3 rankIdx = dimensionize(rank, rankDim_);
       const Dim3 domIdx = rankIdx * gpuDim_ + gpuIdx;
       std::cerr << "id=" << id << "(cuda=" << nodeGpus[id]
-                << ") rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " rank=" << rank
+                << ") rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " colo-rank=" << rank
                 << " domId=" << domId << "\n";
-      // only send the mapping from my rank
-      if (rank == mpiTopo.rank()) {
+      // keep track of my own domain id / domain index corredponence
+      if (rank == mpiTopo.colocated_rank()) {
         localDomIdx.push_back(domIdx);
         localDomId.push_back(domId);
       }
     }
     std::cerr << "\n";
-
-    // should be no duplicates
 
     // should be one domain in the rank per GPU
     assert(localDomIdx.size() == rankGpus.size());
@@ -694,6 +698,7 @@ public:
     MPI_Allgather(localDomId.data(), localDomId.size(), MPI_INT, allDomId.data(), localDomId.size(), MPI_INT, mpiTopo.comm());
 
 
+    // record info from all ranks
     for (size_t i = 0; i < allCudaId.size(); ++i) {
       const int rank = i / rankGpus.size(); // TODO: assuming all ranks provide the same number of GPUs
       const Dim3 domIdx = allDomIdx[i];
