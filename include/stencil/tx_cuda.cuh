@@ -16,6 +16,7 @@
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/local_domain.cuh"
+#include "stencil/packer.cuh"
 #include "stencil/rcstream.hpp"
 
 #include "tx_common.hpp"
@@ -314,15 +315,15 @@ public:
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         srcDev_(srcDev), dstBuf_(nullptr), bufSize_(0), event_(0) {
 
-  int tag_ub = -1;
-	int flag;
-	int* tag_ub_ptr;
-	MPI_Comm_get_attr(MPI_COMM_WORLD, MPI_TAG_UB, &tag_ub_ptr, &flag);
-        assert(flag);
-	if (flag) tag_ub = *tag_ub_ptr;
-        tagUb_ = tag_ub;
-
-}
+    int tag_ub = -1;
+    int flag;
+    int *tag_ub_ptr;
+    MPI_Comm_get_attr(MPI_COMM_WORLD, MPI_TAG_UB, &tag_ub_ptr, &flag);
+    assert(flag);
+    if (flag)
+      tag_ub = *tag_ub_ptr;
+    tagUb_ = tag_ub;
+  }
 
   ~ColocatedDeviceSender() {
     if (dstBuf_) {
@@ -338,7 +339,8 @@ public:
   void start_prepare(size_t numBytes) {
     const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
-    //fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
+    // fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to
+    // r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
 
     // create an event and associated handle
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
@@ -350,22 +352,18 @@ public:
               make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
               &evtReq_);
 
-
-
     // Recieve the IPC mem handle
     const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload);
-    //fprintf(stderr, "ColoDevSend::start_prepare: mem handle tag=%d\n", memHandleTag);
+    // fprintf(stderr, "ColoDevSend::start_prepare: mem handle tag=%d\n",
+    // memHandleTag);
     assert(memHandleTag < tagUb_);
-    MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_,
-              memHandleTag, MPI_COMM_WORLD,
-              &memReq_);
+    MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, memHandleTag,
+              MPI_COMM_WORLD, &memReq_);
     // Retrieve the destination device id
     const int devTag = make_tag<MsgKind::ColocatedDev>(payload);
-    //fprintf(stderr, "ColoDevSend::start_prepare: dev tag=%d\n", devTag);
+    // fprintf(stderr, "ColoDevSend::start_prepare: dev tag=%d\n", devTag);
     assert(devTag < tagUb_);
-    MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_,
-              devTag, MPI_COMM_WORLD,
-              &idReq_);
+    MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_, devTag, MPI_COMM_WORLD, &idReq_);
 
     // compute the required buffer size
     bufSize_ = numBytes;
@@ -489,93 +487,30 @@ public:
 
 class ColocatedHaloSender {
 private:
-  const LocalDomain *domain_;
+  LocalDomain *domain_;
   int srcRank_;
 
-  void *srcBuf_; // buffer in this process
-  size_t bufSize_;
-
-  std::vector<Message> outbox_;
-
   RcStream stream_;
+  DevicePacker packer_;
   ColocatedDeviceSender sender_;
 
-  // multi_pack offsets for each message
-  std::vector<size_t *> msgPackOffsets_;
-
 public:
-  ColocatedHaloSender() : srcBuf_(nullptr) {}
+  ColocatedHaloSender() {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                      const LocalDomain &domain)
-      : domain_(&domain), srcBuf_(nullptr), bufSize_(0), stream_(domain.gpu()),
+                      LocalDomain &domain)
+      : domain_(&domain), stream_(domain.gpu()),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
-  ~ColocatedHaloSender() {
-    CUDA_RUNTIME(cudaFree(srcBuf_));
-    for (auto *p : msgPackOffsets_) {
-      CUDA_RUNTIME(cudaFree(p));
-    }
-  }
-
   void start_prepare(const std::vector<Message> &outbox) {
-    outbox_ = outbox;
-    std::sort(outbox_.begin(), outbox_.end());
-
-    // compute the required buffer size and offsets
-    bufSize_ = 0;
-    std::vector<std::vector<size_t>> msgPackOffsets;
-    for (const auto &msg : outbox_) {
-      std::vector<size_t> packOffsets;
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        packOffsets.push_back(bufSize_);
-        bufSize_ += domain_->halo_bytes(msg.dir_, i);
-      }
-      msgPackOffsets.push_back(packOffsets);
-    }
-
-    // prepare sender
-    sender_.start_prepare(bufSize_);
-
-    // allocate a buffer for the packing
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-    CUDA_RUNTIME(cudaMalloc(&srcBuf_, bufSize_));
-
-    // Allocate space for the offsets needed for each message
-    for (auto &offsets : msgPackOffsets) {
-      size_t *p = nullptr;
-      CUDA_RUNTIME(cudaMalloc(&p, offsets.size() * sizeof(offsets[0])));
-      CUDA_RUNTIME(cudaMemcpy(p, offsets.data(),
-                              offsets.size() * sizeof(offsets[0]),
-                              cudaMemcpyHostToDevice));
-      msgPackOffsets_.push_back(p);
-    }
-    assert(msgPackOffsets_.size() == outbox_.size());
+    packer_.prepare(domain_, outbox);
+    sender_.start_prepare(packer_.size());
   }
 
   void finish_prepare() { sender_.finish_prepare(); }
 
   void send() noexcept {
-    // pack data into device buffer
-    const Dim3 rawSz = domain_->raw_size();
-    // size_t bufOffset = 0;
-
-    for (size_t mi = 0; mi < outbox_.size(); ++mi) {
-      const Message &msg = outbox_[mi];
-      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
-      const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
-      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      assert(stream_.device() == domain_->gpu());
-      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-
-      multi_pack<<<dimGrid, dimBlock, 0, stream_>>>(
-          srcBuf_, msgPackOffsets_[mi], domain_->dev_curr_datas(), rawSz, pos,
-          extent, domain_->dev_elem_sizes(), domain_->num_data());
-      CUDA_RUNTIME(cudaGetLastError());
-    }
-
-    // insert send into stream
-    sender_.send(srcBuf_, stream_);
+    packer_.pack(stream_);
+    sender_.send(packer_.data(), stream_);
   }
 
   void wait() noexcept { sender_.wait(); }
@@ -587,68 +522,23 @@ private:
   int srcGPU_;
   int dstGPU_;
 
-  const LocalDomain *domain_;
-  std::vector<Message> inbox_;
+  LocalDomain *domain_;
 
   RcStream stream_;
-
-  char *devBuf_;
-  size_t bufSize_;
-
   ColocatedDeviceRecver recver_;
-
-  // multi_pack offsets for each message
-  std::vector<size_t *> msgPackOffsets_;
+  DeviceUnpacker unpacker_;
 
 public:
-  ColocatedHaloRecver() : devBuf_(nullptr), domain_(nullptr) {}
+  ColocatedHaloRecver() {}
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                      const LocalDomain &domain)
+                      LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
-        stream_(domain.gpu()), devBuf_(nullptr), bufSize_(0),
+        stream_(domain.gpu()),
         recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
-  ~ColocatedHaloRecver() {
-    CUDA_RUNTIME(cudaFree(devBuf_));
-    for (auto *p : msgPackOffsets_) {
-      CUDA_RUNTIME(cudaFree(p));
-    }
-  }
-
   void start_prepare(const std::vector<Message> &inbox) {
-    inbox_ = inbox;
-    std::sort(inbox_.begin(), inbox_.end());
-
-    // compute the buffer size
-    bufSize_ = 0;
-    std::vector<std::vector<size_t>> msgPackOffsets;
-    for (auto &msg : inbox_) {
-      std::vector<size_t> packOffsets;
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        packOffsets.push_back(bufSize_);
-        bufSize_ += domain_->halo_bytes(msg.dir_, i);
-      }
-      msgPackOffsets.push_back(packOffsets);
-    }
-
-    // allocate the buffer
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
-    assert(devBuf_);
-
-    // prepare to recieve
-    recver_.start_prepare(devBuf_, bufSize_);
-
-    // Allocate space for the offsets needed for each message
-    for (auto &offsets : msgPackOffsets) {
-      size_t *p = nullptr;
-      CUDA_RUNTIME(cudaMalloc(&p, offsets.size() * sizeof(offsets[0])));
-      CUDA_RUNTIME(cudaMemcpy(p, offsets.data(),
-                              offsets.size() * sizeof(offsets[0]),
-                              cudaMemcpyHostToDevice));
-      msgPackOffsets_.push_back(p);
-    }
-    assert(msgPackOffsets_.size() == inbox_.size());
+    unpacker_.prepare(domain_, inbox);
+    recver_.start_prepare(unpacker_.data(), unpacker_.size());
   }
 
   void finish_prepare() { recver_.finish_prepare(); }
@@ -656,25 +546,7 @@ public:
   void recv() {
     assert(stream_.device() == domain_->gpu());
     recver_.wait(stream_);
-
-    // add unpacks to stream
-    const Dim3 rawSz = domain_->raw_size();
-
-    // pack data into device buffer
-    for (size_t mi = 0; mi < inbox_.size(); ++mi) {
-      const Message &msg = inbox_[mi];
-      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
-      const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
-      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-      assert(stream_.device() == domain_->gpu());
-
-      multi_unpack<<<dimGrid, dimBlock, 0, stream_>>>(
-          domain_->dev_curr_datas(), rawSz, pos, extent, devBuf_,
-          msgPackOffsets_[mi], domain_->dev_elem_sizes(), domain_->num_data());
-      CUDA_RUNTIME(cudaGetLastError());
-    }
+    unpacker_.unpack(stream_);
   }
 
   void wait() noexcept {
@@ -1301,11 +1173,11 @@ public:
     nvtxRangePop();
     int tag = make_tag(dstGPU, dataIdx, dir);
 #ifdef ANY_LOUD
-    printf(
-        "[%d] AnySender::send_impl(): r%d,g%d,d%lu: Send %luB -> r%d,g%d,d%lu "
-        "(tag=%08x)\n",
-        getpid(), srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU,
-        dataIdx, tag);
+    printf("[%d] AnySender::send_impl(): r%d,g%d,d%lu: Send %luB -> "
+           "r%d,g%d,d%lu "
+           "(tag=%08x)\n",
+           getpid(), srcRank, srcGPU, dataIdx, hostBuf_.size(), dstRank, dstGPU,
+           dataIdx, tag);
 #endif
     nvtxRangePush("send");
     MPI_Send(hostBuf_.data(), hostBuf_.size(), MPI_BYTE, dstRank, tag,
@@ -1426,8 +1298,8 @@ public:
   }
 };
 
-/*! A data sender that should work as long as CUDA is installed the two devices
-are in the same process
+/*! A data sender that should work as long as CUDA is installed the two
+devices are in the same process
 */
 class DirectAccessCopier : public Copier {
 private:
