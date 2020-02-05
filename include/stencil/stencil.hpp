@@ -169,6 +169,10 @@ public:
 
     // determine topology info for used GPUs
 #if STENCIL_PRINT_TIMINGS == 1
+    for (int dev : nodeCudaIds) {
+      CUDA_RUNTIME(cudaSetDevice(dev));
+      CUDA_RUNTIME(cudaFree(0));
+    }
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -247,7 +251,6 @@ public:
     double start = MPI_Wtime();
 #endif
     nvtxRangePush("node-aware placement");
-    std::cerr << "[" << rank_ << "] do NAP\n";
     NodeAwarePlacement *nap_ = new NodeAwarePlacement(
         size_, worldSize_, mpiTopology_, gpuTopology_, radius_, gpus_);
     nvtxRangePop();
