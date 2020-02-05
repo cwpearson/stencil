@@ -112,6 +112,12 @@ ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ./configure --prefix="blah" --with-cuda=/path/to/cuda
 ```
 
+## ON hal
+
+```
+cmake .. -DCMAKE_CXX_COMPILER=$HOME/software/clang-8.0.0/bin/clang++
+```
+
 ## Design Goals
   * v1 (AsHES)
     * [x] joint stencils over multiple data types (Astaroth)

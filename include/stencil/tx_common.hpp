@@ -79,13 +79,13 @@ static int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
 
 */
 static int make_tag(int gpu, int idx, Dim3 dir) {
-  static_assert(sizeof(int) == 4);
+  static_assert(sizeof(int) == 4, "int is the wrong size");
   constexpr int IDX_BITS = 16;
   constexpr int GPU_BITS = 8;
   constexpr int DIR_BITS = 7;
 
-  static_assert(DIR_BITS + GPU_BITS + IDX_BITS < sizeof(int) * CHAR_BIT);
-  static_assert(DIR_BITS >= 6);
+  static_assert(DIR_BITS + GPU_BITS + IDX_BITS < sizeof(int) * CHAR_BIT, "too many bits");
+  static_assert(DIR_BITS >= 6, "not enough bits");
   assert(gpu < (1 << GPU_BITS));
   assert(idx < (1 << IDX_BITS));
   assert(dir.x >= -1 && dir.x <= 1);
@@ -123,12 +123,12 @@ static int make_tag(int gpu, int idx, Dim3 dir) {
 
 */
 static int make_tag(int gpu, Dim3 dir) {
-  static_assert(sizeof(int) == 4);
+  static_assert(sizeof(int) == 4, "");
   constexpr int GPU_BITS = 8;
   constexpr int DIR_BITS = 6;
 
-  static_assert(DIR_BITS + GPU_BITS < sizeof(int) * CHAR_BIT);
-  static_assert(DIR_BITS >= 6);
+  static_assert(DIR_BITS + GPU_BITS < sizeof(int) * CHAR_BIT, "");
+  static_assert(DIR_BITS >= 6, "");
   assert(gpu < (1 << GPU_BITS));
   assert(dir.x >= -1 && dir.x <= 1);
   assert(dir.y >= -1 && dir.y <= 1);

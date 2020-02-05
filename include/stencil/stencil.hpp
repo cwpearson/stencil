@@ -36,7 +36,7 @@ enum class MethodFlags {
   All = 1 + 4 + 8 + 16
 #endif
 };
-static_assert(sizeof(MethodFlags) == sizeof(int));
+static_assert(sizeof(MethodFlags) == sizeof(int), "int");
 
 inline MethodFlags operator|(MethodFlags a, MethodFlags b) {
   return static_cast<MethodFlags>(static_cast<int>(a) | static_cast<int>(b));

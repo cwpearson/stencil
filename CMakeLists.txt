@@ -45,6 +45,8 @@ endif()
 add_library(stencil INTERFACE)
 add_library(stencil::stencil ALIAS stencil)
 
+target_compile_features(stencil INTERFACE cxx_std_11)
+
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   target_compile_options(
     stencil
