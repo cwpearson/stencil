@@ -304,13 +304,25 @@ private:
   MPI_Request memReq_;
   MPI_Request idReq_;
 
+  int tagUb_; // largest tag value, if positive
+
 public:
   ColocatedDeviceSender() : dstBuf_(nullptr), event_(0) {}
   ColocatedDeviceSender(int srcRank, int srcGPU, // domain ID
                         int dstRank, int dstGPU, // domain ID
                         int srcDev)              // cuda ID
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        srcDev_(srcDev), dstBuf_(nullptr), bufSize_(0), event_(0) {}
+        srcDev_(srcDev), dstBuf_(nullptr), bufSize_(0), event_(0) {
+
+  int tag_ub = -1;
+	int flag;
+	int* tag_ub_ptr;
+	MPI_Comm_get_attr(MPI_COMM_WORLD, MPI_TAG_UB, &tag_ub_ptr, &flag);
+        assert(flag);
+	if (flag) tag_ub = *tag_ub_ptr;
+        tagUb_ = tag_ub;
+
+}
 
   ~ColocatedDeviceSender() {
     if (dstBuf_) {
@@ -326,8 +338,7 @@ public:
   void start_prepare(size_t numBytes) {
     const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
-    // fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to
-    // r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
+    //fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
 
     // create an event and associated handle
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
@@ -339,13 +350,21 @@ public:
               make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
               &evtReq_);
 
+
+
     // Recieve the IPC mem handle
+    const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload);
+    //fprintf(stderr, "ColoDevSend::start_prepare: mem handle tag=%d\n", memHandleTag);
+    assert(memHandleTag < tagUb_);
     MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_,
-              make_tag<MsgKind::ColocatedMem>(payload), MPI_COMM_WORLD,
+              memHandleTag, MPI_COMM_WORLD,
               &memReq_);
     // Retrieve the destination device id
+    const int devTag = make_tag<MsgKind::ColocatedDev>(payload);
+    //fprintf(stderr, "ColoDevSend::start_prepare: dev tag=%d\n", devTag);
+    assert(devTag < tagUb_);
     MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_,
-              make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD,
+              devTag, MPI_COMM_WORLD,
               &idReq_);
 
     // compute the required buffer size
