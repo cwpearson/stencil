@@ -35,6 +35,31 @@ public:
   virtual ~Unpacker() {}
 };
 
+inline int nextPowerOfTwo(int x) {
+  x--;
+  x |= x >> 1;
+  x |= x >> 2;
+  x |= x >> 4;
+  x |= x >> 8;
+  x |= x >> 16;
+  x++;
+  return x;
+}
+
+inline Dim3 make_block_dim(const Dim3 extent, int threads) {
+  Dim3 ret;
+  ret.x = min(threads, nextPowerOfTwo(extent.x));
+  threads /= ret.x;
+  ret.y = min(threads, nextPowerOfTwo(extent.y));
+  threads /= ret.y;
+  ret.z = min(threads, nextPowerOfTwo(extent.z));
+  assert(ret.x <= 1024);
+  assert(ret.y <= 1024);
+  assert(ret.z <= 1024);
+  assert(ret.x * ret.y * ret.z <= 1024);
+  return ret;
+}
+
 static __device__ void
 dev_packer_grid_pack(void *__restrict__ dst, const void *__restrict__ src,
                      const Dim3 srcSize, const Dim3 srcPos,
@@ -53,15 +78,11 @@ dev_packer_grid_pack(void *__restrict__ dst, const void *__restrict__ src,
         size_t xi = xo + srcPos.x;
         size_t oi = zo * srcExtent.y * srcExtent.x + yo * srcExtent.x + xo;
         size_t ii = zi * srcSize.y * srcSize.x + yi * srcSize.x + xi;
-        // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
-        // xo,
-        //       yo, zo, oi);
 
         if (4 == elemSize) {
           uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
           const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
           pDst[oi] = pSrc[ii];
-
         } else if (8 == elemSize) {
           uint64_t *pDst = reinterpret_cast<uint64_t *>(dst);
           const uint64_t *pSrc = reinterpret_cast<const uint64_t *>(src);
@@ -110,6 +131,7 @@ private:
   Dim3 *devPositions_;
   Dim3 *devExtents_;
   size_t *devOffsets_;
+  Dim3 shape_;
 
   void *devBuf_;
 
@@ -130,9 +152,14 @@ public:
     std::vector<Dim3> extents;
     std::vector<size_t> offsets;
     size_ = 0;
+    shape_ = Dim3(0,0,0);
     for (const auto &msg : dirs_) {
       positions.push_back(domain_->halo_pos(msg.dir_, true /*halo*/));
-      extents.push_back(domain_->halo_extent(msg.dir_));
+      Dim3 haloExt = domain_->halo_extent(msg.dir_);
+      shape_.x = std::max(shape_.x, haloExt.x);
+      shape_.y = std::max(shape_.y, haloExt.y);
+      shape_.z = std::max(shape_.z, haloExt.z);
+      extents.push_back(haloExt);
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         size_t numBytes = domain_->halo_bytes(msg.dir_, i);
         offsets.push_back(numBytes);
@@ -141,6 +168,7 @@ public:
     }
     assert(positions.size() == extents.size());
     assert(offsets.size() == positions.size() * domain_->num_data());
+    std::cerr << "shape_ " << shape_ << "\n";
 
     // copy halo info to the GPU
     size_t posBytes = positions.size() * sizeof(positions[0]);
@@ -162,9 +190,8 @@ public:
 
   virtual void pack(cudaStream_t stream) override {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-
-    dim3 dimBlock(16, 8, 4);
-    dim3 dimGrid(10, 10, 10);
+    const dim3 dimBlock = make_block_dim(shape_, 512);
+    const dim3 dimGrid = (shape_ + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
     dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream>>>(
         devBuf_, domain_->dev_curr_datas(), domain_->dev_elem_sizes(),
         domain_->num_data(), domain_->raw_size(), devPositions_, devExtents_,
@@ -249,6 +276,7 @@ private:
   Dim3 *devPositions_;
   Dim3 *devExtents_;
   size_t *devOffsets_;
+  Dim3 shape_;
 
   void *devBuf_;
 
@@ -269,9 +297,14 @@ public:
     std::vector<Dim3> extents;
     std::vector<size_t> offsets;
     size_ = 0;
+    shape_ = Dim3(0,0,0);
     for (const auto &msg : dirs_) {
       positions.push_back(domain_->halo_pos(msg.dir_, false /*interior*/));
-      extents.push_back(domain_->halo_extent(msg.dir_));
+      const Dim3 haloExtent = domain_->halo_extent(msg.dir_);
+      shape_.x = max(shape_.x, haloExtent.x);
+      shape_.y = max(shape_.y, haloExtent.y);
+      shape_.z = max(shape_.z, haloExtent.z);
+      extents.push_back(haloExtent);
       for (size_t i = 0; i < domain_->num_data(); ++i) {
         size_t numBytes = domain_->halo_bytes(msg.dir_, i);
         offsets.push_back(numBytes);
@@ -302,8 +335,8 @@ public:
   virtual void unpack(cudaStream_t stream) override {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    dim3 dimBlock(16, 8, 4);
-    dim3 dimGrid(10, 10, 10);
+    const dim3 dimBlock = make_block_dim(shape_, 512);
+    const dim3 dimGrid = (shape_ + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
     dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream>>>(
         domain_->dev_curr_datas(), devBuf_, domain_->dev_elem_sizes(),
         domain_->num_data(), domain_->raw_size(), devPositions_, devExtents_,

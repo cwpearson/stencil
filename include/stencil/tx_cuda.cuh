@@ -37,31 +37,6 @@ inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::endl;
 }
 
-static int nextPowerOfTwo(int x) {
-  x--;
-  x |= x >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  x++;
-  return x;
-}
-
-static Dim3 make_block_dim(const Dim3 extent, int threads) {
-  Dim3 ret;
-  ret.x = min(threads, nextPowerOfTwo(extent.x));
-  threads /= ret.x;
-  ret.y = min(threads, nextPowerOfTwo(extent.y));
-  threads /= ret.y;
-  ret.z = min(threads, nextPowerOfTwo(extent.z));
-  assert(ret.x <= 1024);
-  assert(ret.y <= 1024);
-  assert(ret.z <= 1024);
-  assert(ret.x * ret.y * ret.z <= 1024);
-  return ret;
-}
-
 /* Send messages to local domains with a kernel
  */
 class PeerAccessSender {
