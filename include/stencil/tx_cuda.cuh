@@ -539,30 +539,27 @@ private:
   int dstRank_;
   int dstGPU_;
 
-  const LocalDomain *domain_;
+  LocalDomain *domain_;
 
-  char *devBuf_;
+  DevicePacker packer_;
   char *hostBuf_;
   size_t bufSize_;
 
   RcStream stream_;
   MPI_Request req_;
 
-  std::vector<Message> outbox_;
-
   enum class State { None, D2H, Wait };
   State state_;
 
 public:
-  RemoteSender() : devBuf_(nullptr) {}
+  RemoteSender() : hostBuf_(nullptr) {}
   RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
-               const LocalDomain &domain)
+               LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
+        domain_(&domain), hostBuf_(nullptr),
         stream_(domain.gpu()), state_(State::None) {}
 
   ~RemoteSender() {
-    CUDA_RUNTIME(cudaFree(devBuf_));
     CUDA_RUNTIME(cudaFreeHost(hostBuf_));
   }
 
@@ -570,32 +567,18 @@ public:
    * outbox
    */
   virtual void prepare(std::vector<Message> &outbox) override {
-    outbox_ = outbox;
+    packer_.prepare(domain_, outbox);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
 #ifdef REMOTE_LOUD
     std::cerr << "RemoteSender::prepare(): " << outbox_.size() << " messages\n";
 #endif
 
-    // sort messages by direction vector
-    std::sort(outbox_.begin(), outbox_.end());
-
-    // compute total size
-    bufSize_ = 0;
-    for (auto &msg : outbox_) {
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        bufSize_ += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
-    assert(bufSize_);
-
 // allocate device & host buffers
 #ifdef REMOTE_LOUD
     std::cerr << "RemoteSender::prepare: alloc " << bufSize_ << "\n";
 #endif
-    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
-    assert(devBuf_);
-    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
+    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, packer_.size(), cudaHostAllocDefault));
     assert(hostBuf_);
 
     // fprintf(stderr, "RemoteSender::prepare r%dg%d -> r%dg%d %luB\n",
@@ -641,26 +624,11 @@ public:
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
-    size_t bufOffset = 0;
-    for (auto &msg : outbox_) {
-      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
-      const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
-      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      assert(stream_.device() == domain_->gpu());
-      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        const void *src = domain_->curr_data(i);
-        const size_t elemSz = domain_->elem_size(i);
-        pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
-                                                0, pos, extent, elemSz);
-        bufOffset += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
+    packer_.pack(stream_);
 
     // copy to host buffer
     assert(hostBuf_);
-    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, devBuf_, bufSize_, cudaMemcpyDefault,
+    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, packer_.data(), packer_.size(), cudaMemcpyDefault,
                                  stream_));
     nvtxRangePop(); // RemoteSender::send_d2h
   }
@@ -699,9 +667,9 @@ private:
   int dstRank_;
   int dstGPU_;
 
-  const LocalDomain *domain_;
+  LocalDomain *domain_;
 
-  char *devBuf_;
+  DeviceUnpacker unpacker_;
   char *hostBuf_;
   size_t bufSize_;
 
@@ -709,23 +677,20 @@ private:
 
   MPI_Request req_;
 
-  std::vector<Message> inbox_;
-
   enum class State { None, H2H, H2D };
   State state_;
 
 public:
-  RemoteRecver() : devBuf_(nullptr) {}
+  RemoteRecver() : hostBuf_(nullptr) {}
   RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
-               const LocalDomain &domain)
+               LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), devBuf_(nullptr), hostBuf_(nullptr),
+        domain_(&domain), hostBuf_(nullptr),
         stream_(domain.gpu()), state_(State::None) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
   ~RemoteRecver() {
-    CUDA_RUNTIME(cudaFree(devBuf_));
     CUDA_RUNTIME(cudaFreeHost(hostBuf_));
   }
 
@@ -733,23 +698,11 @@ public:
    * outbox
    */
   virtual void prepare(std::vector<Message> &inbox) override {
-    inbox_ = inbox;
+    unpacker_.prepare(domain_, inbox);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    // sort messages by direction vector
-    std::sort(inbox_.begin(), inbox_.end());
-
-    // compute total size
-    bufSize_ = 0;
-    for (auto &msg : inbox) {
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        bufSize_ += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
-
     // allocate device & host buffers
-    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
-    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, bufSize_, cudaHostAllocDefault));
+    CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, unpacker_.size(), cudaHostAllocDefault));
     assert(hostBuf_);
     // fprintf(stderr, "RemoteRecver::prepare r%dg%d -> r%dg%d %luB\n",
     // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
@@ -782,32 +735,14 @@ public:
   }
 
   void recv_h2d() {
-    state_ = State::H2D;
     nvtxRangePush("RemoteRecver::recv_h2d");
+    state_ = State::H2D;
 
     // copy to device buffer
-    CUDA_RUNTIME(cudaMemcpyAsync(devBuf_, hostBuf_, bufSize_, cudaMemcpyDefault,
+    CUDA_RUNTIME(cudaMemcpyAsync(unpacker_.data(), hostBuf_, unpacker_.size(), cudaMemcpyDefault,
                                  stream_));
 
-    const Dim3 rawSz = domain_->raw_size();
-
-    // pack data into device buffer
-    size_t bufOffset = 0;
-    for (auto &msg : inbox_) {
-      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
-      const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 512 /* threads per block */);
-      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-      assert(stream_.device() == domain_->gpu());
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        void *dst = domain_->curr_data(i);
-        const size_t elemSz = domain_->elem_size(i);
-        unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
-                                                  &devBuf_[bufOffset], elemSz);
-        bufOffset += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
+    unpacker_.unpack(stream_);
     nvtxRangePop(); // RemoteRecver::recv_h2d
   }
 
