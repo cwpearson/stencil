@@ -535,7 +535,7 @@ public:
     for (auto &r : commCost) {
       r = std::vector<double>(numDomains, 0);
     }
-
+    const Dim3 domDim = gpuDim_ * rankDim_;
     for (size_t i = 0; i < nodeRanks.size(); ++i) {
       for (size_t j = 0; j < rankGpus.size(); ++j) {
         Dim3 srcRankIdx = dimensionize(nodeRanks[i], rankDim_);
@@ -548,7 +548,15 @@ public:
             Dim3 dstGpuIdx = dimensionize(m, gpuDim_);
             Dim3 dstDomIdx = dstRankIdx * gpuDim_ + dstGpuIdx;
 
-            const Dim3 dir = dstDomIdx - srcDomIdx;
+            Dim3 dir = dstDomIdx - srcDomIdx;
+            // periodic boundary
+            if (dir.x == domDim.x - 1) dir.x = -1;
+	    if (dir.y == domDim.y - 1) dir.y = -1;
+            if (dir.z == domDim.z - 1) dir.z = -1;
+            if (dir.x == 1 - domDim.x) dir.x = 1;
+	    if (dir.y == 1 - domDim.y) dir.y = 1;
+            if (dir.z == 1 - domDim.z) dir.z = 1;
+            std::cerr << dir << "=" << srcDomIdx << "->" << dstDomIdx << "\n";
             if (Dim3(0, 0, 0) == dir || dir.any_gt(1) || dir.any_lt(-1)) {
               continue;
             } else {
