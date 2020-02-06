@@ -356,70 +356,75 @@ public:
             const int dstGPU = nap_->get_gpu(dstIdx);
             const int dstDev = nap_->get_cuda(dstIdx);
             Message sMsg(dir, di, dstGPU);
-            if (rank_ == dstRank) {
-              const int myDev = domains_[di].gpu();
-              const int dstDev = domains_[dstGPU].gpu();
-              if ((myDev == dstDev) && any_methods(MethodFlags::CudaKernel)) {
+
+            if (any_methods(MethodFlags::CudaKernel)) {
+              if (dstRank == rank_ && myDev == dstDev) {
                 peerAccessOutbox.push_back(sMsg);
-              } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
-                peerCopyOutboxes[di][dstGPU].push_back(sMsg);
-              } else if (any_methods(MethodFlags::CudaMpi |
-                                     MethodFlags::CudaAwareMpi)) {
-                assert(di < remoteOutboxes.size());
-                remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
-                remoteOutboxes[di][dstIdx].push_back(sMsg);
-              } else {
-                std::cerr << "No method available to send required message\n";
-                exit(EXIT_FAILURE);
+                goto send_planned;
               }
-            } else if (any_methods(MethodFlags::CudaMpiColocated) &&
-                       mpiTopology_.colocated(dstRank) &&
-                       gpuTopology_.peer(myDev, dstDev)) {
-              assert(di < coloOutboxes.size());
-              coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
-              coloOutboxes[di][dstIdx].push_back(sMsg);
-            } else if (any_methods(MethodFlags::CudaMpi |
-                                   MethodFlags::CudaAwareMpi)) {
+            }
+            if (any_methods(MethodFlags::CudaMemcpyPeer)) {
+              if (dstRank == rank_ && gpuTopology_.peer(myDev, dstDev)) {
+                peerCopyOutboxes[di][dstGPU].push_back(sMsg);
+                goto send_planned;
+              }
+            }
+            if (any_methods(MethodFlags::CudaMpiColocated)) {
+              if (mpiTopology_.colocated(dstRank) &&
+                  gpuTopology_.peer(myDev, dstDev)) {
+                assert(di < coloOutboxes.size());
+                coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
+                coloOutboxes[di][dstIdx].push_back(sMsg);
+                goto send_planned;
+              }
+            }
+            if (any_methods(MethodFlags::CudaMpi | MethodFlags::CudaAwareMpi)) {
+              assert(di < remoteOutboxes.size());
               remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
               remoteOutboxes[di][dstIdx].push_back(sMsg);
-            } else {
-              std::cerr << "No method available to send required message\n";
-              exit(EXIT_FAILURE);
+              goto send_planned;
             }
+            std::cerr << "No method available to send required message\n";
+            exit(EXIT_FAILURE);
+          send_planned: // successfully found a way to send
 
             const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
             const int srcRank = nap_->get_rank(srcIdx);
             const int srcGPU = nap_->get_gpu(srcIdx);
             const int srcDev = nap_->get_cuda(srcIdx);
             Message rMsg(dir, srcGPU, di);
-            if (rank_ == srcRank) {
-              const int myDev = domains_[di].gpu();
-              const int srcDev = domains_[srcGPU].gpu();
-              if ((myDev == srcDev) && any_methods(MethodFlags::CudaKernel)) {
-                // no recver needed for same GPU
-              } else if (any_methods(MethodFlags::CudaMemcpyPeer)) {
-                // no recver needed for same rank
-              } else if (any_methods(MethodFlags::CudaMpi |
-                                     MethodFlags::CudaAwareMpi)) {
-                remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
-                remoteInboxes[di][srcIdx].push_back(rMsg);
-              } else {
-                std::cerr << "No method available to recv required message\n";
-                exit(EXIT_FAILURE);
+
+            if (any_methods(MethodFlags::CudaKernel)) {
+              if (dstRank == rank_ && srcDev == myDev) {
+                // no recver needed
+                goto recv_planned;
               }
-            } else if (any_methods(MethodFlags::CudaMpiColocated) &&
-                       mpiTopology_.colocated(srcRank) &&
-                       gpuTopology_.peer(srcDev, myDev)) {
-              coloInboxes[di].emplace(srcIdx, std::vector<Message>());
-              coloInboxes[di][srcIdx].push_back(rMsg);
-            } else if (any_methods(MethodFlags::CudaMpi |
-                                   MethodFlags::CudaAwareMpi)) {
-              remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
-              remoteInboxes[di][srcIdx].push_back(rMsg);
-            } else {
-              std::cerr << "No method available to recv required message\n";
-              exit(EXIT_FAILURE);
             }
+            if (any_methods(MethodFlags::CudaMemcpyPeer)) {
+              if (dstRank == rank_ && gpuTopology_.peer(srcDev, myDev)) {
+                // no recver needed
+                goto recv_planned;
+              }
+            }
+            if (any_methods(MethodFlags::CudaMpiColocated)) {
+              if (mpiTopology_.colocated(srcRank) &&
+                  gpuTopology_.peer(srcDev, myDev)) {
+                assert(di < coloInboxes.size());
+                coloInboxes[di].emplace(srcIdx, std::vector<Message>());
+                coloInboxes[di][srcIdx].push_back(sMsg);
+                goto recv_planned;
+              }
+            }
+            if (any_methods(MethodFlags::CudaMpi | MethodFlags::CudaAwareMpi)) {
+              assert(di < remoteInboxes.size());
+              remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
+              remoteInboxes[di][srcIdx].push_back(sMsg);
+              goto recv_planned;
+            }
+            std::cerr << "No method available to recv required message\n";
+            exit(EXIT_FAILURE);
+          recv_planned: // found a way to recv
+            (void)0;
           }
         }
       }
