@@ -370,7 +370,7 @@ public:
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
-              if (mpiTopology_.colocated(dstRank) &&
+              if (dstRank != rank_ && mpiTopology_.colocated(dstRank) &&
                   gpuTopology_.peer(myDev, dstDev)) {
                 assert(di < coloOutboxes.size());
                 coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
@@ -395,19 +395,19 @@ public:
             Message rMsg(dir, srcGPU, di);
 
             if (any_methods(MethodFlags::CudaKernel)) {
-              if (dstRank == rank_ && srcDev == myDev) {
+              if (srcRank == rank_ && srcDev == myDev) {
                 // no recver needed
                 goto recv_planned;
               }
             }
             if (any_methods(MethodFlags::CudaMemcpyPeer)) {
-              if (dstRank == rank_ && gpuTopology_.peer(srcDev, myDev)) {
+              if (srcRank == rank_ && gpuTopology_.peer(srcDev, myDev)) {
                 // no recver needed
                 goto recv_planned;
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
-              if (mpiTopology_.colocated(srcRank) &&
+              if (srcRank != rank_ && mpiTopology_.colocated(srcRank) &&
                   gpuTopology_.peer(srcDev, myDev)) {
                 assert(di < coloInboxes.size());
                 coloInboxes[di].emplace(srcIdx, std::vector<Message>());
@@ -621,15 +621,17 @@ public:
     assert(coloSenders_.size() == coloRecvers_.size());
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
+        const Dim3 srcIdx = nap_->dom_idx(rank_, di);
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
-        std::cerr << "start_prepare for colo to " << dstIdx << "\n";
+        std::cerr << "rank=" << rank_ << " colo sender.start_prepare " << srcIdx << "->" << dstIdx << "\n";
         sender.start_prepare(coloOutboxes[di][dstIdx]);
       }
       for (auto &kv : coloRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
+        const Dim3 dstIdx = nap_->dom_idx(rank_, di);
         auto &recver = kv.second;
-        std::cerr << "start_prepare for colo from " << srcIdx << "\n";
+        std::cerr << "rank=" << rank_ << " colo recver.start_prepare " << srcIdx << "->" << dstIdx << "\n";
         recver.start_prepare(coloInboxes[di][srcIdx]);
       }
     }
@@ -639,15 +641,14 @@ public:
         auto &sender = kv.second;
         const int srcDev = domains_[di].gpu();
         const int dstDev = nap_->get_cuda(dstIdx);
-        std::cerr << srcDev << " " << dstDev << "\n";
-        std::cerr << "rank=" << rank_ << " finish_prepare for colo to "
+        std::cerr << "rank=" << rank_ << " colo sender.finish_prepare for colo to "
                   << dstIdx << "\n";
         sender.finish_prepare();
       }
       for (auto &kv : coloRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
         auto &recver = kv.second;
-        std::cerr << "rank=" << rank_ << " finish_prepare for colo from "
+        std::cerr << "rank=" << rank_ << " colo recver.finish_prepare for colo from "
                   << srcIdx << "\n";
         recver.finish_prepare();
       }
