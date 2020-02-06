@@ -777,10 +777,9 @@ private:
   int dstRank_;
   int dstGPU_;
 
-  const LocalDomain *domain_;
+  LocalDomain *domain_;
 
-  char *devBuf_;
-  size_t bufSize_;
+  DevicePacker packer_;
 
   RcStream stream_;
   MPI_Request req_;
@@ -795,33 +794,15 @@ private:
   std::vector<Message> outbox_;
 
 public:
-  CudaAwareMpiSender() : devBuf_(nullptr) {}
+  CudaAwareMpiSender() {}
   CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                     const LocalDomain &domain)
+                     LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()),
+        domain_(&domain), stream_(domain.gpu()),
         state_(State::None) {}
 
-  ~CudaAwareMpiSender() { CUDA_RUNTIME(cudaFree(devBuf_)); }
-
   virtual void prepare(std::vector<Message> &outbox) override {
-    outbox_ = outbox;
-
-    // sort messages by direction vector
-    std::sort(outbox_.begin(), outbox_.end());
-
-    // compute total size
-    bufSize_ = 0;
-    for (auto &msg : outbox_) {
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        bufSize_ += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
-    assert(bufSize_);
-
-    // allocate device & host buffers
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
+    packer_.prepare(domain_, outbox);
   }
 
   virtual void send() override { send_pack(); }
@@ -848,30 +829,10 @@ public:
   }
 
   void send_pack() {
-    assert(devBuf_);
     nvtxRangePush("CudaAwareMpiSender::send_pack");
     state_ = State::Pack;
-
-    const Dim3 rawSz = domain_->raw_size();
-
-    // pack data into device buffer
-    size_t bufOffset = 0;
-    for (auto &msg : outbox_) {
-      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*compute region*/);
-      const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
-      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      assert(stream_.device() == domain_->gpu());
-      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        const void *src = domain_->curr_data(i);
-        const size_t elemSz = domain_->elem_size(i);
-        pack<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[bufOffset], src, rawSz,
-                                                0, pos, extent, elemSz);
-        bufOffset += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
-
+    assert(packer_.data());
+    packer_.pack(stream_);
     nvtxRangePop(); // CudaAwareMpiSender::send_pack
   }
 
@@ -892,8 +853,8 @@ public:
   void send_d2d() {
     nvtxRangePush("CudaAwareMpiSender::send_d2d");
     state_ = State::Send;
-    assert(devBuf_);
-    MPI_Isend(devBuf_, bufSize_, MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
+    assert(packer_.data());
+    MPI_Isend(packer_.data(), packer_.size(), MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // CudaAwareMpiSender::send_d2d
   }
@@ -906,13 +867,10 @@ private:
   int dstRank_;
   int dstGPU_;
 
-  const LocalDomain *domain_;
+  LocalDomain *domain_;
 
-  char *devBuf_;
-  size_t bufSize_;
-
+  DeviceUnpacker unpacker_;
   RcStream stream_;
-
   MPI_Request req_;
 
   std::vector<Message> inbox_;
@@ -925,36 +883,18 @@ private:
   State state_; // flattening
 
 public:
-  CudaAwareMpiRecver() : devBuf_(nullptr) {}
+  CudaAwareMpiRecver() {}
   CudaAwareMpiRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                     const LocalDomain &domain)
+                     LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), devBuf_(nullptr), stream_(domain.gpu()),
+        domain_(&domain), stream_(domain.gpu()),
         state_(State::None) {}
-
-  ~CudaAwareMpiRecver() { CUDA_RUNTIME(cudaFree(devBuf_)); }
 
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
    */
   void prepare(std::vector<Message> &inbox) {
-    inbox_ = inbox;
-    // sort messages by direction vector
-    std::sort(inbox_.begin(), inbox_.end());
-
-    // compute total size
-    bufSize_ = 0;
-    for (auto &msg : inbox) {
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        bufSize_ += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
-
-    // allocate device & host buffers
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-    CUDA_RUNTIME(cudaMalloc(&devBuf_, bufSize_));
-    // fprintf(stderr, "CudaAwareMpiRecver::prepare r%dg%d -> r%dg%d %luB\n",
-    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+    unpacker_.prepare(domain_, inbox);
   }
 
   virtual void recv() override { recv_d2d(); }
@@ -983,26 +923,7 @@ public:
   void recv_unpack() {
     nvtxRangePush("CudaAwareMpiRecver::recv_unpack");
     state_ = State::Unpack;
-
-    const Dim3 rawSz = domain_->raw_size();
-
-    // pack data into device buffer
-    size_t bufOffset = 0;
-    for (auto &msg : inbox_) {
-      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*halo region*/);
-      const Dim3 extent = domain_->halo_extent(msg.dir_);
-      const dim3 dimBlock = make_block_dim(extent, 512 /* threads per block */);
-      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      CUDA_RUNTIME(cudaSetDevice(stream_.device()));
-      assert(stream_.device() == domain_->gpu());
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        void *dst = domain_->curr_data(i);
-        const size_t elemSz = domain_->elem_size(i);
-        unpack<<<dimGrid, dimBlock, 0, stream_>>>(dst, rawSz, 0, pos, extent,
-                                                  &devBuf_[bufOffset], elemSz);
-        bufOffset += domain_->halo_bytes(msg.dir_, i);
-      }
-    }
+    unpacker_.unpack(stream_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_unpack
   }
 
@@ -1022,7 +943,7 @@ public:
     nvtxRangePush("CudaAwareMpiRecver::recv_d2d");
     state_ = State::Recv;
     assert(devBuf_);
-    MPI_Irecv(devBuf_, bufSize_, MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
+    MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
   }
