@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH --job-name="weak_4_1_2"
-#SBATCH --output="weak_4_1_2.%j.%N.out"
-#SBATCH --error="weak_4_1_2.%j.%N.err"
+#SBATCH --job-name="weak_mp_2_1_2"
+#SBATCH --output="weak_mp_2_1_2.%j.%N.out"
+#SBATCH --error="weak_mp_2_1_2.%j.%N.err"
 #SBATCH --partition=gpu
-#SBATCH --time=00:05:00
-#SBATCH --nodes=4
-#SBATCH --ntasks-per-node=1
+#SBATCH --time=00:10:00
+#SBATCH --nodes=2
+#SBATCH --ntasks-per-node=2
 #SBATCH --sockets-per-node=1
 #SBATCH --cores-per-socket=20
 #SBATCH --threads-per-core=4
@@ -18,5 +18,4 @@ module load cuda
 module load openmpi/4.0.0-gcc-4.8.5
 
 cd /home/cpearson/repos/stencil/build
-git rev-parse HEAD
 mpirun ./src/weak
