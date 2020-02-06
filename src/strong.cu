@@ -35,8 +35,8 @@ int main(int argc, char **argv) {
     z = val;
   } else if (4 == argc) {
     x = std::stoi(argv[1]);
-    y = std::stoi(argv[1]);
-    z = std::stoi(argv[1]);
+    y = std::stoi(argv[2]);
+    z = std::stoi(argv[3]);
   }
 
 
