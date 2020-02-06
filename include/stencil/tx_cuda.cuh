@@ -466,7 +466,6 @@ private:
 
   DevicePacker packer_;
   char *hostBuf_;
-  size_t bufSize_;
 
   RcStream stream_;
   MPI_Request req_;
@@ -488,16 +487,18 @@ public:
    * outbox
    */
   virtual void prepare(std::vector<Message> &outbox) override {
+#ifdef REMOTE_LOUD
+    std::cerr << "RemoteSender::prepare(): " << outbox.size() << " messages\n";
+#endif
     packer_.prepare(domain_, outbox);
+    assert(packer_.size());
+    assert(packer_.data());
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-#ifdef REMOTE_LOUD
-    std::cerr << "RemoteSender::prepare(): " << outbox_.size() << " messages\n";
-#endif
 
 // allocate device & host buffers
 #ifdef REMOTE_LOUD
-    std::cerr << "RemoteSender::prepare: alloc " << bufSize_ << "\n";
+    std::cerr << "RemoteSender::prepare: alloc " << packer_.size() << "\n";
 #endif
     CUDA_RUNTIME(
         cudaHostAlloc(&hostBuf_, packer_.size(), cudaHostAllocDefault));
@@ -574,7 +575,8 @@ public:
     state_ = State::Wait;
     nvtxRangePush("RemoteSender::send_h2h");
     assert(hostBuf_);
-    MPI_Isend(hostBuf_, bufSize_, MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
+    assert(packer_.size());
+    MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // RemoteSender::send_h2h
   }
@@ -593,7 +595,6 @@ private:
 
   DeviceUnpacker unpacker_;
   char *hostBuf_;
-  size_t bufSize_;
 
   RcStream stream_;
 
@@ -681,9 +682,11 @@ public:
   }
 
   void recv_h2h() {
-    state_ = State::H2H;
     nvtxRangePush("RemoteRecver::recv_h2h");
-    MPI_Irecv(hostBuf_, bufSize_, MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
+    state_ = State::H2H;
+    assert(hostBuf_);
+    assert(unpacker_.size());
+    MPI_Irecv(hostBuf_, unpacker_.size(), MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // RemoteRecver::recv_h2h
   }
