@@ -31,7 +31,13 @@ int main(int argc, char **argv) {
   MethodFlags methods = MethodFlags::All;
 
   if (0 == rank) {
-    std::cout << numSubdoms << " subdomains " << size << " ranks: " << x << "," << y << "," << z << "=" << x*y*z << "\n";
+#ifndef NDEBUG
+    std::cout << "WARN: not release mode\n";
+    std::cerr << "WARN: not release mode\n";
+#endif
+
+    std::cout << numSubdoms << " subdomains " << size << " ranks: " << x << ","
+              << y << "," << z << "=" << x * y * z << "\n";
     if ((methods & MethodFlags::CudaMpi) != MethodFlags::None) {
       std::cout << "CudaMpi enabled\n";
     }
@@ -71,7 +77,6 @@ int main(int argc, char **argv) {
       nvtxRangePush("exchange");
       dd.exchange();
       nvtxRangePop();
-
     }
   } // send domains out of scope before MPI_Finalize
 
