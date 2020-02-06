@@ -6,5 +6,7 @@ target_include_directories(astaroth-sim SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR
 target_link_libraries(astaroth-sim stencil::stencil)
 
 add_executable(weak weak.cu)
-target_include_directories(weak SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
 target_link_libraries(weak stencil::stencil)
+
+add_executable(strong strong.cu)
+target_link_libraries(strong stencil::stencil)

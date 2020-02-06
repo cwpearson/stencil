@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name="stencil_2_8"
-#SBATCH --output="stencil_2_8.%j.%N.out"
-#SBATCH --error="stencil_2_8.%j.%N.err"
+#SBATCH --job-name="weak_4_2_2"
+#SBATCH --output="weak_4_2_2.%j.%N.out"
+#SBATCH --error="weak_4_2_2.%j.%N.err"
 #SBATCH --partition=gpu
 #SBATCH --time=00:10:00
-#SBATCH --nodes=2
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --sockets-per-node=2
 #SBATCH --cores-per-socket=20
@@ -13,11 +13,10 @@
 #SBATCH --export=ALL
 #SBATCH --gres=gpu:v100:4
 
-set -x -e -o
-
 module purge
 module load cuda
 module load openmpi/4.0.0-gcc-4.8.5
 
 cd /home/cpearson/repos/stencil/build
+git rev-parse HEAD
 mpirun ./src/weak
