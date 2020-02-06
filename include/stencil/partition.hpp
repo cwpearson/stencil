@@ -664,18 +664,22 @@ public:
     std::vector<int> allCudaId(rankGpus.size() * mpiTopo.size());
 
     std::cerr << "found best placement\n";
+    std::cerr << "bestMap was ";
+    for (auto &e : bestMap) std::cerr << e << " ";
+    std::cerr << "\n";
     for (size_t i = 0; i < bestMap.size(); ++i) {
       const int id = bestMap[i]; // id of gpu in the node
-      const int rank = id / rankGpus.size();
+      const int coloRank = id / rankGpus.size();
+      const int rank = nodeRanks[coloRank];
       const int domId = id % rankGpus.size();
       const Dim3 gpuIdx = dimensionize(domId, gpuDim_);
-      const Dim3 rankIdx = dimensionize(rank, rankDim_);
+      const Dim3 rankIdx = dimensionize(rank, rankDim_); 
       const Dim3 domIdx = rankIdx * gpuDim_ + gpuIdx;
-      std::cerr << "id=" << id << "(cuda=" << nodeGpus[id]
-                << ") rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " colo-rank=" << rank
+      std::cerr << "rank=" << rank << " colo-rank=" << coloRank << " id=" << id << "(cuda=" << nodeGpus[id]
+                << ") rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " domIdx=" << domIdx
                 << " domId=" << domId << "\n";
       // keep track of my own domain id / domain index corredponence
-      if (rank == mpiTopo.colocated_rank()) {
+      if (coloRank == mpiTopo.colocated_rank()) {
         localDomIdx.push_back(domIdx);
         localDomId.push_back(domId);
       }
@@ -697,6 +701,18 @@ public:
     // all ranks provide the corresponding domain ID
     MPI_Allgather(localDomId.data(), localDomId.size(), MPI_INT, allDomId.data(), localDomId.size(), MPI_INT, mpiTopo.comm());
 
+
+    if (mpiTopo.rank() == 0) {
+      std::cerr << "allDomIdx:";
+      for (auto &e : allDomIdx) std::cerr << e << " ";
+      std::cerr << "\n";      
+      std::cerr << "allCudaId:";
+      for (auto &e : allCudaId) std::cerr << e << " ";
+      std::cerr << "\n";      
+      std::cerr << "allDomId:";
+      for (auto &e : allDomId) std::cerr << e << " ";
+      std::cerr << "\n";      
+   }
 
     // record info from all ranks
     for (size_t i = 0; i < allCudaId.size(); ++i) {
