@@ -37,12 +37,17 @@ TEMPLATE_TEST_CASE("cuda-aware-mpi", "[mpi][cuda][template]", int32_t, int64_t) 
   CUDA_RUNTIME(cudaMemset(buf1, 0x00, numBytes));
 
   MPI_Request sreq, rreq;
+  INFO("isend");
   MPI_Isend(buf0, numBytes, MPI_BYTE, dstRank, 0, MPI_COMM_WORLD, &sreq);
+  INFO("irecv");
   MPI_Irecv(buf1, numBytes, MPI_BYTE, srcRank, 0, MPI_COMM_WORLD, &rreq);
 
+  INFO("wait send");
   MPI_Wait(&sreq, MPI_STATUS_IGNORE);
+  INFO("wait recv");
   MPI_Wait(&rreq, MPI_STATUS_IGNORE);
 
+  INFO("compare");
   std::vector<char> host(numBytes);
   CUDA_RUNTIME(cudaMemcpy(host.data(), buf1, numBytes, cudaMemcpyDeviceToHost));
   REQUIRE(host[0] == char(0x1));
