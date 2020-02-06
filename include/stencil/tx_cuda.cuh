@@ -942,7 +942,7 @@ public:
   void recv_d2d() {
     nvtxRangePush("CudaAwareMpiRecver::recv_d2d");
     state_ = State::Recv;
-    assert(devBuf_);
+    assert(unpacker_.data());
     MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
