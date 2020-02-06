@@ -577,7 +577,7 @@ public:
     assert(packer_.size());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
-    const int tag = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, tag, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // RemoteSender::send_h2h
@@ -690,7 +690,7 @@ public:
     assert(unpacker_.size());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
-    const int tag = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     MPI_Irecv(hostBuf_, unpacker_.size(), MPI_BYTE, srcRank_, tag,
               MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // RemoteRecver::recv_h2h
