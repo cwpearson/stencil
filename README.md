@@ -117,6 +117,19 @@ ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ```
 srun --partition=gpu --time=4:00:00 --ntasks=2 --nodes=2 --ntasks-per-node=1 --sockets-per-node=1 --cores-per-socket=8 --threads-per-core=4 --mem-per-cpu=1200 --wait=0 --export=ALL --gres=gpu:v100:2 --pty /bin/bash
 ```
+
+SpectrumMPI with CUDA-Aware MPI
+
+```
+module load spectrum-mpi
+cmake .. -DUSE_CUDA_AWARE_MPI=ON
+make
+```
+
+Show reservations: `scontrol show res`
+
+Show queue: `swqueue`
+
 ## Design Goals
   * v1 (AsHES)
     * [x] joint stencils over multiple data types (Astaroth)
