@@ -270,6 +270,12 @@ double match(const Mat2D<double> &x, const Mat2D<double> &y) {
     double tmp = scc(x[ri], y[ri]);
     rowCorrs[ri] = tmp;
   }
+#if 0
+  std::cerr << "row corrs\n";
+  for (auto &e : rowCorrs) {
+    std::cerr << e << "\n";
+  }
+#endif
 
   // avg row correlations
   double acc = 0;
@@ -300,7 +306,7 @@ Mat2D<double> permute(const Mat2D<double> &m, std::vector<size_t> map) {
       size_t nc = map[c];
       assert(nr < result.size());
       assert(nc < result[nr].size());
-      result[nr][nc] = m[r][c];
+      result[r][c] = m[nr][nc];
     }
   }
 
@@ -604,7 +610,7 @@ public:
     }
 
     std::vector<size_t> bestMap = mapping;
-    double bestFit = 0;
+    double bestFit = -1;
     do {
 
       auto placedCommCost = permute(commCost, mapping);
@@ -628,7 +634,7 @@ public:
 #endif
       }
 
-      const double score = match(commCost, gpuBandwidth);
+      const double score = match(placedCommCost, gpuBandwidth);
 #if 0
       std::cerr << "score=" << score << "\n";
 #endif
