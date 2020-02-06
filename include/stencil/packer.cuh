@@ -168,7 +168,6 @@ public:
     }
     assert(positions.size() == extents.size());
     assert(offsets.size() == positions.size() * domain_->num_data());
-    std::cerr << "shape_ " << shape_ << "\n";
 
     // copy halo info to the GPU
     size_t posBytes = positions.size() * sizeof(positions[0]);
