@@ -162,8 +162,8 @@ public:
     // copy from src device to dst device
     const int dstDev = dstDomain_->gpu();
     const int srcDev = srcDomain_->gpu();
-    CUDA_RUNTIME(cudaMemcpyPeerAsync(unpacker_.data(), dstDev, packer_.data(), srcDev, packer_.size(),
-                                     srcStream_));
+    CUDA_RUNTIME(cudaMemcpyPeerAsync(unpacker_.data(), dstDev, packer_.data(),
+                                     srcDev, packer_.size(), srcStream_));
 
     // sync src and dst streams
     CUDA_RUNTIME(cudaEventRecord(event_, srcStream_));
@@ -495,7 +495,6 @@ public:
     assert(packer_.data());
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-
 // allocate device & host buffers
 #ifdef REMOTE_LOUD
     std::cerr << "RemoteSender::prepare: alloc " << packer_.size() << "\n";
@@ -576,7 +575,10 @@ public:
     nvtxRangePush("RemoteSender::send_h2h");
     assert(hostBuf_);
     assert(packer_.size());
-    MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, dstGPU_, MPI_COMM_WORLD,
+    assert(srcGPU_ < 8);
+    assert(dstGPU_ < 8);
+    const int tag = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+    MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, tag, MPI_COMM_WORLD,
               &req_);
     nvtxRangePop(); // RemoteSender::send_h2h
   }
@@ -686,8 +688,11 @@ public:
     state_ = State::H2H;
     assert(hostBuf_);
     assert(unpacker_.size());
-    MPI_Irecv(hostBuf_, unpacker_.size(), MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
-              &req_);
+    assert(srcGPU_ < 8);
+    assert(dstGPU_ < 8);
+    const int tag = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+    MPI_Irecv(hostBuf_, unpacker_.size(), MPI_BYTE, srcRank_, tag,
+              MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // RemoteRecver::recv_h2h
   }
 };
@@ -865,8 +870,8 @@ public:
     nvtxRangePush("CudaAwareMpiRecver::recv_d2d");
     state_ = State::Recv;
     assert(unpacker_.data());
-    MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, srcGPU_, MPI_COMM_WORLD,
-              &req_);
+    MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, srcGPU_,
+              MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
   }
 };
