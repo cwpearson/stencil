@@ -28,7 +28,17 @@ int main(int argc, char **argv) {
   size_t y = 512 * pow(numSubdoms, 0.33333) + 0.5;
   size_t z = 512 * pow(numSubdoms, 0.33333) + 0.5;
 
-  MethodFlags methods = MethodFlags::All;
+
+  MethodFlags methods = MethodFlags::CudaMpi;
+  #ifdef WEAK_METHOD_COLO
+  methods |= MethodFlags::CudaMpiColocated;
+  #endif
+  #ifdef WEAK_METHOD_PEER
+  methods |= MethodFlags::CudaMemcpyPeer;
+  #endif
+  #ifdef WEAK_METHOD_ALL
+  methods |= MethodFlags::All;
+  #endif
 
   if (0 == rank) {
 #ifndef NDEBUG
