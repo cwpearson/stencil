@@ -782,7 +782,10 @@ public:
     nvtxRangePush("CudaAwareMpiSender::send_d2d");
     state_ = State::Send;
     assert(packer_.data());
-    MPI_Isend(packer_.data(), packer_.size(), MPI_BYTE, dstRank_, dstGPU_,
+    assert(srcGPU_ < 8);
+    assert(dstGPU_ < 8);
+    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
+    MPI_Isend(packer_.data(), packer_.size(), MPI_BYTE, dstRank_, tag,
               MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiSender::send_d2d
   }
@@ -800,8 +803,6 @@ private:
   DeviceUnpacker unpacker_;
   RcStream stream_;
   MPI_Request req_;
-
-  std::vector<Message> inbox_;
 
   enum class State {
     None,
@@ -870,7 +871,10 @@ public:
     nvtxRangePush("CudaAwareMpiRecver::recv_d2d");
     state_ = State::Recv;
     assert(unpacker_.data());
-    MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, srcGPU_,
+    assert(srcGPU_ < 8);
+    assert(dstGPU_ < 8);
+    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
+    MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, tag,
               MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
   }
