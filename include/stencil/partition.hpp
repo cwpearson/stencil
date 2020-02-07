@@ -313,6 +313,8 @@ Mat2D<double> permute(const Mat2D<double> &m, std::vector<size_t> map) {
   return result;
 }
 
+enum class PlacementStrategy { NodeAware, Trivial };
+
 class NodeAwarePlacement {
 private:
   int gpus_;
@@ -321,6 +323,7 @@ private:
   Dim3 gpuDim_;
   Dim3 rankDim_;
   Dim3 domSize_;
+  PlacementStrategy strategy_;
 
   static size_t linearize(Dim3 idx, Dim3 dim) {
     assert(idx.x >= 0);
@@ -362,9 +365,9 @@ private:
   // convert domIdx to domId for all ranks
   std::map<Dim3, int> domId_;
   // convert rank and domain ID to domainIdx
-  // since each domain is already attached to a GPU, and the domIdx controls the communication requirements,
-  // there is no direct conversion between domainId and domIdx.
-  // domIdx_[rank][domId] = domIdx
+  // since each domain is already attached to a GPU, and the domIdx controls the
+  // communication requirements, there is no direct conversion between domainId
+  // and domIdx. domIdx_[rank][domId] = domIdx
   std::vector<std::vector<Dim3>> domIdx_;
 
 public:
@@ -400,13 +403,9 @@ public:
   /*! return the domain id for a domain, consistent with indices passed into
       the constructor
   */
-  int get_gpu(const Dim3 &domIdx) {
-    return domId_[domIdx];
-  }
+  int get_gpu(const Dim3 &domIdx) { return domId_[domIdx]; }
 
-  int get_cuda(const Dim3 &domIdx) {
-    return cudaId_[domIdx];
-  }
+  int get_cuda(const Dim3 &domIdx) { return cudaId_[domIdx]; }
 
   Dim3 domain_size(const Dim3 &domIdx) {
 
@@ -426,13 +425,15 @@ public:
     return ret;
   }
 
-  NodeAwarePlacement(const Dim3 &domSize,
-                     const int ranks, // how many ranks there are
-                     MpiTopology &mpiTopo, GpuTopology &gpuTopo, size_t radius,
-                     const std::vector<int>
-                         &rankGpus // which GPUs this rank wants to contribute
-                     )
-      : size_(domSize), ranks_(ranks), gpuDim_(1, 1, 1), rankDim_(1, 1, 1) {
+  NodeAwarePlacement(
+      const Dim3 &domSize,
+      const int ranks, // how many ranks there are
+      MpiTopology &mpiTopo, GpuTopology &gpuTopo, size_t radius,
+      const std::vector<int>
+          &rankGpus, // which GPUs this rank wants to contribute
+      const PlacementStrategy strategy = PlacementStrategy::NodeAware)
+      : size_(domSize), ranks_(ranks), gpuDim_(1, 1, 1), rankDim_(1, 1, 1),
+        strategy_(strategy) {
 
     // TODO: make sure everyone is contributing the same number of GPUs
     int rank;
@@ -550,12 +551,18 @@ public:
 
             Dim3 dir = dstDomIdx - srcDomIdx;
             // periodic boundary
-            if (dir.x != 0 && dir.x == domDim.x - 1) dir.x = -1;
-	    if (dir.y != 0 && dir.y == domDim.y - 1) dir.y = -1;
-            if (dir.z != 0 && dir.z == domDim.z - 1) dir.z = -1;
-            if (dir.x != 0 && dir.x == 1 - domDim.x) dir.x = 1;
-	    if (dir.y != 0 && dir.y == 1 - domDim.y) dir.y = 1;
-            if (dir.z != 0 && dir.z == 1 - domDim.z) dir.z = 1;
+            if (dir.x != 0 && dir.x == domDim.x - 1)
+              dir.x = -1;
+            if (dir.y != 0 && dir.y == domDim.y - 1)
+              dir.y = -1;
+            if (dir.z != 0 && dir.z == domDim.z - 1)
+              dir.z = -1;
+            if (dir.x != 0 && dir.x == 1 - domDim.x)
+              dir.x = 1;
+            if (dir.y != 0 && dir.y == 1 - domDim.y)
+              dir.y = 1;
+            if (dir.z != 0 && dir.z == 1 - domDim.z)
+              dir.z = 1;
             std::cerr << dir << "=" << srcDomIdx << "->" << dstDomIdx << "\n";
             if (Dim3(0, 0, 0) == dir || dir.any_gt(1) || dir.any_lt(-1)) {
               continue;
@@ -618,12 +625,13 @@ public:
     }
 
     std::vector<size_t> bestMap = mapping;
-    double bestFit = -1;
-    do {
+    if (PlacementStrategy::NodeAware == strategy_) {
+      double bestFit = -1;
+      do {
 
-      auto placedCommCost = permute(commCost, mapping);
+        auto placedCommCost = permute(commCost, mapping);
 
-      {
+        {
 #if 0
         std::cerr << "checking permutation";
         for (auto &e : mapping) {
@@ -640,15 +648,15 @@ public:
         std::cerr << "\n";
         std::cerr << ss.str();
 #endif
-      }
+        }
 
-      const double score = match(placedCommCost, gpuBandwidth);
+        const double score = match(placedCommCost, gpuBandwidth);
 #if 0
       std::cerr << "score=" << score << "\n";
 #endif
-      if (score > bestFit) {
-        bestFit = score;
-        bestMap = mapping;
+        if (score > bestFit) {
+          bestFit = score;
+          bestMap = mapping;
 #if 0
         {
           std::stringstream ss;
@@ -666,11 +674,12 @@ public:
           std::cerr << ss.str();
         }
 #endif
-      }
-    } while (std::next_permutation(mapping.begin(), mapping.end()));
+        }
+      } while (std::next_permutation(mapping.begin(), mapping.end()));
+    }
 
-
-    // gather up per-rank and global information about what cuda device is used for each domain
+    // gather up per-rank and global information about what cuda device is used
+    // for each domain
     std::vector<Dim3> localDomIdx;
     std::vector<Dim3> allDomIdx(rankGpus.size() * mpiTopo.size());
     std::vector<int> localDomId;
@@ -679,7 +688,8 @@ public:
 
     std::cerr << "found best placement\n";
     std::cerr << "bestMap was ";
-    for (auto &e : bestMap) std::cerr << e << " ";
+    for (auto &e : bestMap)
+      std::cerr << e << " ";
     std::cerr << "\n";
     for (size_t i = 0; i < bestMap.size(); ++i) {
       const int id = bestMap[i]; // id of gpu in the node
@@ -687,10 +697,11 @@ public:
       const int rank = nodeRanks[coloRank];
       const int domId = id % rankGpus.size();
       const Dim3 gpuIdx = dimensionize(domId, gpuDim_);
-      const Dim3 rankIdx = dimensionize(rank, rankDim_); 
+      const Dim3 rankIdx = dimensionize(rank, rankDim_);
       const Dim3 domIdx = rankIdx * gpuDim_ + gpuIdx;
-      std::cerr << "rank=" << rank << " colo-rank=" << coloRank << " id=" << id << "(cuda=" << nodeGpus[id]
-                << ") rankIdx=" << rankIdx << " gpuIdx=" << gpuIdx << " domIdx=" << domIdx
+      std::cerr << "rank=" << rank << " colo-rank=" << coloRank << " id=" << id
+                << "(cuda=" << nodeGpus[id] << ") rankIdx=" << rankIdx
+                << " gpuIdx=" << gpuIdx << " domIdx=" << domIdx
                 << " domId=" << domId << "\n";
       // keep track of my own domain id / domain index corredponence
       if (coloRank == mpiTopo.colocated_rank()) {
@@ -705,32 +716,38 @@ public:
 
     // all ranks provide their domain indices
     {
-    size_t numBytes = localDomIdx.size() * sizeof(localDomIdx[0]);
-    MPI_Allgather(localDomIdx.data(), numBytes, MPI_BYTE, allDomIdx.data(), numBytes, MPI_BYTE, mpiTopo.comm());
+      size_t numBytes = localDomIdx.size() * sizeof(localDomIdx[0]);
+      MPI_Allgather(localDomIdx.data(), numBytes, MPI_BYTE, allDomIdx.data(),
+                    numBytes, MPI_BYTE, mpiTopo.comm());
     }
 
     // all ranks provide the corresponding cuda device ID
-    MPI_Allgather(rankGpus.data(), rankGpus.size(), MPI_INT, allCudaId.data(), rankGpus.size(), MPI_INT, mpiTopo.comm());
+    MPI_Allgather(rankGpus.data(), rankGpus.size(), MPI_INT, allCudaId.data(),
+                  rankGpus.size(), MPI_INT, mpiTopo.comm());
 
     // all ranks provide the corresponding domain ID
-    MPI_Allgather(localDomId.data(), localDomId.size(), MPI_INT, allDomId.data(), localDomId.size(), MPI_INT, mpiTopo.comm());
-
+    MPI_Allgather(localDomId.data(), localDomId.size(), MPI_INT,
+                  allDomId.data(), localDomId.size(), MPI_INT, mpiTopo.comm());
 
     if (mpiTopo.rank() == 0) {
       std::cerr << "allDomIdx:";
-      for (auto &e : allDomIdx) std::cerr << e << " ";
-      std::cerr << "\n";      
+      for (auto &e : allDomIdx)
+        std::cerr << e << " ";
+      std::cerr << "\n";
       std::cerr << "allCudaId:";
-      for (auto &e : allCudaId) std::cerr << e << " ";
-      std::cerr << "\n";      
+      for (auto &e : allCudaId)
+        std::cerr << e << " ";
+      std::cerr << "\n";
       std::cerr << "allDomId:";
-      for (auto &e : allDomId) std::cerr << e << " ";
-      std::cerr << "\n";      
-   }
+      for (auto &e : allDomId)
+        std::cerr << e << " ";
+      std::cerr << "\n";
+    }
 
     // record info from all ranks
     for (size_t i = 0; i < allCudaId.size(); ++i) {
-      const int rank = i / rankGpus.size(); // TODO: assuming all ranks provide the same number of GPUs
+      const int rank = i / rankGpus.size(); // TODO: assuming all ranks provide
+                                            // the same number of GPUs
       const Dim3 domIdx = allDomIdx[i];
       const int cuda = allCudaId[i];
       const int domId = allDomId[i];
@@ -743,8 +760,6 @@ public:
       assert(domId < domIdx_[rank].size());
       domIdx_[rank][domId] = domIdx;
     }
-
-
   }
 
   // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/

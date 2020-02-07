@@ -19,6 +19,7 @@ int main(int argc, char **argv) {
   ("colocated", "Enable ColocatedHaloSender/Recver")
   ("peer", "Enable PeerAccessSender")
   ("kernel", "Enable PeerCopySender")
+  ("trivial", "Skip node-aware placement")
   ("f,file", "File name", cxxopts::value<std::string>());
   // clang-format on
 
@@ -46,7 +47,7 @@ int main(int argc, char **argv) {
   }
 
   if (0 == rank) {
-  std::cout << "assuming " << numSubdoms << " subdomains\n";
+    std::cout << "assuming " << numSubdoms << " subdomains\n";
   }
 
   double kernelMillis = 50;
@@ -98,6 +99,11 @@ int main(int argc, char **argv) {
     methods = MethodFlags::All;
   }
 
+  PlacementStrategy strategy = PlacementStrategy::NodeAware;
+  if (result["trivial"].as<bool>()) {
+    strategy = PlacementStrategy::Trivial;
+  }
+
   if (0 == rank) {
     std::cout << "domain: " << x << "," << y << "," << z << "\n";
   }
@@ -109,6 +115,7 @@ int main(int argc, char **argv) {
 
     dd.set_methods(methods);
     dd.set_radius(radius);
+    dd.set_placement(strategy);
 
     dd.add_data<float>();
     dd.add_data<float>();

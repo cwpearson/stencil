@@ -82,6 +82,7 @@ private:
   std::vector<size_t> dataElemSize_;
 
   MethodFlags flags_;
+  PlacementStrategy strategy_;
 
   // PeerCopySenders for same-rank exchanges
   std::vector<std::map<size_t, PeerCopySender>> peerCopySenders_;
@@ -233,6 +234,10 @@ public:
   */
   void set_methods(MethodFlags flags) noexcept { flags_ = flags; }
 
+  void set_placement(PlacementStrategy strategy) noexcept {
+    strategy_ = strategy;
+  }
+
   /*! return true if any provided methods are enabled
    */
   bool any_methods(MethodFlags methods) const noexcept {
@@ -251,8 +256,9 @@ public:
     double start = MPI_Wtime();
 #endif
     nvtxRangePush("node-aware placement");
-    NodeAwarePlacement *nap_ = new NodeAwarePlacement(
-        size_, worldSize_, mpiTopology_, gpuTopology_, radius_, gpus_);
+    NodeAwarePlacement *nap_ =
+        new NodeAwarePlacement(size_, worldSize_, mpiTopology_, gpuTopology_,
+                               radius_, gpus_, strategy_);
     nvtxRangePop();
 #if STENCIL_PRINT_TIMINGS == 1
     double maxElapsed = -1;
@@ -624,14 +630,16 @@ public:
         const Dim3 srcIdx = nap_->dom_idx(rank_, di);
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
-        std::cerr << "rank=" << rank_ << " colo sender.start_prepare " << srcIdx << "->" << dstIdx << "\n";
+        std::cerr << "rank=" << rank_ << " colo sender.start_prepare " << srcIdx
+                  << "->" << dstIdx << "\n";
         sender.start_prepare(coloOutboxes[di][dstIdx]);
       }
       for (auto &kv : coloRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
         const Dim3 dstIdx = nap_->dom_idx(rank_, di);
         auto &recver = kv.second;
-        std::cerr << "rank=" << rank_ << " colo recver.start_prepare " << srcIdx << "->" << dstIdx << "\n";
+        std::cerr << "rank=" << rank_ << " colo recver.start_prepare " << srcIdx
+                  << "->" << dstIdx << "\n";
         recver.start_prepare(coloInboxes[di][srcIdx]);
       }
     }
@@ -641,15 +649,17 @@ public:
         auto &sender = kv.second;
         const int srcDev = domains_[di].gpu();
         const int dstDev = nap_->get_cuda(dstIdx);
-        std::cerr << "rank=" << rank_ << " colo sender.finish_prepare for colo to "
-                  << dstIdx << "\n";
+        std::cerr << "rank=" << rank_
+                  << " colo sender.finish_prepare for colo to " << dstIdx
+                  << "\n";
         sender.finish_prepare();
       }
       for (auto &kv : coloRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
         auto &recver = kv.second;
-        std::cerr << "rank=" << rank_ << " colo recver.finish_prepare for colo from "
-                  << srcIdx << "\n";
+        std::cerr << "rank=" << rank_
+                  << " colo recver.finish_prepare for colo from " << srcIdx
+                  << "\n";
         recver.finish_prepare();
       }
     }
