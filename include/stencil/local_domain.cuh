@@ -1,7 +1,6 @@
 #pragma once
 
 #include <iostream>
-#include <mpi.h>
 
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
@@ -45,13 +44,13 @@ public:
 
   ~LocalDomain() {
 
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // int rank;
+    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    std::cerr << "rank=" << rank << " ~LocalDomain(): device=" << dev_ << "\n";
+    // std::cerr << "rank=" << rank << " ~LocalDomain(): device=" << dev_ << "\n";
     CUDA_RUNTIME(cudaSetDevice(dev_));
     for (auto p : currDataPtrs_) {
-      std::cerr << "rank=" << rank << " ~LocalDomain(): cudaFree " << uintptr_t(p) << "\n";
+      // std::cerr << "rank=" << rank << " ~LocalDomain(): cudaFree " << uintptr_t(p) << "\n";
       CUDA_RUNTIME(cudaFree(p));
     }
     CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));

@@ -127,6 +127,22 @@ public:
     CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
     std::cerr << "[" << rank_ << "] cudaGetDeviceCount= " << deviceCount << "\n";
 
+  /*
+cudaComputeModeDefault = 0
+    Default compute mode (Multiple threads can use cudaSetDevice() with this device) 
+cudaComputeModeExclusive = 1
+    Compute-exclusive-thread mode (Only one thread in one process will be able to use cudaSetDevice() with this device) 
+cudaComputeModeProhibited = 2
+    Compute-prohibited mode (No threads can use cudaSetDevice() with this device) 
+cudaComputeModeExclusiveProcess = 3
+    Compute-exclusive-process mode (Many threads in one process will be able to use cudaSetDevice() with this device) 
+  */
+    cudaDeviceProp prop;
+    for (int i = 0; i < deviceCount; ++i) {
+      CUDA_RUNTIME(cudaGetDeviceProperties(&prop, i));
+      std::cerr << "[" << rank_ << "] cudaDeviceProp.computeMode=" << prop.computeMode << "\n";
+    }
+
     // Determine GPUs this DistributedDomain is reposible for
     if (gpus_.empty()) {
       // if fewer colocated ranks than GPUs, round-robin GPUs to ranks
