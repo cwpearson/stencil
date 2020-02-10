@@ -123,10 +123,12 @@ public:
     std::cerr << "[" << rank_ << "] colocated with "
               << mpiTopology_.colocated_size() << " ranks\n";
 
+    int deviceCount;
+    CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
+    std::cerr << "[" << rank_ << "] cudaGetDeviceCount= " << deviceCount << "\n";
+
     // Determine GPUs this DistributedDomain is reposible for
     if (gpus_.empty()) {
-      int deviceCount;
-      CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
       // if fewer colocated ranks than GPUs, round-robin GPUs to ranks
       if (mpiTopology_.colocated_size() <= deviceCount) {
         for (int id = 0; id < deviceCount; ++id) {
