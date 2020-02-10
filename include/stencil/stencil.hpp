@@ -290,18 +290,18 @@ public:
       // placement algorithm should agree with me what my GPU is
       assert(placement->get_cuda(idx) == gpus_[domId]);
 
-      int cudaId = placement->get_cuda(idx);
+      const int cudaId = placement->get_cuda(idx);
+
+      fprintf(stderr, "rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
+              domId, cudaId, idx.x, idx.y, idx.z);
 
       LocalDomain sd(sdSize, cudaId);
-      sd.radius_ = radius_;
+      sd.set_radius(radius_);
       for (size_t dataIdx = 0; dataIdx < dataElemSize_.size(); ++dataIdx) {
         sd.add_data(dataElemSize_[dataIdx]);
       }
 
       domains_.push_back(sd);
-
-      fprintf(stderr, "rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
-              domId, cudaId, idx.x, idx.y, idx.z);
     }
     // realize local domains
     for (auto &d : domains_) {
