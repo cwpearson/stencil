@@ -16,167 +16,133 @@
 #include "local_domain.cuh"
 #include "mpi_topology.hpp"
 
-class Partition {
-public:
-  // get the MPI rank for a domain
-  virtual int get_rank(const Dim3 &idx) const = 0;
+namespace collective {}
 
-  // get the gpu for a domain
-  virtual int get_gpu(const Dim3 &idx) const = 0;
+class RankPartition {
 
-  // the index of a GPU in the GPU space
-  virtual Dim3 gpu_idx(int gpu) const = 0;
-
-  // the index of the rank in the rank space
-  virtual Dim3 rank_idx(int rank) const = 0;
-
-  // the domain for rank and gpu
-  // opposite of get_rank and get_gpu
-  Dim3 dom_idx(int rank, int gpu) const {
-    return rank_idx(rank) * gpu_dim() + gpu_idx(gpu);
-  }
-
-  // the extent of the gpu space
-  virtual Dim3 gpu_dim() const = 0;
-
-  // the extent of the rank space
-  virtual Dim3 rank_dim() const = 0;
-
-  // get the size of a domain
-  virtual Dim3 local_domain_size(const Dim3 &domIdx) const = 0;
-};
-
-/*! Prime-factor Placer
- */
-class PFP : public Partition {
 private:
-  int gpus_;
-  int ranks_;
-  Dim3 size_;
-  Dim3 gpuDim_;
-  Dim3 rankDim_;
-  Dim3 domSize_;
+  Dim3 dim_;  // the number of subdomains
+  Dim3 size_; // the size of each subdomain
+  Dim3 rem_;  // input size % dim_
+
+  /*! return the prime factors of n
+   */
+  static std::vector<int64_t> prime_factors(int64_t n) {
+    std::vector<int64_t> result;
+    if (0 == n) {
+      return result;
+    }
+    while (n % 2 == 0) {
+      result.push_back(2);
+      n = n / 2;
+    }
+    for (int i = 3; i <= sqrt(n); i = i + 2) {
+      while (n % i == 0) {
+        result.push_back(i);
+        n = n / i;
+      }
+    }
+    if (n > 2)
+      result.push_back(n);
+    std::sort(result.begin(), result.end(),
+              [](int64_t a, int64_t b) { return b < a; });
+    return result;
+  }
+
+  static int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
 
 public:
-  int get_rank(const Dim3 &idx) const override {
-    Dim3 rankIdx = idx / gpuDim_;
-    return rankIdx.x + rankIdx.y * rankDim_.x +
-           rankIdx.z * rankDim_.y * rankDim_.x;
+  RankPartition(const Dim3 &size, const int64_t n)
+      : size_(size), dim_(1, 1, 1) {
+
+    // split repeatedly by the prime factors of n
+    std::vector<int64_t> factors = prime_factors(n);
+    for (size_t amt : factors) {
+      if (amt < 2) {
+        continue;
+      }
+
+      if (size_.x >= size_.y && size_.x >= size_.z) { // split in x
+        size_.x = div_ceil(size_.x, amt);
+        dim_.x *= amt;
+      } else if (size_.y >= size_.z) { // split in y
+        size_.y = div_ceil(size_.y, amt);
+        dim_.y *= amt;
+      } else { // split in z
+        size_.z = div_ceil(size_.z, amt);
+        dim_.z *= amt;
+      }
+    }
+
+    rem_ = size % dim_;
   }
+  RankPartition() : RankPartition(Dim3(0, 0, 0), 0) {}
 
-  int get_gpu(const Dim3 &idx) const override {
-    Dim3 gpuIdx = idx % gpuDim_;
-    return gpuIdx.x + gpuIdx.y * gpuDim_.x + gpuIdx.z * gpuDim_.y * gpuDim_.x;
-  }
+  virtual Dim3 dim() const { return dim_; }
 
-  Dim3 gpu_idx(int gpu) const override {
-    assert(gpu < gpus_);
-    Dim3 ret;
-    ret.x = gpu % gpuDim_.x;
-    gpu /= gpuDim_.x;
-    ret.y = gpu % gpuDim_.y;
-    gpu /= gpuDim_.y;
-    ret.z = gpu;
-    return ret;
-  }
-  Dim3 rank_idx(int rank) const override {
-    assert(rank < ranks_);
-    Dim3 ret;
-    ret.x = rank % rankDim_.x;
-    rank /= rankDim_.x;
-    ret.y = rank % rankDim_.y;
-    rank /= rankDim_.y;
-    ret.z = rank;
-    return ret;
-  }
+  virtual Dim3 subdomain_size(const Dim3 &idx) const {
 
-  Dim3 gpu_dim() const override { return gpuDim_; }
-  Dim3 rank_dim() const override { return rankDim_; }
+    Dim3 ret = size_;
 
-  Dim3 local_domain_size(const Dim3 &domIdx) const override {
-
-    Dim3 ret = domSize_;
-    Dim3 rem = size_ % (rankDim_ * gpuDim_);
-
-    if (rem.x != 0 && domIdx.x >= rem.x) {
+    if (rem_.x != 0 && idx.x >= rem_.x) {
       ret.x -= 1;
     }
-    if (rem.y != 0 && domIdx.y >= rem.y) {
+    if (rem_.y != 0 && idx.y >= rem_.y) {
       ret.y -= 1;
     }
-    if (rem.z != 0 && domIdx.z >= rem.z) {
+    if (rem_.z != 0 && idx.z >= rem_.z) {
       ret.z -= 1;
     }
 
     return ret;
   }
 
-  PFP(const Dim3 &domSize, const int ranks, const int gpus)
-      : size_(domSize), gpuDim_(1, 1, 1), rankDim_(1, 1, 1), ranks_(ranks),
-        gpus_(gpus) {
-
-    domSize_ = size_;
-    auto rankFactors = prime_factors(ranks_);
-    // split repeatedly by prime factors of the number of MPI ranks to establish
-    // the 3D partition among ranks
-    for (size_t amt : rankFactors) {
-      if (amt < 2) {
-        continue;
-      }
-      double curCubeness = cubeness(domSize_.x, domSize_.y, domSize_.z);
-      double xSplitCubeness =
-          cubeness(div_ceil(domSize_.x, amt), domSize_.y, domSize_.z);
-      double ySplitCubeness =
-          cubeness(domSize_.x, div_ceil(domSize_.y, amt), domSize_.z);
-      double zSplitCubeness =
-          cubeness(domSize_.x, domSize_.y, div_ceil(domSize_.z, amt));
-
-      if (xSplitCubeness >=
-          std::max(ySplitCubeness, zSplitCubeness)) { // split in x
-        domSize_.x = div_ceil(domSize_.x, amt);
-        rankDim_.x *= amt;
-      } else if (ySplitCubeness >=
-                 std::max(xSplitCubeness, ySplitCubeness)) { // split in y
-        domSize_.y = div_ceil(domSize_.y, amt);
-        rankDim_.y *= amt;
-      } else { // split in z
-        domSize_.z = div_ceil(domSize_.z, amt);
-        rankDim_.z *= amt;
-      }
-    }
-
-    // split again for GPUs
-    auto gpuFactors = prime_factors(gpus_);
-    for (size_t amt : gpuFactors) {
-      if (amt < 2) {
-        continue;
-      }
-      double curCubeness = cubeness(domSize_.x, domSize_.y, domSize_.z);
-      double xSplitCubeness =
-          cubeness(div_ceil(domSize_.x, amt), domSize_.y, domSize_.z);
-      double ySplitCubeness =
-          cubeness(domSize_.x, div_ceil(domSize_.y, amt), domSize_.z);
-      double zSplitCubeness =
-          cubeness(domSize_.x, domSize_.y, div_ceil(domSize_.z, amt));
-
-      if (xSplitCubeness >=
-          std::max(ySplitCubeness, zSplitCubeness)) { // split in x
-        domSize_.x = div_ceil(domSize_.x, amt);
-        gpuDim_.x *= amt;
-      } else if (ySplitCubeness >=
-                 std::max(xSplitCubeness, ySplitCubeness)) { // split in y
-        domSize_.y = div_ceil(domSize_.y, amt);
-        gpuDim_.y *= amt;
-      } else { // split in z
-        domSize_.z = div_ceil(domSize_.z, amt);
-        gpuDim_.z *= amt;
-      }
-    }
+  /* get a unique 1D integer for an index */
+  size_t linearize(Dim3 idx) const {
+    Dim3 dim = this->dim();
+    assert(idx.x >= 0);
+    assert(idx.y >= 0);
+    assert(idx.z >= 0);
+    assert(dim.x >= 0);
+    assert(dim.y >= 0);
+    assert(dim.z >= 0);
+    assert(idx.x < dim.x);
+    assert(idx.y < dim.y);
+    assert(idx.z < dim.z);
+    return idx.x + idx.y * dim.x + idx.z * dim.y * dim.x;
   }
 
-  // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
-  static std::vector<size_t> prime_factors(size_t n) {
-    std::vector<size_t> result;
+  /* opposite of linearize */
+  Dim3 dimensionize(int64_t i) {
+    Dim3 dim = this->dim();
+    assert(i < dim.flatten());
+    assert(i >= 0);
+    Dim3 ret;
+    ret.x = i % dim.x;
+    i /= dim.x;
+    ret.y = i % dim.y;
+    i /= dim.y;
+    ret.z = i;
+    return ret;
+  }
+};
+
+class NodePartition {
+
+private:
+  Dim3 sysDim_;  // dimension of the system
+  Dim3 nodeDim_; // dimension of a node
+
+  Dim3 size_; // approximate subdomain size
+  Dim3 rem_;  // input size % sysDim_ * nodeDim_
+
+  /*! return the prime factors of n
+   */
+  static std::vector<int64_t> prime_factors(int64_t n) {
+    std::vector<int64_t> result;
+    if (0 == n) {
+      return result;
+    }
 
     while (n % 2 == 0) {
       result.push_back(2);
@@ -190,22 +156,295 @@ public:
     }
     if (n > 2)
       result.push_back(n);
-
     std::sort(result.begin(), result.end(),
-              [](size_t a, size_t b) { return b < a; });
-
+              [](int64_t a, int64_t b) { return b < a; });
     return result;
   }
 
-  static double cubeness(double x, double y, double z) {
-    double smallest = std::min(x, std::min(y, z));
-    double largest = std::max(x, std::max(y, z));
-    return smallest / largest;
+  static int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
+
+  /* get a unique 1D integer for an index */
+  static int64_t linearize(const Dim3 idx, const Dim3 dim) {
+    assert(idx.x >= 0);
+    assert(idx.y >= 0);
+    assert(idx.z >= 0);
+    assert(dim.x >= 0);
+    assert(dim.y >= 0);
+    assert(dim.z >= 0);
+    assert(idx.x < dim.x);
+    assert(idx.y < dim.y);
+    assert(idx.z < dim.z);
+    return idx.x + idx.y * dim.x + idx.z * dim.y * dim.x;
   }
 
-  /*! \brief ceil(n/d)
+  /* opposite of linearize */
+  static Dim3 dimensionize(int64_t i, const Dim3 &dim) {
+    assert(i < dim.flatten());
+    assert(i >= 0);
+    Dim3 ret;
+    ret.x = i % dim.x;
+    i /= dim.x;
+    ret.y = i % dim.y;
+    i /= dim.y;
+    ret.z = i;
+    return ret;
+  }
+
+public:
+  NodePartition(const Dim3 &size, const int64_t nodes, const int64_t gpus)
+      : size_(size), sysDim_(1, 1, 1), nodeDim_(1, 1, 1) {
+
+    // split among nodes
+    std::vector<int64_t> factors = prime_factors(nodes);
+    for (size_t amt : factors) {
+      if (amt < 2) {
+        continue;
+      }
+
+      if (size_.x >= size_.y && size_.x >= size_.z) { // split in x
+        size_.x = div_ceil(size_.x, amt);
+        sysDim_.x *= amt;
+      } else if (size_.y >= size_.z) { // split in y
+        size_.y = div_ceil(size_.y, amt);
+        sysDim_.y *= amt;
+      } else { // split in z
+        size_.z = div_ceil(size_.z, amt);
+        sysDim_.z *= amt;
+      }
+    }
+
+    // split among gpus
+    factors = prime_factors(gpus);
+    for (size_t amt : factors) {
+      if (amt < 2) {
+        continue;
+      }
+
+      if (size_.x >= size_.y && size_.x >= size_.z) { // split in x
+        size_.x = div_ceil(size_.x, amt);
+        nodeDim_.x *= amt;
+      } else if (size_.y >= size_.z) { // split in y
+        size_.y = div_ceil(size_.y, amt);
+        nodeDim_.y *= amt;
+      } else { // split in z
+        size_.z = div_ceil(size_.z, amt);
+        nodeDim_.z *= amt;
+      }
+    }
+
+    rem_ = size % (sysDim_ * nodeDim_);
+  }
+
+  NodePartition() : NodePartition(Dim3(0, 0, 0), 0, 0) {}
+
+  Dim3 sys_dim() const noexcept { return sysDim_; }
+
+  Dim3 node_dim() const noexcept { return nodeDim_; }
+
+  Dim3 dim() const noexcept { return sys_dim() * node_dim(); }
+
+  Dim3 subdomain_size(const Dim3 &idx) const {
+
+    Dim3 ret = size_;
+
+    if (rem_.x != 0 && idx.x >= rem_.x) {
+      ret.x -= 1;
+    }
+    if (rem_.y != 0 && idx.y >= rem_.y) {
+      ret.y -= 1;
+    }
+    if (rem_.z != 0 && idx.z >= rem_.z) {
+      ret.z -= 1;
+    }
+
+    return ret;
+  }
+
+  Dim3 sys_idx(int64_t i) const noexcept { return dimensionize(i, sys_dim()); }
+  Dim3 node_idx(int64_t i) const noexcept {
+    return dimensionize(i, node_dim());
+  }
+  Dim3 idx(int64_t i) const noexcept { return dimensionize(i, dim()); }
+};
+
+enum class PlacementStrategy { NodeAware, Trivial };
+
+class Placement {
+
+public:
+  // get the index of subdomain i for rank
+  virtual Dim3 get_idx(const int rank, const int i) = 0;
+
+  // get the MPI rank for a subdomain
+  virtual int get_rank(const Dim3 &idx) = 0;
+
+  // get the subdomain's id within the rank it is placed in
+  virtual int get_subdomain_id(const Dim3 &idx) = 0;
+
+  // get the cuda id for a subdomain
+  virtual int get_cuda(const Dim3 &idx) = 0;
+
+  // get the size of a subdomain
+  virtual Dim3 subdomain_size(const Dim3 &idx) = 0;
+
+  // upper bound for idx
+  virtual Dim3 dim() = 0;
+};
+
+class Trivial : public Placement {
+private:
+  RankPartition partition_;
+
+  /* idx_[rank][id] = idx */
+  std::vector<std::vector<Dim3>> idx_;
+
+  // get the rank that owns a subdomain
+  std::map<Dim3, int> rank_;
+
+  // get the subdomain id (within a rank) for a subdomain
+  std::map<Dim3, int> subdomain_id_;
+
+  // get the CUDA devixe id for a subdomain
+  std::map<Dim3, int> cuda_;
+
+public:
+  /*! return the compute domain index associated with a particular rank and
+      domain ID `domId`.
+  */
+  Dim3 get_idx(int rank, int domId) override {
+    assert(rank < idx_.size());
+    assert(domId < idx_[rank].size());
+    return idx_[rank][domId];
+  }
+
+  /* return the rank for a domain
    */
-  static size_t div_ceil(size_t n, size_t d) { return (n + d - 1) / d; }
+  int get_rank(const Dim3 &idx) override { return rank_[idx]; }
+
+  /*! return the domain id for a domain, consistent with indices passed into
+      the constructor
+  */
+  int get_subdomain_id(const Dim3 &idx) override { return subdomain_id_[idx]; }
+
+  /* which cuda device a subdomain runs on */
+  int get_cuda(const Dim3 &idx) override { return cuda_[idx]; }
+
+  /* size of a subdomain */
+  Dim3 subdomain_size(const Dim3 &idx) override {
+    return partition_.subdomain_size(idx);
+  }
+
+  Dim3 dim() override { return partition_.dim(); }
+
+  Trivial(const Dim3 &size, // total domain size
+          MpiTopology &mpiTopo, GpuTopology &gpuTopo, size_t radius,
+          const std::vector<int> &rankCudaIds // which CUDA devices the calling
+                                              // rank wants to contribute
+  ) {
+    MPI_Barrier(MPI_COMM_WORLD);
+    // have everyone request one work item per GPU
+    const int workItems = rankCudaIds.size();
+    std::vector<int> workItemCounts(mpiTopo.size());
+    MPI_Allgather(&workItems, 1, MPI_INT, workItemCounts.data(), 1, MPI_INT,
+                  MPI_COMM_WORLD);
+
+    if (mpiTopo.rank() == 0) {
+      std::cerr << "Trivial: workItemCounts:";
+      for (auto &e : workItemCounts) {
+        std::cerr << " " << e;
+      }
+      std::cerr << "\n";
+    }
+
+    const int numSubdomains =
+        std::accumulate(workItemCounts.begin(), workItemCounts.end(), 0);
+
+    if (mpiTopo.rank() == 0) {
+      std::cerr << "Trivial: numSubdomains=" << numSubdomains << "\n";
+    }
+
+    partition_ = RankPartition(size, numSubdomains);
+
+    // determine which rank each subdomain will be assigned to
+    // determine what the subdomain id within each rank each subdomain is
+    std::vector<int> rankAssignments;
+    std::vector<int> rankIds;
+    for (int rank = 0; rank < workItemCounts.size(); ++rank) {
+      for (int i = 0; i < workItemCounts[rank]; ++i) {
+        rankAssignments.push_back(rank);
+        rankIds.push_back(i);
+      }
+    }
+    assert(rankAssignments.size() == numSubdomains);
+    assert(rankIds.size() == numSubdomains);
+    if (mpiTopo.rank() == 0) {
+      std::cerr << "Trivial: rankAssignments:";
+      for (auto &e : rankAssignments) {
+        std::cerr << " " << e;
+      }
+      std::cerr << "\n";
+
+      std::cerr << "Trivial: rankIds:";
+      for (auto &e : rankIds) {
+        std::cerr << " " << e;
+      }
+      std::cerr << "\n";
+    }
+
+    // figure out the cuda IDs contributed from each rank
+    std::vector<int> offs;
+    int val = 0;
+    for (const auto &e : workItemCounts) {
+      offs.push_back(val);
+      val += e;
+    }
+
+    // determine which CUDA id each subdomain will be assigned to
+    std::vector<int> cudaAssignments(numSubdomains);
+    MPI_Allgatherv(rankCudaIds.data(), rankCudaIds.size(), MPI_INT,
+                   cudaAssignments.data(), workItemCounts.data(), offs.data(),
+                   MPI_INT, MPI_COMM_WORLD);
+
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "Trivial: cudaAssignments:";
+      for (auto &e : cudaAssignments) {
+        std::cerr << " " << e;
+      }
+      std::cerr << "\n";
+    }
+
+    // fill data
+    assert(cudaAssignments.size() == numSubdomains);
+    assert(rankIds.size() == numSubdomains);
+    assert(rankAssignments.size() == numSubdomains);
+    for (size_t i = 0; i < numSubdomains; ++i) {
+      const int rank = rankAssignments[i];
+      const int id = rankIds[i];
+      const int cuda = cudaAssignments[i];
+      const Dim3 idx = partition_.dimensionize(i);
+      const Dim3 size = partition_.subdomain_size(idx);
+
+      if (0 == mpiTopo.rank()) {
+        std::cerr << idx << "is sd" << id << " on r" << rank << " cuda" << cuda
+                  << ")" << size << "\n";
+      }
+
+      assert(rank_.count(idx) == 0);
+      rank_[idx] = rank;
+      assert(subdomain_id_.count(idx) == 0);
+      subdomain_id_[idx] = id;
+      if (idx_.size() <= rank) {
+        idx_.resize(rank + 1);
+      }
+      if (idx_[rank].size() <= id) {
+        idx_[rank].resize(id + 1);
+      }
+      idx_[rank][id] = idx;
+      cuda_[idx] = cuda;
+    }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+  }
 };
 
 /*! average
@@ -313,42 +552,12 @@ Mat2D<double> permute(const Mat2D<double> &m, std::vector<size_t> map) {
   return result;
 }
 
-enum class PlacementStrategy { NodeAware, Trivial };
-
-class NodeAwarePlacement {
+class NodeAware : public Placement {
 private:
-  int gpus_;
-  int ranks_;
-  Dim3 size_;
-  Dim3 gpuDim_;
-  Dim3 rankDim_;
-  Dim3 domSize_;
-  PlacementStrategy strategy_;
+  NodePartition partition_;
 
-  static size_t linearize(Dim3 idx, Dim3 dim) {
-    assert(idx.x >= 0);
-    assert(idx.y >= 0);
-    assert(idx.z >= 0);
-    assert(dim.x >= 0);
-    assert(dim.y >= 0);
-    assert(dim.z >= 0);
-    assert(idx.x < dim.x);
-    assert(idx.y < dim.y);
-    assert(idx.z < dim.z);
-    return idx.x + idx.y * dim.x + idx.z * dim.y * dim.x;
-  }
-
-  static Dim3 dimensionize(int64_t i, Dim3 dim) {
-    assert(i < dim.flatten());
-    assert(i >= 0);
-    Dim3 ret;
-    ret.x = i % dim.x;
-    i /= dim.x;
-    ret.y = i % dim.y;
-    i /= dim.y;
-    ret.z = i;
-    return ret;
-  }
+  constexpr static double interNodeBandwidth = 15;
+  constexpr static double gpuMemoryBandwidth = 900;
 
   /* Return a number proportional to the bytes in a halo exchange, along
    * direction `dir` for a domain of size `sz` with radius `radius`
@@ -360,438 +569,306 @@ private:
     return count;
   }
 
-  // map of domIdx to cuda device for all ranks
-  std::map<Dim3, int> cudaId_;
-  // convert domIdx to domId for all ranks
-  std::map<Dim3, int> domId_;
-  // convert rank and domain ID to domainIdx
-  // since each domain is already attached to a GPU, and the domIdx controls the
-  // communication requirements, there is no direct conversion between domainId
-  // and domIdx. domIdx_[rank][domId] = domIdx
-  std::vector<std::vector<Dim3>> domIdx_;
-
-public:
-  Dim3 gpu_dim() const { return gpuDim_; }
-  Dim3 rank_dim() const { return rankDim_; }
-
-  /*! return the rankIdx for a rank
+  /* a vector that maps indices in comm to indices in bw
    */
-  Dim3 rank_idx(const int rank) const {
-    assert(rank < ranks_);
-    return dimensionize(rank, rankDim_);
+  std::vector<size_t>
+  get_mapping(const Mat2D<double> &comm,
+              const Mat2D<double> &bandwidth // the ranks in each node
+  ) {
+    assert(comm.size() == bandwidth.size());
+
+    int rank;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+    std::vector<size_t> map;
+    for (size_t i = 0; i < comm.size(); ++i) {
+      map.push_back(i);
+    }
+
+    std::vector<size_t> bestMap = map;
+    double bestFit = -1;
+    do {
+
+      auto checkBandwidth = permute(bandwidth, map);
+
+#if 1
+      if (0 == rank) {
+        std::cerr << "checking permutation";
+        for (auto &e : map) {
+          std::cerr << " " << e;
+        }
+        std::cerr << "\n";
+        std::cerr << "bandwidth:\n";
+        for (auto &r : checkBandwidth) {
+          for (auto &c : r) {
+            std::cerr << c << " ";
+          }
+          std::cerr << "\n";
+        }
+      }
+
+#endif
+
+      const double score = match(checkBandwidth, comm);
+      assert(score >= -1);
+#if 1
+      if (0 == rank)
+        std::cerr << "score=" << score << "\n";
+#endif
+      if (score > bestFit) {
+        bestFit = score;
+        bestMap = map;
+#if 1
+        if (0 == rank) {
+          std::cerr << "new best placement:\n";
+          for (auto &e : map) {
+            std::cerr << e << " ";
+          }
+          std::cerr << "\n";
+        }
+#endif
+      }
+    } while (std::next_permutation(map.begin(), map.end()));
+
+    return bestMap;
   }
 
+  // convert idx to rank
+  std::map<Dim3, int> rank_;
+
+  // convert idx to subdomain id
+  std::map<Dim3, int> subdomainId_;
+
+  // get cuda device for idx
+  std::map<Dim3, int> cuda_;
+
+  // convert rank and subdomain to idx
+  std::vector<std::vector<Dim3>> idx_;
+
+public:
   /*! return the compute domain index associated with a particular rank and
       domain ID `domId`.
   */
-  Dim3 dom_idx(int rank, int domId) {
-    assert(rank < ranks_);
-    assert(rank < domIdx_.size());
-    assert(domId < domIdx_[rank].size());
-    const Dim3 ret = domIdx_[rank][domId];
-    assert(ret.all_lt(gpu_dim() * rank_dim()));
+  Dim3 get_idx(int rank, int domId) override {
+    assert(rank < idx_.size());
+    assert(domId < idx_[rank].size());
+    const Dim3 ret = idx_[rank][domId];
     return ret;
   }
 
   /* return the rank for a domain
    */
-  int get_rank(Dim3 idx) const {
-    idx /= gpuDim_;
-    return linearize(idx, rankDim_);
-  }
+  int get_rank(const Dim3 &idx) override { return rank_[idx]; }
 
   /*! return the domain id for a domain, consistent with indices passed into
       the constructor
   */
-  int get_gpu(const Dim3 &domIdx) { return domId_[domIdx]; }
+  int get_subdomain_id(const Dim3 &idx) override { return subdomainId_[idx]; }
 
-  int get_cuda(const Dim3 &domIdx) { return cudaId_[domIdx]; }
+  int get_cuda(const Dim3 &idx) override { return cuda_[idx]; }
 
-  Dim3 domain_size(const Dim3 &domIdx) {
-
-    Dim3 ret = domSize_;
-    Dim3 rem = size_ % (rankDim_ * gpuDim_);
-
-    if (rem.x != 0 && domIdx.x >= rem.x) {
-      ret.x -= 1;
-    }
-    if (rem.y != 0 && domIdx.y >= rem.y) {
-      ret.y -= 1;
-    }
-    if (rem.z != 0 && domIdx.z >= rem.z) {
-      ret.z -= 1;
-    }
-
-    return ret;
+  Dim3 subdomain_size(const Dim3 &idx) override {
+    return partition_.subdomain_size(idx);
   }
 
-  NodeAwarePlacement(
-      const Dim3 &domSize,
-      const int ranks, // how many ranks there are
+  Dim3 dim() override { return partition_.dim(); }
+
+  NodeAware(
+      const Dim3 &size, // total domain size
       MpiTopology &mpiTopo, GpuTopology &gpuTopo, size_t radius,
-      const std::vector<int>
-          &rankGpus, // which GPUs this rank wants to contribute
-      const PlacementStrategy strategy = PlacementStrategy::NodeAware)
-      : size_(domSize), ranks_(ranks), gpuDim_(1, 1, 1), rankDim_(1, 1, 1),
-        strategy_(strategy) {
+      const std::vector<int> &rankCudaIds // which CUDA devices the calling
+                                          // rank wants to contribute
+  ) {
 
-    // TODO: make sure everyone is contributing the same number of GPUs
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // TODO: actually check that everyone has the same number of GPUs
+    const int gpusPerRank = rankCudaIds.size();
+    const int ranksPerNode = mpiTopo.colocated_size();
+    const int gpusPerNode = gpusPerRank * ranksPerNode;
+    const int numNodes = mpiTopo.size() / mpiTopo.colocated_size();
+    const int numSubdomains = numNodes * gpusPerNode;
 
-    for (auto &dev : rankGpus) {
-      std::cerr << "rank " << rank << " contributing cuda " << dev << "\n";
+    partition_ = NodePartition(size, numNodes, gpusPerNode);
+
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "NodeAware: " << partition_.sys_dim() << "x"
+                << partition_.node_dim() << "\n";
     }
 
-    domIdx_.resize(ranks_);
-    for (auto &v : domIdx_) {
-      v.resize(rankGpus.size());
-    }
+    // get the name of each node
+    char name[MPI_MAX_PROCESSOR_NAME] = {0};
+    int nameLen;
+    MPI_Get_processor_name(name, &nameLen);
 
-    domSize_ = size_;
-    auto rankFactors = prime_factors(ranks_);
+    // gather the names to root
+    std::vector<char> allNames;
+    allNames = std::vector<char>(MPI_MAX_PROCESSOR_NAME * mpiTopo.size(), 0);
+    MPI_Gather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, allNames.data(),
+               MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
 
-    // split repeatedly by prime factors of the number of MPI ranks to
-    // establish the 3D partition among ranks
-    for (size_t amt : rankFactors) {
-      if (amt < 2) {
-        continue;
-      }
-      double curCubeness = cubeness(domSize_.x, domSize_.y, domSize_.z);
-      double xSplitCubeness =
-          cubeness(div_ceil(domSize_.x, amt), domSize_.y, domSize_.z);
-      double ySplitCubeness =
-          cubeness(domSize_.x, div_ceil(domSize_.y, amt), domSize_.z);
-      double zSplitCubeness =
-          cubeness(domSize_.x, domSize_.y, div_ceil(domSize_.z, amt));
-
-      if (xSplitCubeness >=
-          std::max(ySplitCubeness, zSplitCubeness)) { // split in x
-        domSize_.x = div_ceil(domSize_.x, amt);
-        rankDim_.x *= amt;
-      } else if (ySplitCubeness >=
-                 std::max(xSplitCubeness, ySplitCubeness)) { // split in y
-        domSize_.y = div_ceil(domSize_.y, amt);
-        rankDim_.y *= amt;
-      } else { // split in z
-        domSize_.z = div_ceil(domSize_.z, amt);
-        rankDim_.z *= amt;
+    // get the name for each rank
+    std::vector<std::string> rankNames;
+    if (0 == mpiTopo.rank()) {
+      for (int rank = 0; rank < mpiTopo.size(); ++rank) {
+        std::string name(allNames.data() + rank * MPI_MAX_PROCESSOR_NAME);
+        rankNames.push_back(name);
       }
     }
 
-    // partition domain among GPUs in the rank
-    auto gpuFactors = prime_factors(rankGpus.size());
-    for (size_t amt : gpuFactors) {
-      if (amt < 2) {
-        continue;
-      }
-      double curCubeness = cubeness(domSize_.x, domSize_.y, domSize_.z);
-      double xSplitCubeness =
-          cubeness(div_ceil(domSize_.x, amt), domSize_.y, domSize_.z);
-      double ySplitCubeness =
-          cubeness(domSize_.x, div_ceil(domSize_.y, amt), domSize_.z);
-      double zSplitCubeness =
-          cubeness(domSize_.x, domSize_.y, div_ceil(domSize_.z, amt));
-
-      if (xSplitCubeness >=
-          std::max(ySplitCubeness, zSplitCubeness)) { // split in x
-        domSize_.x = div_ceil(domSize_.x, amt);
-        gpuDim_.x *= amt;
-      } else if (ySplitCubeness >=
-                 std::max(xSplitCubeness, ySplitCubeness)) { // split in y
-        domSize_.y = div_ceil(domSize_.y, amt);
-        gpuDim_.y *= amt;
-      } else { // split in z
-        domSize_.z = div_ceil(domSize_.z, amt);
-        gpuDim_.z *= amt;
+    // number each name
+    std::map<std::string, size_t> nodeNumbers;
+    size_t nn = 0;
+    if (0 == mpiTopo.rank()) {
+      for (int rank = 0; rank < mpiTopo.size(); ++rank) {
+        auto p = nodeNumbers.emplace(rankNames[rank], nn);
+        if (p.second) {
+          ++nn;
+        }
       }
     }
 
-    std::cerr << "NodeAwarePlacement: " << rankDim_ << "x" << gpuDim_ << "\n";
-
-    // each rank on the node reports its global rank
-    std::vector<int> nodeRanks(mpiTopo.colocated_size());
-    MPI_Allgather(&rank, 1, MPI_INT, nodeRanks.data(), 1, MPI_INT,
-                  mpiTopo.colocated_comm());
-    std::cerr << "NAP: colo global ranks: ";
-    for (auto &e : nodeRanks) {
-      std::cerr << e << " ";
+    // store the node number for each rank
+    std::vector<int> rankNode(mpiTopo.size());
+    // a vec of ranks that are in each node
+    std::vector<std::vector<int>> nodeRanks(nodeNumbers.size());
+    if (0 == mpiTopo.rank()) {
+      for (int rank = 0; rank < mpiTopo.size(); ++rank) {
+        int node = nodeNumbers[rankNames[rank]];
+        rankNode[rank] = node;
+        nodeRanks[node].push_back(rank);
+      }
     }
-    std::cerr << "\n";
 
-    // each rank reports which GPUs it is contributing
-    std::vector<int> nodeGpus(mpiTopo.colocated_size() * rankGpus.size());
-    MPI_Allgather(rankGpus.data(), rankGpus.size(), MPI_INT, nodeGpus.data(),
-                  rankGpus.size(), MPI_INT, mpiTopo.colocated_comm());
-    std::cerr << "NAP: colo GPUs: ";
-    for (auto &e : nodeGpus) {
-      std::cerr << e << " ";
+    // gather up all CUDA ids that all ranks are contributing
+    std::vector<int> globalCudaIds(numSubdomains);
+    MPI_Allgather(rankCudaIds.data(), rankCudaIds.size(), MPI_INT,
+                  globalCudaIds.data(), rankCudaIds.size(), MPI_INT,
+                  mpiTopo.comm());
+
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "globalCudaIds:";
+      for (auto &e : globalCudaIds)
+        std::cerr << " " << e;
+      std::cerr << "\n";
     }
-    std::cerr << "\n";
 
-    // record communication costs between all domains on this node
-    Mat2D<double> commCost;
-    const size_t numDomains = gpuDim_.flatten() * nodeRanks.size();
-    commCost.resize(numDomains);
-    for (auto &r : commCost) {
-      r = std::vector<double>(numDomains, 0);
-    }
-    const Dim3 domDim = gpuDim_ * rankDim_;
-    for (size_t i = 0; i < nodeRanks.size(); ++i) {
-      for (size_t j = 0; j < rankGpus.size(); ++j) {
-        Dim3 srcRankIdx = dimensionize(nodeRanks[i], rankDim_);
-        Dim3 srcGpuIdx = dimensionize(j, gpuDim_);
-        Dim3 srcDomIdx = srcRankIdx * gpuDim_ + srcGpuIdx;
+    // OUTPUTS
+    // the CUDA device for each subdomain
+    std::vector<int> cudaAssignment(numSubdomains);
+    // the rank for each subdomain
+    std::vector<int> rankAssignment(numSubdomains);
+    // subdomain ID for each subdomain
+    std::vector<int> idForDomain(numSubdomains);
 
-        for (size_t k = 0; k < nodeRanks.size(); ++k) {
-          for (size_t m = 0; m < rankGpus.size(); ++m) {
-            Dim3 dstRankIdx = dimensionize(nodeRanks[k], rankDim_);
-            Dim3 dstGpuIdx = dimensionize(m, gpuDim_);
-            Dim3 dstDomIdx = dstRankIdx * gpuDim_ + dstGpuIdx;
+    if (0 == mpiTopo.rank()) {
 
-            Dim3 dir = dstDomIdx - srcDomIdx;
+      const Dim3 nodeDim = partition_.node_dim();
+      const Dim3 globalDim = nodeDim * partition_.sys_dim();
+
+      // do placement separately for each node
+      for (int node = 0; node < numNodes; ++node) {
+        const Dim3 sysIdx = partition_.sys_idx(node);
+
+        auto &ranks = nodeRanks[node]; // ranks in this node
+        assert(ranks.size() == ranksPerNode);
+
+        // make a bandwidth matrix for the components in this node
+        Mat2D<double> bandwidth = make_mat2d(gpusPerNode, 0.0);
+        for (size_t ri = 0; ri < ranksPerNode; ++ri) {  // rank i in this node
+          for (size_t gi = 0; gi < gpusPerRank; ++gi) { // gpu i in this rank
+            const size_t ci = ri * gpusPerRank + gi;
+            for (size_t rj = 0; rj < ranksPerNode;
+                 ++rj) { // rank j in this node
+              for (size_t gj = 0; gj < gpusPerRank;
+                   ++gj) { // gpu j in this rank
+                const size_t cj = rj * gpusPerRank + gj;
+
+                // recover the cuda device ID for this component
+                const int di = globalCudaIds[ranks[ri] * gpusPerRank + gi];
+                const int dj = globalCudaIds[ranks[ri] * gpusPerRank + gj];
+                bandwidth[ci][cj] = gpuTopo.bandwidth(di, dj);
+              }
+            }
+          }
+        }
+
+        // build a stencil communication matrix for the domains in this node
+        Mat2D<double> comm = make_mat2d(gpusPerNode, 0.0);
+        for (size_t i = 0; i < gpusPerNode; ++i) {
+          const Dim3 srcIdx = sysIdx * nodeDim + partition_.node_idx(i);
+          for (size_t j = 0; j < gpusPerNode; ++j) {
+            const Dim3 dstIdx = sysIdx * nodeDim + partition_.node_idx(j);
+
+            Dim3 dir = dstIdx - srcIdx;
             // periodic boundary
-            if (dir.x != 0 && dir.x == domDim.x - 1)
+            if (dir.x != 0 && dir.x == globalDim.x - 1)
               dir.x = -1;
-            if (dir.y != 0 && dir.y == domDim.y - 1)
+            if (dir.y != 0 && dir.y == globalDim.y - 1)
               dir.y = -1;
-            if (dir.z != 0 && dir.z == domDim.z - 1)
+            if (dir.z != 0 && dir.z == globalDim.z - 1)
               dir.z = -1;
-            if (dir.x != 0 && dir.x == 1 - domDim.x)
+            if (dir.x != 0 && dir.x == 1 - globalDim.x)
               dir.x = 1;
-            if (dir.y != 0 && dir.y == 1 - domDim.y)
+            if (dir.y != 0 && dir.y == 1 - globalDim.y)
               dir.y = 1;
-            if (dir.z != 0 && dir.z == 1 - domDim.z)
+            if (dir.z != 0 && dir.z == 1 - globalDim.z)
               dir.z = 1;
-            std::cerr << dir << "=" << srcDomIdx << "->" << dstDomIdx << "\n";
+            std::cerr << dir << "=" << srcIdx << "->" << dstIdx << "\n";
             if (Dim3(0, 0, 0) == dir || dir.any_gt(1) || dir.any_lt(-1)) {
               continue;
             } else {
-              const Dim3 sz = domain_size(srcDomIdx);
+              const Dim3 sz = partition_.subdomain_size(srcIdx);
               double cost = comm_cost(dir, sz, radius);
-              commCost[i * gpuDim_.flatten() + j][k * gpuDim_.flatten() + m] =
-                  cost;
+              comm[i][j] = cost;
             }
           }
         }
+
+        // which component each subdomain should be on
+        std::vector<size_t> components = get_mapping(comm, bandwidth);
+
+        for (size_t id = 0; id < components.size(); ++id) {
+
+          // each component is owned by a rank and has a local ID
+          size_t component = components[id];
+          const int ri = component / gpusPerRank;
+          const int rank = ranks[ri];
+          const int gpuId = component % gpusPerRank;
+          const int cuda = globalCudaIds[node * gpusPerNode + gpuId];
+
+          rankAssignment[node * gpusPerNode + id] = rank;
+          idForDomain[node * gpusPerNode + id] = gpuId;
+          cudaAssignment[node * gpusPerNode + id] = cuda;
+        }
       }
-    }
 
-    {
-      std::stringstream ss;
-      for (auto &r : commCost) {
-        for (auto &c : r) {
-          ss << c << " ";
-        }
-        ss << "\n";
-      }
-      std::cerr << "domain exchange cost matrix\n";
-      std::cerr << ss.str();
-    }
+    } // 0 == rank
 
-    // build a bandwidth matrix between all participating GPUs on the node
-    Mat2D<double> gpuBandwidth;
-    gpuBandwidth.resize(numDomains);
-    for (auto &r : gpuBandwidth) {
-      r = std::vector<double>(numDomains, 0);
-    }
+    // broadcast the data to all ranks
+    MPI_Bcast(rankAssignment.data(), rankAssignment.size(), MPI_INT, 0,
+              MPI_COMM_WORLD);
+    MPI_Bcast(idForDomain.data(), idForDomain.size(), MPI_INT, 0,
+              MPI_COMM_WORLD);
+    MPI_Bcast(cudaAssignment.data(), cudaAssignment.size(), MPI_INT, 0,
+              MPI_COMM_WORLD);
 
-    for (size_t i = 0; i < gpuBandwidth.size(); ++i) {
-      for (size_t j = 0; j < gpuBandwidth[i].size(); ++j) {
-        int srcId = nodeGpus[i];
-        int dstId = nodeGpus[j];
-        gpuBandwidth[i][j] = gpuTopo.bandwidth(srcId, dstId);
-      }
-    }
+    for (size_t i = 0; i < rankAssignment.size(); ++i) {
+      // convert i into a domain idx
+      const Dim3 idx = partition_.idx(i);
+      const int subdomain = idForDomain[i];
+      const int rank = rankAssignment[i];
+      const int cuda = cudaAssignment[i];
 
-    {
-      std::stringstream ss;
-      for (auto &r : gpuBandwidth) {
-        for (auto &c : r) {
-          ss << c << " ";
-        }
-        ss << "\n";
-      }
-      std::cerr << "bw matrix\n";
-      std::cerr << ss.str();
-    }
+      // convert index to rank, gpuId, and actual device
+      rank_[idx] = rank;
+      subdomainId_[idx] = subdomain;
+      cuda_[idx] = cuda;
 
-    assert(gpuBandwidth.size() == commCost.size());
-
-    // which domain on the node to map to which GPU on the node
-    std::vector<size_t> mapping;
-    for (size_t i = 0; i < numDomains; ++i) {
-      mapping.push_back(i);
-    }
-
-    std::vector<size_t> bestMap = mapping;
-    if (PlacementStrategy::NodeAware == strategy_) {
-      double bestFit = -1;
-      do {
-
-        auto placedCommCost = permute(commCost, mapping);
-
-        {
-#if 0
-        std::cerr << "checking permutation";
-        for (auto &e : mapping) {
-          std::cerr << " " << e;
-        }
-        std::stringstream ss;
-        for (auto &r : placedCommCost) {
-          for (auto &c : r) {
-            ss << c << " ";
-          }
-          ss << "\n";
-        }
-
-        std::cerr << "\n";
-        std::cerr << ss.str();
-#endif
-        }
-
-        const double score = match(placedCommCost, gpuBandwidth);
-#if 0
-      std::cerr << "score=" << score << "\n";
-#endif
-        if (score > bestFit) {
-          bestFit = score;
-          bestMap = mapping;
-#if 0
-        {
-          std::stringstream ss;
-          for (auto &r : placedCommCost) {
-            for (auto &c : r) {
-              ss << c << " ";
-            }
-            ss << "\n";
-          }
-          std::cerr << "new best placement:\n";
-          for (auto &e : mapping) {
-            std::cerr << e << " ";
-          }
-          std::cerr << "\n";
-          std::cerr << ss.str();
-        }
-#endif
-        }
-      } while (std::next_permutation(mapping.begin(), mapping.end()));
-    }
-
-    // gather up per-rank and global information about what cuda device is used
-    // for each domain
-    std::vector<Dim3> localDomIdx;
-    std::vector<Dim3> allDomIdx(rankGpus.size() * mpiTopo.size());
-    std::vector<int> localDomId;
-    std::vector<int> allDomId(rankGpus.size() * mpiTopo.size());
-    std::vector<int> allCudaId(rankGpus.size() * mpiTopo.size());
-
-    std::cerr << "found best placement\n";
-    std::cerr << "bestMap was ";
-    for (auto &e : bestMap)
-      std::cerr << e << " ";
-    std::cerr << "\n";
-    for (size_t i = 0; i < bestMap.size(); ++i) {
-      const int id = bestMap[i]; // id of gpu in the node
-      const int coloRank = id / rankGpus.size();
-      const int rank = nodeRanks[coloRank];
-      const int domId = id % rankGpus.size();
-      const Dim3 gpuIdx = dimensionize(domId, gpuDim_);
-      const Dim3 rankIdx = dimensionize(rank, rankDim_);
-      const Dim3 domIdx = rankIdx * gpuDim_ + gpuIdx;
-      std::cerr << "rank=" << rank << " colo-rank=" << coloRank << " id=" << id
-                << "(cuda=" << nodeGpus[id] << ") rankIdx=" << rankIdx
-                << " gpuIdx=" << gpuIdx << " domIdx=" << domIdx
-                << " domId=" << domId << "\n";
-      // keep track of my own domain id / domain index corredponence
-      if (coloRank == mpiTopo.colocated_rank()) {
-        localDomIdx.push_back(domIdx);
-        localDomId.push_back(domId);
-      }
-    }
-    std::cerr << "\n";
-
-    // should be one domain in the rank per GPU
-    assert(localDomIdx.size() == rankGpus.size());
-
-    // all ranks provide their domain indices
-    {
-      size_t numBytes = localDomIdx.size() * sizeof(localDomIdx[0]);
-      MPI_Allgather(localDomIdx.data(), numBytes, MPI_BYTE, allDomIdx.data(),
-                    numBytes, MPI_BYTE, mpiTopo.comm());
-    }
-
-    // all ranks provide the corresponding cuda device ID
-    MPI_Allgather(rankGpus.data(), rankGpus.size(), MPI_INT, allCudaId.data(),
-                  rankGpus.size(), MPI_INT, mpiTopo.comm());
-
-    // all ranks provide the corresponding domain ID
-    MPI_Allgather(localDomId.data(), localDomId.size(), MPI_INT,
-                  allDomId.data(), localDomId.size(), MPI_INT, mpiTopo.comm());
-
-    if (mpiTopo.rank() == 0) {
-      std::cerr << "allDomIdx:";
-      for (auto &e : allDomIdx)
-        std::cerr << e << " ";
-      std::cerr << "\n";
-      std::cerr << "allCudaId:";
-      for (auto &e : allCudaId)
-        std::cerr << e << " ";
-      std::cerr << "\n";
-      std::cerr << "allDomId:";
-      for (auto &e : allDomId)
-        std::cerr << e << " ";
-      std::cerr << "\n";
-    }
-
-    // record info from all ranks
-    for (size_t i = 0; i < allCudaId.size(); ++i) {
-      const int rank = i / rankGpus.size(); // TODO: assuming all ranks provide
-                                            // the same number of GPUs
-      const Dim3 domIdx = allDomIdx[i];
-      const int cuda = allCudaId[i];
-      const int domId = allDomId[i];
-
-      assert(cudaId_.count(domIdx) == 0);
-      cudaId_[domIdx] = cuda;
-      domId_[domIdx] = domId;
-
-      assert(rank < domIdx_.size());
-      assert(domId < domIdx_[rank].size());
-      domIdx_[rank][domId] = domIdx;
+      // convert rank and subdomain to idx
+      if (idx_.size() <= rank)
+        idx_.resize(rank + 1);
+      if (idx_[rank].size() <= subdomain)
+        idx_[rank].resize(subdomain + 1);
+      idx_[rank][subdomain] = idx;
     }
   }
-
-  // https://www.geeksforgeeks.org/print-all-prime-factors-of-a-given-number/
-  static std::vector<size_t> prime_factors(size_t n) {
-    std::vector<size_t> result;
-
-    while (n % 2 == 0) {
-      result.push_back(2);
-      n = n / 2;
-    }
-    for (int i = 3; i <= sqrt(n); i = i + 2) {
-      while (n % i == 0) {
-        result.push_back(i);
-        n = n / i;
-      }
-    }
-    if (n > 2)
-      result.push_back(n);
-
-    std::sort(result.begin(), result.end(),
-              [](size_t a, size_t b) { return b < a; });
-
-    return result;
-  }
-
-  static double cubeness(double x, double y, double z) {
-    double smallest = std::min(x, std::min(y, z));
-    double largest = std::max(x, std::max(y, z));
-    return smallest / largest;
-  }
-
-  /*! \brief ceil(n/d)
-   */
-  static size_t div_ceil(size_t n, size_t d) { return (n + d - 1) / d; }
 };

@@ -96,3 +96,5 @@ public:
     return 0 != colocated_.count(rank);
   }
 };
+
+

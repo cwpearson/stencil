@@ -255,10 +255,16 @@ public:
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
-    nvtxRangePush("node-aware placement");
-    NodeAwarePlacement *nap_ =
-        new NodeAwarePlacement(size_, worldSize_, mpiTopology_, gpuTopology_,
-                               radius_, gpus_, strategy_);
+    nvtxRangePush("placement");
+    Placement *placement = nullptr;
+    if (strategy_ == PlacementStrategy::NodeAware) {
+      placement =
+          new NodeAware(size_, mpiTopology_, gpuTopology_, radius_, gpus_);
+    } else {
+      placement =
+          new Trivial(size_, mpiTopology_, gpuTopology_, radius_, gpus_);
+    }
+    assert(placement);
     nvtxRangePop();
 #if STENCIL_PRINT_TIMINGS == 1
     double maxElapsed = -1;
@@ -266,7 +272,7 @@ public:
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.nap %f s\n", maxElapsed);
+      printf("time.placement %f s\n", maxElapsed);
     }
 #endif
 
@@ -276,22 +282,24 @@ public:
 #endif
     for (int domId = 0; domId < gpus_.size(); domId++) {
 
-      Dim3 idx = nap_->dom_idx(rank_, domId);
-      Dim3 ldSize = nap_->domain_size(idx);
+      const Dim3 idx = placement->get_idx(rank_, domId);
+      const Dim3 sdSize = placement->subdomain_size(idx);
 
-      // placement algorithm should agree what my GPU is
-      assert(nap_->get_cuda(idx) == gpus_[domId]);
+      // placement algorithm should agree with me what my GPU is
+      assert(placement->get_cuda(idx) == gpus_[domId]);
 
-      LocalDomain ld(ldSize, gpus_[domId]);
-      ld.radius_ = radius_;
+      int cudaId = placement->get_cuda(idx);
+
+      LocalDomain sd(sdSize, cudaId);
+      sd.radius_ = radius_;
       for (size_t dataIdx = 0; dataIdx < dataElemSize_.size(); ++dataIdx) {
-        ld.add_data(dataElemSize_[dataIdx]);
+        sd.add_data(dataElemSize_[dataIdx]);
       }
 
-      domains_.push_back(ld);
+      domains_.push_back(sd);
 
       fprintf(stderr, "rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
-              domId, gpus_[domId], idx.x, idx.y, idx.z);
+              domId, cudaId, idx.x, idx.y, idx.z);
     }
     // realize local domains
     for (auto &d : domains_) {
@@ -331,8 +339,6 @@ public:
     std::vector<std::map<Dim3, std::vector<Message>>>
         remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
 
-    const Dim3 globalDim = nap_->gpu_dim() * nap_->rank_dim();
-
     std::cerr << "comm plan\n";
     // plan messages
     nvtxRangePush("DistributedDomain::realize() plan messages");
@@ -345,10 +351,12 @@ public:
     remoteOutboxes.resize(gpus_.size());
     remoteInboxes.resize(gpus_.size());
 
+    const Dim3 globalDim = placement->dim();
+
     for (size_t di = 0; di < domains_.size(); ++di) {
-      const Dim3 myIdx = nap_->dom_idx(rank_, di);
+      const Dim3 myIdx = placement->get_idx(rank_, di);
       const int myDev = domains_[di].gpu();
-      assert(myDev == nap_->get_cuda(myIdx));
+      assert(myDev == placement->get_cuda(myIdx));
       for (int z = -1; z <= 1; ++z) {
         for (int y = -1; y <= 1; ++y) {
           for (int x = -1; x <= 1; ++x) {
@@ -358,9 +366,9 @@ public:
             }
 
             const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
-            const int dstRank = nap_->get_rank(dstIdx);
-            const int dstGPU = nap_->get_gpu(dstIdx);
-            const int dstDev = nap_->get_cuda(dstIdx);
+            const int dstRank = placement->get_rank(dstIdx);
+            const int dstGPU = placement->get_subdomain_id(dstIdx);
+            const int dstDev = placement->get_cuda(dstIdx);
             Message sMsg(dir, di, dstGPU);
 
             if (any_methods(MethodFlags::CudaKernel)) {
@@ -395,9 +403,9 @@ public:
           send_planned: // successfully found a way to send
 
             const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
-            const int srcRank = nap_->get_rank(srcIdx);
-            const int srcGPU = nap_->get_gpu(srcIdx);
-            const int srcDev = nap_->get_cuda(srcIdx);
+            const int srcRank = placement->get_rank(srcIdx);
+            const int srcGPU = placement->get_subdomain_id(srcIdx);
+            const int srcDev = placement->get_cuda(srcIdx);
             Message rMsg(dir, srcGPU, di);
 
             if (any_methods(MethodFlags::CudaKernel)) {
@@ -454,7 +462,7 @@ public:
     planFile << "domains\n";
     for (size_t di = 0; di < domains_.size(); ++di) {
       planFile << di << ":" << domains_[di].gpu() << ":"
-               << nap_->dom_idx(rank_, di) << " sz=" << domains_[di].size()
+               << placement->get_idx(rank_, di) << " sz=" << domains_[di].size()
                << "\n";
     }
     planFile << "\n";
@@ -523,11 +531,11 @@ public:
 
     // create all required remote senders/recvers
     for (size_t di = 0; di < domains_.size(); ++di) {
-      const Dim3 myIdx = nap_->dom_idx(rank_, di);
+      const Dim3 myIdx = placement->get_idx(rank_, di);
       for (auto &kv : remoteOutboxes[di]) {
         const Dim3 dstIdx = kv.first;
-        const int dstRank = nap_->get_rank(dstIdx);
-        const int dstGPU = nap_->get_gpu(dstIdx);
+        const int dstRank = placement->get_rank(dstIdx);
+        const int dstGPU = placement->get_subdomain_id(dstIdx);
         if (0 == remoteSenders_[di].count(dstIdx)) {
           StatefulSender *sender = nullptr;
           if (any_methods(MethodFlags::CudaAwareMpi)) {
@@ -542,8 +550,8 @@ public:
       }
       for (auto &kv : remoteInboxes[di]) {
         const Dim3 srcIdx = kv.first;
-        const int srcRank = nap_->get_rank(srcIdx);
-        const int srcGPU = nap_->get_gpu(srcIdx);
+        const int srcRank = placement->get_rank(srcIdx);
+        const int srcGPU = placement->get_subdomain_id(srcIdx);
         if (0 == remoteRecvers_[di].count(srcIdx)) {
           StatefulRecver *recver = nullptr;
           if (any_methods(MethodFlags::CudaAwareMpi)) {
@@ -568,19 +576,19 @@ public:
 
     // create all required colocated senders/recvers
     for (size_t di = 0; di < domains_.size(); ++di) {
-      const Dim3 myIdx = nap_->dom_idx(rank_, di);
+      const Dim3 myIdx = placement->get_idx(rank_, di);
       for (auto &kv : coloOutboxes[di]) {
         const Dim3 dstIdx = kv.first;
-        const int dstRank = nap_->get_rank(dstIdx);
-        const int dstGPU = nap_->get_gpu(dstIdx);
+        const int dstRank = placement->get_rank(dstIdx);
+        const int dstGPU = placement->get_subdomain_id(dstIdx);
         coloSenders_[di].emplace(
             dstIdx,
             ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
       }
       for (auto &kv : coloInboxes[di]) {
         const Dim3 srcIdx = kv.first;
-        const int srcRank = nap_->get_rank(srcIdx);
-        const int srcGPU = nap_->get_gpu(srcIdx);
+        const int srcRank = placement->get_rank(srcIdx);
+        const int srcGPU = placement->get_subdomain_id(srcIdx);
         coloRecvers_[di].emplace(
             srcIdx,
             ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
@@ -627,7 +635,7 @@ public:
     assert(coloSenders_.size() == coloRecvers_.size());
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
-        const Dim3 srcIdx = nap_->dom_idx(rank_, di);
+        const Dim3 srcIdx = placement->get_idx(rank_, di);
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
         std::cerr << "rank=" << rank_ << " colo sender.start_prepare " << srcIdx
@@ -636,7 +644,7 @@ public:
       }
       for (auto &kv : coloRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
-        const Dim3 dstIdx = nap_->dom_idx(rank_, di);
+        const Dim3 dstIdx = placement->get_idx(rank_, di);
         auto &recver = kv.second;
         std::cerr << "rank=" << rank_ << " colo recver.start_prepare " << srcIdx
                   << "->" << dstIdx << "\n";
@@ -648,7 +656,7 @@ public:
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
         const int srcDev = domains_[di].gpu();
-        const int dstDev = nap_->get_cuda(dstIdx);
+        const int dstDev = placement->get_cuda(dstIdx);
         std::cerr << "rank=" << rank_
                   << " colo sender.finish_prepare for colo to " << dstIdx
                   << "\n";
