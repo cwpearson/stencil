@@ -151,6 +151,7 @@ Show queue: `swqueue`
     * [ ] Autodetect CUDA-Aware MPI support
       * testing at build time with `ompi_info`
       * `MPI_T_cvar_read` / `MPI_T_cvar_get_info` ?
+    * [ ] take snapshots
   * future work
     * [ ] Non-rectangular regions
     * [ ] Remove requirement of CUDA (HPCG)
