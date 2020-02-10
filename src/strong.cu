@@ -24,7 +24,6 @@ int main(int argc, char **argv) {
     numSubdoms = size / topo.colocated_size() * devCount;
   }
 
-
   size_t x = 512;
   size_t y = 512;
   size_t z = 512;
@@ -38,7 +37,6 @@ int main(int argc, char **argv) {
     y = std::stoi(argv[2]);
     z = std::stoi(argv[3]);
   }
-
 
   MethodFlags methods = MethodFlags::All;
 
@@ -74,6 +72,7 @@ int main(int argc, char **argv) {
 
     dd.set_methods(methods);
     dd.set_radius(radius);
+    dd.set_placement(PlacementStrategy::NodeAware);
 
     dd.add_data<float>();
     dd.add_data<float>();

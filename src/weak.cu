@@ -24,21 +24,34 @@ int main(int argc, char **argv) {
     numSubdoms = size / topo.colocated_size() * devCount;
   }
 
-  size_t x = 512 * pow(numSubdoms, 0.33333) + 0.5; // round to nearest
-  size_t y = 512 * pow(numSubdoms, 0.33333) + 0.5;
-  size_t z = 512 * pow(numSubdoms, 0.33333) + 0.5;
+  size_t x = 512;
+  size_t y = 512;
+  size_t z = 512;
+  if (argc == 2) {
+    int val = std::stoi(argv[1]);
+    x = val;
+    y = val;
+    z = val;
+  } else if (4 == argc) {
+    x = std::stoi(argv[1]);
+    y = std::stoi(argv[2]);
+    z = std::stoi(argv[3]);
+  }
 
+  x = x * pow(numSubdoms, 0.33333) + 0.5; // round to nearest
+  y = y * pow(numSubdoms, 0.33333) + 0.5;
+  z = z * pow(numSubdoms, 0.33333) + 0.5;
 
   MethodFlags methods = MethodFlags::CudaMpi;
-  #ifdef WEAK_METHOD_COLO
+#ifdef WEAK_METHOD_COLO
   methods |= MethodFlags::CudaMpiColocated;
-  #endif
-  #ifdef WEAK_METHOD_PEER
+#endif
+#ifdef WEAK_METHOD_PEER
   methods |= MethodFlags::CudaMemcpyPeer;
-  #endif
-  #ifdef WEAK_METHOD_ALL
+#endif
+#ifdef WEAK_METHOD_ALL
   methods |= MethodFlags::All;
-  #endif
+#endif
 
   if (0 == rank) {
 #ifndef NDEBUG
@@ -72,6 +85,7 @@ int main(int argc, char **argv) {
 
     dd.set_methods(methods);
     dd.set_radius(radius);
+    dd.set_placement(PlacementStrategy::NodeAware);
 
     dd.add_data<float>();
     dd.add_data<float>();
