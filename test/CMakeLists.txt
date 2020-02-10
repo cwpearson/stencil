@@ -1,19 +1,19 @@
 if (CMAKE_CUDA_COMPILER)
     add_executable(test_cuda test_cuda_main.cu 
-    test_any_tx.cu
       test_cuda_allocator.cu
       test_cuda_array.cu 
       test_cuda_gpu_topo.cu 
       test_cuda_local_domain.cu 
-      test_cuda_mtregiontx.cu
       test_cuda_pack.cu 
       test_cuda_packer.cu
-      test_cuda_packmemcpycopier.cu
       test_cuda_rcstream.cu
-      test_cuda_regioncopier.cu
-      test_cuda_regiontx.cu
       test_cuda_translate.cu
     )
+    # test_cuda_packmemcpycopier.cu
+    # test_any_tx.cu
+    # test_cuda_regiontx.cu
+    # test_cuda_regioncopier.cu
+    # test_cuda_mtregiontx.cu
     target_include_directories(test_cuda SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda stencil)
     add_test(NAME test_cuda COMMAND ${MPIEXEC_EXECUTABLE} -n 1 cuda-memcheck test_cuda -a)

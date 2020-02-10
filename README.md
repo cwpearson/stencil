@@ -112,7 +112,9 @@ ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ./configure --prefix="blah" --with-cuda=/path/to/cuda
 ```
 
-## ON hal
+## On NCSA Hal
+
+Run scripts are in `scripts/hal`
 
 ```
 srun --partition=gpu --time=4:00:00 --ntasks=2 --nodes=2 --ntasks-per-node=1 --sockets-per-node=1 --cores-per-socket=8 --threads-per-core=4 --mem-per-cpu=1200 --wait=0 --export=ALL --gres=gpu:v100:2 --pty /bin/bash
@@ -129,6 +131,17 @@ make
 Show reservations: `scontrol show res`
 
 Show queue: `swqueue`
+
+## On OLCF Summit
+
+[jsrunvisualizer](jsrunvisualizer.olcf.ornl.gov)
+
+Run scripts are in `srcipts/summit`.
+
+```
+module load cmake
+module load cuda
+```
 
 ## Design Goals
   * v1 (AsHES)
