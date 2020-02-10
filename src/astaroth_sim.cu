@@ -68,8 +68,10 @@ int main(int argc, char **argv) {
     y = 512 * pow(numSubdoms, 0.33333) + 0.5;
     z = 512 * pow(numSubdoms, 0.33333) + 0.5;
   } else {
-    std::cerr << "WARN: unknown GPU " << prop.name << ", using " << kernelMillis
-              << "ms for kernel\n";
+    if (0 == rank) {
+      std::cerr << "WARN: unknown GPU " << prop.name << ", using "
+                << kernelMillis << "ms for kernel\n";
+    }
   }
 
   /*
