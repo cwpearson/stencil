@@ -20,6 +20,9 @@ int main(int argc, char **argv) {
   ("peer", "Enable PeerAccessSender")
   ("kernel", "Enable PeerCopySender")
   ("trivial", "Skip node-aware placement")
+  ("x", "x dim", cxxopts::value<int>()->default_value("512"))
+  ("y", "y dim", cxxopts::value<int>()->default_value("512"))
+  ("z", "z dim", cxxopts::value<int>()->default_value("512"))
   ("f,file", "File name", cxxopts::value<std::string>());
   // clang-format on
 
@@ -51,22 +54,16 @@ int main(int argc, char **argv) {
   }
 
   double kernelMillis = 50;
-  size_t x = 64;
-  size_t y = 64;
-  size_t z = 64;
+  size_t x = result["x"].as<int>();
+  size_t y = result["y"].as<int>(); 
+  size_t z = result["z"].as<int>();
 
   cudaDeviceProp prop;
   CUDA_RUNTIME(cudaGetDeviceProperties(&prop, 0));
   if (std::string("Tesla V100-SXM2-32GB") == prop.name) {
     kernelMillis = 20.1;
-    x = 512 * pow(numSubdoms, 0.33333) + 0.5; // round to nearest
-    y = 512 * pow(numSubdoms, 0.33333) + 0.5;
-    z = 512 * pow(numSubdoms, 0.33333) + 0.5;
   } else if (std::string("Tesla P100-SXM2-16GB") == prop.name) {
     kernelMillis = 34.1;
-    x = 512 * pow(numSubdoms, 0.33333) + 0.5;
-    y = 512 * pow(numSubdoms, 0.33333) + 0.5;
-    z = 512 * pow(numSubdoms, 0.33333) + 0.5;
   } else {
     if (0 == rank) {
       std::cerr << "WARN: unknown GPU " << prop.name << ", using "
