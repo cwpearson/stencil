@@ -586,7 +586,7 @@ private:
     }
 
     std::vector<size_t> bestMap = map;
-    double bestFit = -1;
+    double bestFit = -2;
     do {
 
       auto checkBandwidth = permute(bandwidth, map);
@@ -610,11 +610,11 @@ private:
 #endif
 
       const double score = match(checkBandwidth, comm);
-#if 0
+#if 1
       if (0 == rank)
         std::cerr << "score=" << score << "\n";
 #endif
-      assert(score >= -1);
+      assert(score >= -2);
       if (score > bestFit) {
         bestFit = score;
         bestMap = map;
@@ -838,7 +838,8 @@ public:
 
         for (size_t id = 0; id < gpusPerNode; ++id) {
           const Dim3 nodeIdx = partition_.node_idx(id);
-
+          const Dim3 nodeDim = partition_.node_dim();
+          const Dim3 size = partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
 
           // each component is owned by a rank and has a local ID
           size_t component = components[id];
@@ -846,8 +847,8 @@ public:
           const int rank = ranks[ri];
           const int gpuId = component % gpusPerRank;
           const int cuda = globalCudaIds[rank * gpusPerRank + gpuId];
-
-          std::cerr << "nodeIdx=" << nodeIdx << " rank=" << rank << " gpuId=" << gpuId << " cuda=" << cuda << "\n";
+          
+          std::cerr << "nodeIdx=" << nodeIdx  << " size=" << size << " rank=" << rank << " gpuId=" << gpuId << " cuda=" << cuda << "\n";
 
           rankAssignment[node * gpusPerNode + id] = rank;
           idForDomain[node * gpusPerNode + id] = gpuId;
@@ -876,6 +877,10 @@ public:
       rank_[idx] = rank;
       subdomainId_[idx] = subdomain;
       cuda_[idx] = cuda;
+
+      if (0 == mpiTopo.rank()) {
+        std::cerr << "idx=" << idx << " size=" << partition_.subdomain_size(idx) << " rank=" << rank << " subdomain=" << subdomain << " cuda=" << cuda << "\n";
+      }
 
       // convert rank and subdomain to idx
       if (idx_.size() <= rank)
