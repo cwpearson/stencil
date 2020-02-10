@@ -2,7 +2,7 @@
 
 A prototype MPI/CUDA stencil halo exchange library
 
-## Quick Start
+## Quick Start (weak scaling)
 
 Install MPI, CUDA, and CMake 3.13+, then
 
@@ -13,7 +13,7 @@ mkdir build
 cd build
 cmake ..
 make
-mpirun -n 4 src/main
+mpirun -n 4 src/weak
 ```
 
 ## Documentation
@@ -86,7 +86,7 @@ To mount a remote directory (where there are nvprof files to load):
 ```
 sshfs -o IdentityFile=/path/to/id_rsa user@host:/path /mount/location
 ```
-## Choosing a Different MPI
+## Choosing a different MPI
 
 ```
 cd build
@@ -146,13 +146,14 @@ Show queue: `swqueue`
     * [x] Control which GPUs a distributed domain should use
       * `DistributedDomain::use_gpus(const std::vector<int> &gpus)` 
     * [x] Control which exchange method should be used
+    
+  * future work
+    * [ ] take snapshots
     * [ ] `cudaMemcpy3D` and family for data transfers & allocations
       * supports pitched arrays
     * [ ] Autodetect CUDA-Aware MPI support
       * testing at build time with `ompi_info`
       * `MPI_T_cvar_read` / `MPI_T_cvar_get_info` ?
-    * [ ] take snapshots
-  * future work
     * [ ] Non-rectangular regions
     * [ ] Remove requirement of CUDA (HPCG)
     * [ ] support uneven radius
