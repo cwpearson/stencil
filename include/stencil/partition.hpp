@@ -591,7 +591,7 @@ private:
 
       auto checkBandwidth = permute(bandwidth, map);
 
-#if 1
+#if 0
       if (0 == rank) {
         std::cerr << "checking permutation";
         for (auto &e : map) {
@@ -610,15 +610,15 @@ private:
 #endif
 
       const double score = match(checkBandwidth, comm);
-      assert(score >= -1);
-#if 1
+#if 0
       if (0 == rank)
         std::cerr << "score=" << score << "\n";
 #endif
+      assert(score >= -1);
       if (score > bestFit) {
         bestFit = score;
         bestMap = map;
-#if 1
+#if 0
         if (0 == rank) {
           std::cerr << "new best placement:\n";
           for (auto &e : map) {
@@ -679,6 +679,8 @@ public:
       const std::vector<int> &rankCudaIds // which CUDA devices the calling
                                           // rank wants to contribute
   ) {
+
+    MPI_Barrier(MPI_COMM_WORLD);
 
     // TODO: actually check that everyone has the same number of GPUs
     const int gpusPerRank = rankCudaIds.size();
@@ -766,9 +768,13 @@ public:
 
       // do placement separately for each node
       for (int node = 0; node < numNodes; ++node) {
-        const Dim3 sysIdx = partition_.sys_idx(node);
 
+	const Dim3 sysIdx = partition_.sys_idx(node);
         auto &ranks = nodeRanks[node]; // ranks in this node
+        std::cerr << "placement on node " << node << " " << sysIdx << "\n";
+	std::cerr << "ranks:";
+	for (auto &e : ranks) std::cerr << " " << e;
+	std::cerr << "\n";
         assert(ranks.size() == ranksPerNode);
 
         // make a bandwidth matrix for the components in this node
@@ -780,11 +786,11 @@ public:
                  ++rj) { // rank j in this node
               for (size_t gj = 0; gj < gpusPerRank;
                    ++gj) { // gpu j in this rank
-                const size_t cj = rj * gpusPerRank + gj;
+		const size_t cj = rj * gpusPerRank + gj;
 
                 // recover the cuda device ID for this component
                 const int di = globalCudaIds[ranks[ri] * gpusPerRank + gi];
-                const int dj = globalCudaIds[ranks[ri] * gpusPerRank + gj];
+                const int dj = globalCudaIds[ranks[rj] * gpusPerRank + gj];
                 bandwidth[ci][cj] = gpuTopo.bandwidth(di, dj);
               }
             }
@@ -826,14 +832,22 @@ public:
         // which component each subdomain should be on
         std::vector<size_t> components = get_mapping(comm, bandwidth);
 
-        for (size_t id = 0; id < components.size(); ++id) {
+        std::cerr << "components:";
+	for (auto &e : components) std::cerr << " " << e;
+	std::cerr << "\n";
+
+        for (size_t id = 0; id < gpusPerNode; ++id) {
+          const Dim3 nodeIdx = partition_.node_idx(id);
+
 
           // each component is owned by a rank and has a local ID
           size_t component = components[id];
           const int ri = component / gpusPerRank;
           const int rank = ranks[ri];
           const int gpuId = component % gpusPerRank;
-          const int cuda = globalCudaIds[node * gpusPerNode + gpuId];
+          const int cuda = globalCudaIds[rank * gpusPerRank + gpuId];
+
+          std::cerr << "nodeIdx=" << nodeIdx << " rank=" << rank << " gpuId=" << gpuId << " cuda=" << cuda << "\n";
 
           rankAssignment[node * gpusPerNode + id] = rank;
           idForDomain[node * gpusPerNode + id] = gpuId;
