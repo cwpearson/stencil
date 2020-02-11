@@ -57,6 +57,7 @@ public:
   void prepare(std::vector<Message> &outbox,
                const std::vector<LocalDomain> &domains) {
     outbox_ = outbox;
+    std::sort(outbox_.begin(), outbox_.end());
 
     for (auto &e : domains) {
       domains_.push_back(&e);
@@ -131,7 +132,8 @@ public:
                  LocalDomain &dstDomain)
       : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain),
         dstDomain_(&dstDomain), srcStream_(srcDomain.gpu()),
-        dstStream_(dstDomain.gpu()) {}
+        dstStream_(dstDomain.gpu()) {
+}
 
   void prepare(std::vector<Message> &outbox) {
     packer_.prepare(srcDomain_, outbox);
@@ -396,7 +398,9 @@ public:
     sender_.start_prepare(packer_.size());
   }
 
-  void finish_prepare() { sender_.finish_prepare(); }
+  void finish_prepare() { 
+    sender_.finish_prepare();
+  }
 
   void send() noexcept {
     packer_.pack(stream_);
@@ -471,7 +475,8 @@ public:
                LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu()),
-        state_(State::None) {}
+        state_(State::None) {
+}
 
   ~RemoteSender() { CUDA_RUNTIME(cudaFreeHost(hostBuf_)); }
 
@@ -538,6 +543,8 @@ public:
     const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
+    assert(stream_.device() == domain_->gpu());
+    //std::cerr << "RemoteSender::send_d2h: rank=" << srcRank_ << " pack on gpu " << domain_->gpu() << "\n";
     packer_.pack(stream_);
 
     // copy to host buffer
