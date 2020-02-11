@@ -97,16 +97,19 @@ double bandwidth(int src, int dst) {
 static void enable_peer(const int src, const int dst) {
   if (src == dst) {
     detail::peer_[src][dst] = true;
+    detail::peer_[dst][src] = true;
     std::cerr << src << " -> " << dst << " peer access (same)\n";
   } else {
     int canAccess;
     std::cerr << "check peer " << src << "->" << dst <<"\n";
     CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
     if (canAccess) {
+      CUDA_RUNTIME(cudaSetDevice(src));
       cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
       if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
         cudaGetLastError(); // clear the error
         detail::peer_[src][dst] = true;
+        detail::peer_[dst][src] = true; // assume this will be enabled
         std::cerr << src << " -> " << dst << " peer access (peer)\n";
       } else if (cudaErrorInvalidDevice) {
         cudaGetLastError(); // clear the error
