@@ -100,25 +100,28 @@ static void enable_peer(const int src, const int dst) {
     std::cerr << src << " -> " << dst << " peer access (same)\n";
   } else {
     int canAccess;
+    std::cerr << "check peer " << src << "->" << dst <<"\n";
     CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
     if (canAccess) {
-      CUDA_RUNTIME(cudaSetDevice(src));
       cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
       if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+        cudaGetLastError(); // clear the error
         detail::peer_[src][dst] = true;
         std::cerr << src << " -> " << dst << " peer access (peer)\n";
       } else if (cudaErrorInvalidDevice) {
+        cudaGetLastError(); // clear the error
         detail::peer_[src][dst] = false;
         std::cerr << src << " -> " << dst << " (invalid device)\n";
       } else {
-        assert(0);
         detail::peer_[src][dst] = false;
+        CUDA_RUNTIME(err);
       }
     } else {
       detail::peer_[src][dst] = false;
       std::cerr << src << " -> " << dst << " (no access)\n";
     }
   }
+  CUDA_RUNTIME(cudaGetLastError());
 };
 
 static bool peer(const int src, const int dst) {
