@@ -44,7 +44,7 @@ private:
   std::vector<Message> outbox_;
 
   // one stream per source device
-  std::vector<RcStream> streams_;
+  std::map<int, RcStream> streams_;
 
   std::vector<const LocalDomain *> domains_;
 
@@ -64,16 +64,7 @@ public:
     // create a stream per device
     for (auto &msg : outbox_) {
       int srcDev = domains_[msg.srcGPU_]->gpu();
-      int dstDev = domains_[msg.dstGPU_]->gpu();
-      if (srcDev >= streams_.size()) {
-        streams_.resize(srcDev + 1);
-      }
-      if (dstDev >= streams_.size()) {
-        streams_.resize(dstDev + 1);
-      }
-    }
-    for (size_t i = 0; i < streams_.size(); ++i) {
-      streams_[i] = RcStream(i);
+      streams_.emplace(srcDev, RcStream(srcDev));
     }
   }
 
@@ -108,8 +99,8 @@ public:
   }
 
   void wait() {
-    for (auto &s : streams_) {
-      CUDA_RUNTIME(cudaStreamSynchronize(s));
+    for (auto &kv : streams_) {
+      CUDA_RUNTIME(cudaStreamSynchronize(kv.second));
     }
   }
 };
