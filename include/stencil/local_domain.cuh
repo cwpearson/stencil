@@ -1,6 +1,7 @@
 #pragma once
 
 #include <iostream>
+//#include <mpi.h>
 
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
@@ -43,23 +44,24 @@ public:
         devDataElemSize_(nullptr) {}
 
   ~LocalDomain() {
+    CUDA_RUNTIME(cudaGetLastError());
 
-    // int rank;
-    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    //int rank;
+    //MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    // std::cerr << "rank=" << rank << " ~LocalDomain(): device=" << dev_ << "\n";
+    //std::cerr << "dtor rank=" << rank << " ~LocalDomain(): device=" << dev_ << "\n";
     CUDA_RUNTIME(cudaSetDevice(dev_));
     for (auto p : currDataPtrs_) {
-      // std::cerr << "rank=" << rank << " ~LocalDomain(): cudaFree " << uintptr_t(p) << "\n";
-      CUDA_RUNTIME(cudaFree(p));
+      //std::cerr << "rank=" << rank << " ~LocalDomain(): cudaFree " << uintptr_t(p) << "\n";
+      if (p)  CUDA_RUNTIME(cudaFree(p));
     }
-    CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
+    if (devCurrDataPtrs_) CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
 
     for (auto p : nextDataPtrs_) {
-      CUDA_RUNTIME(cudaFree(p));
+      if (p) CUDA_RUNTIME(cudaFree(p));
     }
-
-    CUDA_RUNTIME(cudaFree(devDataElemSize_));
+    if (devDataElemSize_) CUDA_RUNTIME(cudaFree(devDataElemSize_));
+    CUDA_RUNTIME(cudaGetLastError());
   }
 
   /*
@@ -359,11 +361,15 @@ public:
   int gpu() const { return dev_; }
 
   void realize() {
+    CUDA_RUNTIME(cudaGetLastError());
     assert(currDataPtrs_.size() == nextDataPtrs_.size());
     assert(dataElemSize_.size() == nextDataPtrs_.size());
 
     // allocate each data region
     CUDA_RUNTIME(cudaSetDevice(dev_));
+    //int rank;
+    //MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    //std::cerr << "r" << rank << " dev=" << dev_ << "\n";
     for (size_t i = 0; i < num_data(); ++i) {
       size_t elemSz = dataElemSize_[i];
 
@@ -390,5 +396,6 @@ public:
     CUDA_RUNTIME(cudaMemcpy(devDataElemSize_, dataElemSize_.data(),
                             dataElemSize_.size() * sizeof(dataElemSize_[0]),
                             cudaMemcpyHostToDevice));
+    CUDA_RUNTIME(cudaGetLastError());
   }
 };
