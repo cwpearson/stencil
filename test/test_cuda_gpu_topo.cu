@@ -2,13 +2,11 @@
 
 #include "stencil/gpu_topology.hpp"
 
-TEST_CASE("get_gpu_distance_matrix", "[cuda]") {
+TEST_CASE("gpu_topo", "[cuda]") {
   INFO("should not fail");
 
-  
   // expect peer access to self
-  GpuTopology t({0});
-  t.enable_peer();
-  REQUIRE(t.peer(0,0));
+  gpu_topo::enable_peer(0,0);
+  REQUIRE(gpu_topo::peer(0,0));
 
 }

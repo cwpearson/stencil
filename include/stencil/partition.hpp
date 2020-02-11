@@ -337,7 +337,7 @@ public:
   Dim3 dim() override { return partition_.dim(); }
 
   Trivial(const Dim3 &size, // total domain size
-          MpiTopology &mpiTopo, GpuTopology &gpuTopo, size_t radius,
+          MpiTopology &mpiTopo, size_t radius,
           const std::vector<int> &rankCudaIds // which CUDA devices the calling
                                               // rank wants to contribute
   ) {
@@ -675,7 +675,7 @@ public:
 
   NodeAware(
       const Dim3 &size, // total domain size
-      MpiTopology &mpiTopo, GpuTopology &gpuTopo, size_t radius,
+      MpiTopology &mpiTopo, size_t radius,
       const std::vector<int> &rankCudaIds // which CUDA devices the calling
                                           // rank wants to contribute
   ) {
@@ -791,7 +791,7 @@ public:
                 // recover the cuda device ID for this component
                 const int di = globalCudaIds[ranks[ri] * gpusPerRank + gi];
                 const int dj = globalCudaIds[ranks[rj] * gpusPerRank + gj];
-                bandwidth[ci][cj] = gpuTopo.bandwidth(di, dj);
+                bandwidth[ci][cj] = gpu_topo::bandwidth(di, dj);
               }
             }
           }

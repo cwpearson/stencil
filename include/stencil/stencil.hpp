@@ -66,9 +66,6 @@ private:
   // MPI-related topology information
   MpiTopology mpiTopology_;
 
-  // GPU-related topology information
-  GpuTopology gpuTopology_;
-
   // the stencil radius
   size_t radius_;
 
@@ -186,24 +183,6 @@ cudaComputeModeExclusiveProcess = 3
       std::cerr << "\n";
     }
 
-    // determine topology info for used GPUs
-#if STENCIL_PRINT_TIMINGS == 1
-    for (int dev : nodeCudaIds) {
-      CUDA_RUNTIME(cudaSetDevice(dev));
-      CUDA_RUNTIME(cudaFree(0));
-    }
-    MPI_Barrier(MPI_COMM_WORLD);
-    start = MPI_Wtime();
-#endif
-    gpuTopology_ = GpuTopology(nodeCudaIds);
-#if STENCIL_PRINT_TIMINGS == 1
-    elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
-    if (0 == rank_) {
-      printf("time.gpu_topo %f s\n", maxElapsed);
-    }
-#endif
 
 #if STENCIL_PRINT_TIMINGS == 1
     MPI_Barrier(MPI_COMM_WORLD);
@@ -211,7 +190,11 @@ cudaComputeModeExclusiveProcess = 3
 #endif
     // Try to enable peer access between all GPUs
     nvtxRangePush("peer_en");
-    gpuTopology_.enable_peer();
+    for (const auto &srcGpu : gpus_){
+      for (const auto &dstGpu : nodeCudaIds) {
+        gpu_topo::enable_peer(srcGpu, dstGpu);
+      }
+    }
     nvtxRangePop();
 #if STENCIL_PRINT_TIMINGS == 1
     elapsed = MPI_Wtime() - start;
@@ -277,10 +260,10 @@ cudaComputeModeExclusiveProcess = 3
     Placement *placement = nullptr;
     if (strategy_ == PlacementStrategy::NodeAware) {
       placement =
-          new NodeAware(size_, mpiTopology_, gpuTopology_, radius_, gpus_);
+          new NodeAware(size_, mpiTopology_, radius_, gpus_);
     } else {
       placement =
-          new Trivial(size_, mpiTopology_, gpuTopology_, radius_, gpus_);
+          new Trivial(size_, mpiTopology_, radius_, gpus_);
     }
     assert(placement);
     nvtxRangePop();
@@ -396,14 +379,14 @@ cudaComputeModeExclusiveProcess = 3
               }
             }
             if (any_methods(MethodFlags::CudaMemcpyPeer)) {
-              if (dstRank == rank_ && gpuTopology_.peer(myDev, dstDev)) {
+              if (dstRank == rank_ && gpu_topo::peer(myDev, dstDev)) {
                 peerCopyOutboxes[di][dstGPU].push_back(sMsg);
                 goto send_planned;
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
               if (dstRank != rank_ && mpiTopology_.colocated(dstRank) &&
-                  gpuTopology_.peer(myDev, dstDev)) {
+                  gpu_topo::peer(myDev, dstDev)) {
                 assert(di < coloOutboxes.size());
                 coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
                 coloOutboxes[di][dstIdx].push_back(sMsg);
@@ -433,14 +416,14 @@ cudaComputeModeExclusiveProcess = 3
               }
             }
             if (any_methods(MethodFlags::CudaMemcpyPeer)) {
-              if (srcRank == rank_ && gpuTopology_.peer(srcDev, myDev)) {
+              if (srcRank == rank_ && gpu_topo::peer(srcDev, myDev)) {
                 // no recver needed
                 goto recv_planned;
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
               if (srcRank != rank_ && mpiTopology_.colocated(srcRank) &&
-                  gpuTopology_.peer(srcDev, myDev)) {
+                  gpu_topo::peer(srcDev, myDev)) {
                 assert(di < coloInboxes.size());
                 coloInboxes[di].emplace(srcIdx, std::vector<Message>());
                 coloInboxes[di][srcIdx].push_back(sMsg);

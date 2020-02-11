@@ -8,9 +8,13 @@
 #include "stencil/mat2d.hpp"
 #include "stencil/nvml.hpp"
 
+namespace gpu_topo {
+namespace detail {
+static std::map<int, std::map<int, bool>> peer_;
+
 /* return the distance between two GPUs
  */
-inline double get_gpu_distance(const int src, const int dst) {
+static double get_gpu_distance(const int src, const int dst) {
   const double SAME_DISTANCE = 0.1;
   const double NVLINK_DISTANCE = 1.0;
   const double INTERNAL_DISTANCE = 2.0;
@@ -84,94 +88,45 @@ inline double get_gpu_distance(const int src, const int dst) {
   return -1;
 }
 
-class GpuTopology {
-private:
-  std::vector<int> ids_; // cuda device IDs, not necessarily unique
+}; // namespace detail
 
-  std::map<int, std::map<int, bool>> peer_;
+double bandwidth(int src, int dst) {
+  return 1.0 / detail::get_gpu_distance(src, dst);
+}
 
-public:
-  /*! gather GPU topology information for the provided GPUs
-   */
-  GpuTopology(const std::vector<int> &ids) {
-
-    auto unique = std::set<int>(ids.begin(), ids.end());
-    ids_ = std::vector<int>(unique.begin(), unique.end());
-
-    for (auto src : ids_) {
-      for (auto dst : ids_) {
-        if (src == dst) {
-          peer_[src][dst] = true;
-        } else {
-          peer_[src][dst] = false;
-        }
+static void enable_peer(const int src, const int dst) {
+  if (src == dst) {
+    detail::peer_[src][dst] = true;
+    std::cerr << src << " -> " << dst << " peer access\n";
+  } else {
+    int canAccess;
+    CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
+    if (canAccess) {
+      CUDA_RUNTIME(cudaSetDevice(src));
+      cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
+      if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+        detail::peer_[src][dst] = true;
+        std::cerr << src << " -> " << dst << " peer access\n";
+      } else if (cudaErrorInvalidDevice) {
+        detail::peer_[src][dst] = false;
+      } else {
+        assert(0);
+        detail::peer_[src][dst] = false;
       }
+    } else {
+      detail::peer_[src][dst] = false;
     }
-  }
-  GpuTopology() : GpuTopology(std::vector<int>()) {}
-
-  const std::vector<int> &devices() const noexcept { return ids_; }
-
-  /* enable peer access where possible
-   */
-  void enable_peer() {
-
-    for (auto src : ids_) {
-      for (auto dst : ids_) {
-        if (src == dst) {
-          peer_[src][dst] = true;
-          peer_[dst][src] = true;
-          std::cerr << src << " -> " << dst << " peer access\n";
-          std::cerr << dst << " -> " << src << " peer access\n";
-        } else {
-          int canAccess;
-          CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
-          if (canAccess) {
-            CUDA_RUNTIME(cudaSetDevice(src))
-            cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
-            if (cudaSuccess == err ||
-                cudaErrorPeerAccessAlreadyEnabled == err) {
-              peer_[src][dst] = true;
-              std::cerr << src << " -> " << dst << " peer access\n";
-            } else if (cudaErrorInvalidDevice) {
-              peer_[src][dst] = false;
-            } else {
-              assert(0);
-              peer_[src][dst] = false;
-            }
-          } else {
-            peer_[src][dst] = false;
-          }
-        }
-      }
-    }
-  }
-
-  bool peer(int src, int dst) { return peer_[src][dst]; }
-
-  double bandwidth(int src, int dst) {
-    return 1.0 / get_gpu_distance(src, dst);
-  }
-
-  Mat2D<double> bandwidth_matrix() {
-    std::cerr << "bw matrix for";
-    for (auto &id : ids_) {
-      std::cerr << " " << id;
-    }
-    std::cerr << "\n";
-
-    Mat2D<double> ret(ids_.size());
-    for (auto &r : ret) {
-      r.resize(ids_.size());
-    }
-
-    for (size_t i = 0; i < ids_.size(); ++i) {
-      for (size_t j = 0; j < ids_.size(); ++j) {
-        double bw = bandwidth(ids_[i], ids_[j]);
-        ret[i][j] = bw;
-        ret[j][i] = bw;
-      }
-    }
-    return ret;
   }
 };
+
+static bool peer(const int src, const int dst) {
+  if (0 == detail::peer_.count(src)) {
+    return false;
+  } else if (0 == detail::peer_[src].count(dst)) {
+    return false;
+  } else {
+    return detail::peer_[src][dst];
+  }
+}
+
+} // namespace gpu_topo

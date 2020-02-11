@@ -37,6 +37,7 @@ add_executable(test_cpu test_cpu_main.cpp
   test_cpu_radius.cpp
   test_cpu_tx.cpp
 )
+set_source_files_properties(test_cpu_partition.cpp PROPERTIES LANGUAGE CUDA)
 target_include_directories(test_cpu SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
 target_link_libraries(test_cpu stencil)
 add_test(NAME test_cpu COMMAND ${MPIEXEC_EXECUTABLE} -n 1 test_cpu -a)
