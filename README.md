@@ -143,6 +143,8 @@ module load cmake
 module load cuda
 ```
 
+To control the compute mode, use `bsub -alloc_flags gpudefault` (see https://www.olcf.ornl.gov/for-users/system-user-guides/summitdev-quickstart-guide/#gpu-specific-jobs)
+
 ## Design Goals
   * v1 (AsHES)
     * [x] joint stencils over multiple data types (Astaroth)
