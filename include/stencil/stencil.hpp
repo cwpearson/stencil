@@ -392,7 +392,7 @@ cudaComputeModeExclusiveProcess = 3
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
-              if (dstRank != rank_ && mpiTopology_.colocated(dstRank) &&
+              if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) &&
                   gpu_topo::peer(myDev, dstDev)) {
                 assert(di < coloOutboxes.size());
                 coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
@@ -429,7 +429,7 @@ cudaComputeModeExclusiveProcess = 3
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
-              if (srcRank != rank_ && mpiTopology_.colocated(srcRank) &&
+              if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) &&
                   gpu_topo::peer(srcDev, myDev)) {
                 assert(di < coloInboxes.size());
                 coloInboxes[di].emplace(srcIdx, std::vector<Message>());
@@ -598,6 +598,7 @@ cudaComputeModeExclusiveProcess = 3
         const Dim3 srcIdx = kv.first;
         const int srcRank = placement->get_rank(srcIdx);
         const int srcGPU = placement->get_subdomain_id(srcIdx);
+        std::cerr << "rank " << rank_ << " create ColoRecver from " << srcIdx << " on " << srcRank << " (" << srcGPU << ")\n";
         coloRecvers_[di].emplace(
             srcIdx,
             ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
@@ -661,15 +662,16 @@ cudaComputeModeExclusiveProcess = 3
         recver.start_prepare(coloInboxes[di][srcIdx]);
       }
     }
-    std::cerr << "DistributedDomain::realize: finish_prepare ColocatedHaloSender/ColocatedHaloRecver\n";
+    std::cerr << "rank=" << rank_ << " DistributedDomain::realize: finish_prepare ColocatedHaloSender/ColocatedHaloRecver\n";
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
         const int srcDev = domains_[di].gpu();
+	const Dim3 srcIdx = placement->get_idx(rank_, di);
         const int dstDev = placement->get_cuda(dstIdx);
-        std::cerr << "rank=" << rank_
-                  << " colo sender.finish_prepare for colo to " << dstIdx
+        std::cerr << "rank=" << rank_ 
+                  << " colo sender.finish_prepare " << srcIdx << " -> " << dstIdx
                   << "\n";
         sender.finish_prepare();
       }
@@ -683,7 +685,7 @@ cudaComputeModeExclusiveProcess = 3
       }
     }
     nvtxRangePop(); // prep colocated
-    std::cerr << "DistributedDomain::realize: prepare remoteSender\n";
+    std::cerr << "rank=" << rank_ <<  "DistributedDomain::realize: prepare RemoteSender\n";
     nvtxRangePush("DistributedDomain::realize: prep remote");
     assert(remoteSenders_.size() == remoteRecvers_.size());
     for (size_t di = 0; di < remoteSenders_.size(); ++di) {
