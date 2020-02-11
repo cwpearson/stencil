@@ -99,6 +99,7 @@ private:
 public:
   DistributedDomain(size_t x, size_t y, size_t z)
       : size_(x, y, z), flags_(MethodFlags::All) {
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
 
@@ -204,8 +205,9 @@ cudaComputeModeExclusiveProcess = 3
       printf("time.peer_en %f s\n", maxElapsed);
     }
 #endif
+  CUDA_RUNTIME(cudaGetLastError());
   }
-
+  
   ~DistributedDomain() {
     for (auto &m : remoteSenders_) {
       for (auto &kv : m) {
@@ -250,6 +252,7 @@ cudaComputeModeExclusiveProcess = 3
   void set_gpus(const std::vector<int> &cudaIds) { gpus_ = cudaIds; }
 
   void realize(bool useUnified = false) {
+    CUDA_RUNTIME(cudaGetLastError());
 
     // compute domain placement
 #if STENCIL_PRINT_TIMINGS == 1
@@ -267,6 +270,7 @@ cudaComputeModeExclusiveProcess = 3
     }
     assert(placement);
     nvtxRangePop();
+    CUDA_RUNTIME(cudaGetLastError());
 #if STENCIL_PRINT_TIMINGS == 1
     double maxElapsed = -1;
     double elapsed = MPI_Wtime() - start;
@@ -281,6 +285,7 @@ cudaComputeModeExclusiveProcess = 3
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
+    CUDA_RUNTIME(cudaGetLastError());
     for (int domId = 0; domId < gpus_.size(); domId++) {
 
       const Dim3 idx = placement->get_idx(rank_, domId);
@@ -302,10 +307,12 @@ cudaComputeModeExclusiveProcess = 3
 
       domains_.push_back(sd);
     }
+    CUDA_RUNTIME(cudaGetLastError());
     // realize local domains
     for (auto &d : domains_) {
       d.realize();
     }
+    CUDA_RUNTIME(cudaGetLastError());
 #if STENCIL_PRINT_TIMINGS == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
@@ -582,6 +589,7 @@ cudaComputeModeExclusiveProcess = 3
         const Dim3 dstIdx = kv.first;
         const int dstRank = placement->get_rank(dstIdx);
         const int dstGPU = placement->get_subdomain_id(dstIdx);
+        std::cerr << "rank " << rank_ << " create ColoSender to " << dstIdx << " on " << dstRank << " (" << dstGPU << ")\n";
         coloSenders_[di].emplace(
             dstIdx,
             ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
@@ -617,11 +625,11 @@ cudaComputeModeExclusiveProcess = 3
     nvtxRangePop(); // create peer copy
 
     // prepare senders and receivers
-    std::cerr << "DistributedDomain::realize: prepare peerAccessSender\n";
+    std::cerr << "DistributedDomain::realize: prepare PeerAccessSender\n";
     nvtxRangePush("DistributedDomain::realize: prep peerAccessSender");
     peerAccessSender_.prepare(peerAccessOutbox, domains_);
     nvtxRangePop();
-    std::cerr << "DistributedDomain::realize: prepare peerCopySender\n";
+    std::cerr << "DistributedDomain::realize: prepare PeerCopySender\n";
     nvtxRangePush("DistributedDomain::realize: prep peerCopySender");
     for (size_t srcGPU = 0; srcGPU < peerCopySenders_.size(); ++srcGPU) {
       for (auto &kv : peerCopySenders_[srcGPU]) {
@@ -631,16 +639,17 @@ cudaComputeModeExclusiveProcess = 3
       }
     }
     nvtxRangePop();
-    std::cerr << "DistributedDomain::realize: prepare colocatedHaloSender\n";
+    std::cerr << "DistributedDomain::realize: start_prepare ColocatedHaloSender/ColocatedHaloRecver\n";
     nvtxRangePush("DistributedDomain::realize: prep colocated");
     assert(coloSenders_.size() == coloRecvers_.size());
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
         const Dim3 srcIdx = placement->get_idx(rank_, di);
         const Dim3 dstIdx = kv.first;
+        const int dstRank = placement->get_rank(dstIdx);
         auto &sender = kv.second;
         std::cerr << "rank=" << rank_ << " colo sender.start_prepare " << srcIdx
-                  << "->" << dstIdx << "\n";
+                  << "->" << dstIdx << "(rank " << dstRank << ")\n";
         sender.start_prepare(coloOutboxes[di][dstIdx]);
       }
       for (auto &kv : coloRecvers_[di]) {
@@ -652,6 +661,7 @@ cudaComputeModeExclusiveProcess = 3
         recver.start_prepare(coloInboxes[di][srcIdx]);
       }
     }
+    std::cerr << "DistributedDomain::realize: finish_prepare ColocatedHaloSender/ColocatedHaloRecver\n";
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
         const Dim3 dstIdx = kv.first;
