@@ -1,6 +1,7 @@
 #include "catch2/catch.hpp"
 
 #include "stencil/copy.cuh"
+#include "stencil/pack_kernel.cuh"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
 
@@ -68,7 +69,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     CUDA_RUNTIME(cudaMallocManaged(&dst, sizeof(TestType) * arrSz.x * arrSz.y));
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
-    pack<<<dimGrid, dimBlock>>>(dst, src, arrSz, pitch, Dim3(0, 0, arrSz.z - 1),
+    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 0, arrSz.z - 1),
                                 Dim3(arrSz.x, arrSz.y, 1), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
@@ -93,7 +94,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     CUDA_RUNTIME(cudaMallocManaged(&dst, sizeof(TestType) * arrSz.y * arrSz.z));
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
-    pack<<<dimGrid, dimBlock>>>(dst, src, arrSz, pitch, Dim3(0, 0, 0),
+    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 0, 0),
                                 Dim3(1, arrSz.y, arrSz.z), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
@@ -108,7 +109,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     CUDA_RUNTIME(cudaMallocManaged(&dst, sizeof(TestType) * arrSz.y * arrSz.z));
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
-    pack<<<dimGrid, dimBlock>>>(dst, src, arrSz, pitch, Dim3(0, 1, 0),
+    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 1, 0),
                                 Dim3(arrSz.x, 1, arrSz.z), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 

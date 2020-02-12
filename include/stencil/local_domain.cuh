@@ -5,6 +5,7 @@
 
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
+#include "stencil/pack_kernel.cuh"
 
 class DistributedDomain;
 
@@ -207,6 +208,31 @@ public:
 
   // the GPU this domain is on
   int gpu() const { return dev_; }
+
+  std::vector<unsigned char> interior_to_host(const size_t qi // quantity index
+  ) const {
+    
+    Dim3 pos = halo_pos(Dim3(0,0,0), true);
+    Dim3 ext = halo_extent(Dim3(0,0,0));
+    const size_t bytes = halo_bytes(Dim3(0,0,0), qi);
+
+    // pack quantity
+    CUDA_RUNTIME(cudaSetDevice(gpu()));
+    void *devBuf = nullptr;
+    CUDA_RUNTIME(cudaMalloc(&devBuf, bytes));
+    const dim3 dimBlock = make_block_dim(ext, 512);
+    const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+    pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos, ext, elem_size(qi));
+
+    // copy quantity to host
+    std::vector<unsigned char> hostBuf(bytes);
+    CUDA_RUNTIME(cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
+
+    // free device buffer
+    CUDA_RUNTIME(cudaFree(devBuf));
+
+    return hostBuf;
+  }
 
   void realize() {
     CUDA_RUNTIME(cudaGetLastError());
