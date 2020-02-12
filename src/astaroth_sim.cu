@@ -83,7 +83,7 @@ int main(int argc, char **argv) {
     methods |= MethodFlags::CudaMpi;
   }
   if (result["cuda-aware-mpi"].as<bool>()) {
-    methods |= MethodFlags::CudaMpi;
+    methods |= MethodFlags::CudaAwareMpi;
   }
   if (result["colocated"].as<bool>()) {
     methods |= MethodFlags::CudaMpiColocated;
