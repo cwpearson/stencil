@@ -97,11 +97,10 @@ TEST_CASE("exchange") {
 
   MPI_Barrier(MPI_COMM_WORLD);
 
-
   // test initialization
   INFO("test init");
   for (auto &d : dd.domains()) {
-    const Dim3 ext = d.halo_extent(Dim3(0,0,0));
+    const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
       auto vec = d.interior_to_host(qi);
@@ -110,7 +109,7 @@ TEST_CASE("exchange") {
       std::vector<TestType1> interior(ext.flatten());
       REQUIRE(vec.size() == interior.size() * sizeof(TestType1));
       std::memcpy(interior.data(), vec.data(), vec.size());
-      
+
       for (int64_t z = 0; z < ext.z; ++z) {
         for (int64_t y = 0; y < ext.y; ++y) {
           for (int64_t x = 0; x < ext.x; ++x) {
@@ -118,8 +117,8 @@ TEST_CASE("exchange") {
             REQUIRE(unpack_x(val) == x + radius);
             REQUIRE(unpack_y(val) == y + radius);
             REQUIRE(unpack_z(val) == z + radius);
-          }        
-        }        
+          }
+        }
       }
     }
   }
@@ -130,10 +129,9 @@ TEST_CASE("exchange") {
   dd.exchange();
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
-  #if 0
   INFO("interior should be unchanged");
   for (auto &d : dd.domains()) {
-    const Dim3 ext = d.halo_extent(Dim3(0,0,0));
+    const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
       auto vec = d.interior_to_host(qi);
@@ -142,7 +140,7 @@ TEST_CASE("exchange") {
       std::vector<TestType1> interior(ext.flatten());
       REQUIRE(vec.size() == interior.size() * sizeof(TestType1));
       std::memcpy(interior.data(), vec.data(), vec.size());
-      
+
       for (int64_t z = 0; z < ext.z; ++z) {
         for (int64_t y = 0; y < ext.y; ++y) {
           for (int64_t x = 0; x < ext.x; ++x) {
@@ -150,10 +148,9 @@ TEST_CASE("exchange") {
             REQUIRE(unpack_x(val) == x + radius);
             REQUIRE(unpack_y(val) == y + radius);
             REQUIRE(unpack_z(val) == z + radius);
-          }        
-        }        
+          }
+        }
       }
     }
   }
-  #endif
 }
