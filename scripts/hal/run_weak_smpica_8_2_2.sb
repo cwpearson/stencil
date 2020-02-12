@@ -1,0 +1,22 @@
+#!/bin/bash
+#SBATCH --job-name="weak_smpica_8_2_2"
+#SBATCH --output="weak_smpica_8_2_2.%j.%N.out"
+#SBATCH --error="weak_smpica_8_2_2.%j.%N.err"
+#SBATCH --partition=gpu
+#SBATCH --time=00:10:00
+#SBATCH --nodes=8
+#SBATCH --ntasks-per-node=1
+#SBATCH --sockets-per-node=2
+#SBATCH --cores-per-socket=20
+#SBATCH --threads-per-core=4
+#SBATCH --mem-per-cpu=1200
+#SBATCH --export=ALL
+#SBATCH --gres=gpu:v100:4
+
+module purge
+module load cuda
+module load spectrum_smpi
+
+cd /home/cpearson/repos/stencil/build-smpica
+git rev-parse HEAD
+mpirun ./src/weak
