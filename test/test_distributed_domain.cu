@@ -1,5 +1,7 @@
 #include "catch2/catch.hpp"
 
+#include <cstring> // std::memcpy
+
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
@@ -72,6 +74,8 @@ TEST_CASE("exchange") {
   DistributedDomain dd(10, 10, 10);
   dd.set_radius(radius);
   auto dh1 = dd.add_data<TestType1>();
+  dd.set_methods(MethodFlags::CudaMpi);
+
   INFO("realize");
   dd.realize();
 
@@ -81,7 +85,7 @@ TEST_CASE("exchange") {
   MPI_Barrier(MPI_COMM_WORLD);
 
   INFO("init");
-  dim3 dimGrid(2, 2, 2);
+  dim3 dimGrid(10, 10, 10);
   dim3 dimBlock(8, 8, 8);
   for (auto &d : dd.domains()) {
     REQUIRE(d.get_curr(dh1) != nullptr);
@@ -93,9 +97,63 @@ TEST_CASE("exchange") {
 
   MPI_Barrier(MPI_COMM_WORLD);
 
+
+  // test initialization
+  INFO("test init");
+  for (auto &d : dd.domains()) {
+    const Dim3 ext = d.halo_extent(Dim3(0,0,0));
+
+    for (size_t qi = 0; qi < d.num_data(); ++qi) {
+      auto vec = d.interior_to_host(qi);
+
+      // make sure we can access data as a TestType1
+      std::vector<TestType1> interior(ext.flatten());
+      REQUIRE(vec.size() == interior.size() * sizeof(TestType1));
+      std::memcpy(interior.data(), vec.data(), vec.size());
+      
+      for (int64_t z = 0; z < ext.z; ++z) {
+        for (int64_t y = 0; y < ext.y; ++y) {
+          for (int64_t x = 0; x < ext.x; ++x) {
+            TestType1 val = interior[z * (ext.y * ext.x) + y * (ext.x) + x];
+            REQUIRE(unpack_x(val) == x + radius);
+            REQUIRE(unpack_y(val) == y + radius);
+            REQUIRE(unpack_z(val) == z + radius);
+          }        
+        }        
+      }
+    }
+  }
+
+  MPI_Barrier(MPI_COMM_WORLD);
+
   INFO("exchange");
   dd.exchange();
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
-  // test exchange
+  #if 0
+  INFO("interior should be unchanged");
+  for (auto &d : dd.domains()) {
+    const Dim3 ext = d.halo_extent(Dim3(0,0,0));
+
+    for (size_t qi = 0; qi < d.num_data(); ++qi) {
+      auto vec = d.interior_to_host(qi);
+
+      // make sure we can access data as a TestType1
+      std::vector<TestType1> interior(ext.flatten());
+      REQUIRE(vec.size() == interior.size() * sizeof(TestType1));
+      std::memcpy(interior.data(), vec.data(), vec.size());
+      
+      for (int64_t z = 0; z < ext.z; ++z) {
+        for (int64_t y = 0; y < ext.y; ++y) {
+          for (int64_t x = 0; x < ext.x; ++x) {
+            TestType1 val = interior[z * (ext.y * ext.x) + y * (ext.x) + x];
+            REQUIRE(unpack_x(val) == x + radius);
+            REQUIRE(unpack_y(val) == y + radius);
+            REQUIRE(unpack_z(val) == z + radius);
+          }        
+        }        
+      }
+    }
+  }
+  #endif
 }
