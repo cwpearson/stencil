@@ -27,7 +27,6 @@ TEST_CASE("packer", "[packer]") {
   msgs.push_back(Message(Dim3(0, 0, 1), 0, 0));
   DevicePacker packer;
   packer.prepare(&ld, msgs);
-  std::cerr << packer.size() << "\n";
 
   DeviceUnpacker unpacker;
   unpacker.prepare(&dst, msgs);
