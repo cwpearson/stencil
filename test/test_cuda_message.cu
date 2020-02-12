@@ -54,9 +54,24 @@ TEST_CASE("message") {
     msgs.push_back(MESSAGE(1, 1, 0));
     msgs.push_back(MESSAGE(0, 0, 0));
 
-    auto result = remove_overlap(msgs);
+    auto result = Message::remove_overlapping(msgs);
     REQUIRE(result.size() == 2);
     REQUIRE(result[0] == MESSAGE(1, 0, 0));
     REQUIRE(result[1] == MESSAGE(0, 0, 0));
+  }
+
+  SECTION("real case") {
+    REQUIRE(MESSAGE(0, 0, 1).contains(MESSAGE(1, 1, 1)));
+    REQUIRE(MESSAGE(0, 0, 1).contains(MESSAGE(0, 1, 1)));
+
+    std::vector<Message> msgs;
+    msgs.push_back(MESSAGE(1, 1, 1));
+    msgs.push_back(MESSAGE(0, 1, 1));
+    msgs.push_back(MESSAGE(0, 0, 1));
+
+    auto result = Message::remove_overlapping(msgs);
+
+    REQUIRE(result.size() == 1);
+    REQUIRE(result[0] == MESSAGE(0, 0, 1));
   }
 }

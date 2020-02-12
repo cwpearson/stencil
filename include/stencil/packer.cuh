@@ -2,6 +2,7 @@
 
 #include <vector>
 
+#include "align.cuh"
 #include "local_domain.cuh"
 #include "pack_kernel.cuh"
 #include "tx_common.hpp"
@@ -36,94 +37,59 @@ public:
   virtual ~Unpacker() {}
 };
 
-
-
+/*! pack all quantities in a single domain into dst
+ */
 __global__ static void
-dev_packer_pack_domain(void *dst,             // buffer to pack into
-                       void **srcs,           // raw pointer to each quanitity
-                       size_t *elemSizes,     // element size for each quantity
-                       const size_t nQuants,  // number of quantities
-                       const Dim3 rawSz,      // domain size (elements)
-                       const Dim3 *positions, // numHalos positions
-                       const Dim3 *extents,   // numhalos extents
-                       const size_t *offsets, // numHalos * nQuants offsets
-                       const size_t numHalos) {
-  size_t oi = 0; // offset index
-  for (size_t mi = 0; mi < numHalos; ++mi) {
-    Dim3 pos = positions[mi];
-    Dim3 ext = extents[mi];
-    for (size_t qi = 0; qi < nQuants; ++qi, ++oi) {
-      void *src = srcs[qi];
-      const size_t elemSz = elemSizes[qi];
-      const size_t offset = offsets[oi];
-      void *dstp = &((char *)dst)[offset];
-
-      grid_pack(dstp, src, rawSz, pos, ext, elemSz);
-    }
+dev_packer_pack_domain(void *dst,            // buffer to pack into
+                       void **srcs,          // raw pointer to each quanitity
+                       size_t *elemSizes,    // element size for each quantity
+                       const size_t nQuants, // number of quantities
+                       const Dim3 rawSz,     // domain size (elements)
+                       const Dim3 pos,       // halo position
+                       const Dim3 ext        // halo extent
+) {
+  size_t offset = 0;
+  for (size_t qi = 0; qi < nQuants; ++qi) {
+    const size_t elemSz = elemSizes[qi];
+    offset = next_align_of(offset, elemSz);
+    void *src = srcs[qi];
+    void *dstp = &((char *)dst)[offset];
+    grid_pack(dstp, src, rawSz, pos, ext, elemSz);
+    offset += elemSz * ext.flatten();
   }
 }
-
 
 class DevicePacker : public Packer {
 private:
   LocalDomain *domain_;
 
   std::vector<Message> dirs_;
-  size_t size_;
-  Dim3 *devPositions_;
-  Dim3 *devExtents_;
-  size_t *devOffsets_;
-  Dim3 shape_;
+  int64_t size_;
 
-  void *devBuf_;
+  char *devBuf_;
 
 public:
-  DevicePacker()
-      : devPositions_(0), devExtents_(0), devOffsets_(0), devBuf_(0) {}
+  DevicePacker() : domain_(nullptr), size_(-1), devBuf_(0) {}
 
   virtual void prepare(LocalDomain *domain,
                        const std::vector<Message> &messages) override {
     domain_ = domain;
     dirs_ = messages;
+    std::cerr << dirs_.size() << "\n";
+    dirs_ = Message::remove_overlapping(dirs_);
     std::sort(dirs_.begin(), dirs_.end());
+    std::cerr << dirs_.size() << "\n";
 
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    // compute the buffer size, and track halo positions and extents
-    std::vector<Dim3> positions;
-    std::vector<Dim3> extents;
-    std::vector<size_t> offsets;
+    // compute the required buffer size for all messages
     size_ = 0;
-    shape_ = Dim3(0,0,0);
     for (const auto &msg : dirs_) {
-      positions.push_back(domain_->halo_pos(msg.dir_, true /*halo*/));
-      Dim3 haloExt = domain_->halo_extent(msg.dir_);
-      shape_.x = std::max(shape_.x, haloExt.x);
-      shape_.y = std::max(shape_.y, haloExt.y);
-      shape_.z = std::max(shape_.z, haloExt.z);
-      extents.push_back(haloExt);
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        size_t numBytes = domain_->halo_bytes(msg.dir_, i);
-        offsets.push_back(numBytes);
-        size_ += numBytes;
+      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+        size_ = next_align_of(size_, domain_->elem_size(qi));
+        size_ += domain_->halo_bytes(msg.dir_, qi);
       }
     }
-    assert(positions.size() == extents.size());
-    assert(offsets.size() == positions.size() * domain_->num_data());
-
-    // copy halo info to the GPU
-    size_t posBytes = positions.size() * sizeof(positions[0]);
-    size_t extBytes = extents.size() * sizeof(extents[0]);
-    size_t offBytes = offsets.size() * sizeof(offsets[0]);
-    CUDA_RUNTIME(cudaMalloc(&devPositions_, posBytes));
-    CUDA_RUNTIME(cudaMalloc(&devExtents_, extBytes));
-    CUDA_RUNTIME(cudaMalloc(&devOffsets_, offBytes));
-    CUDA_RUNTIME(cudaMemcpy(devPositions_, positions.data(), posBytes,
-                            cudaMemcpyHostToDevice));
-    CUDA_RUNTIME(cudaMemcpy(devExtents_, extents.data(), extBytes,
-                            cudaMemcpyHostToDevice));
-    CUDA_RUNTIME(cudaMemcpy(devOffsets_, offsets.data(), offBytes,
-                            cudaMemcpyHostToDevice));
 
     // allocate the buffer for the packing
     CUDA_RUNTIME(cudaMalloc(&devBuf_, size_));
@@ -131,13 +97,24 @@ public:
 
   virtual void pack(cudaStream_t stream) override {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-    const dim3 dimBlock = make_block_dim(shape_, 512);
-    const dim3 dimGrid = (shape_ + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-    dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream>>>(
-        devBuf_, domain_->dev_curr_datas(), domain_->dev_elem_sizes(),
-        domain_->num_data(), domain_->raw_size(), devPositions_, devExtents_,
-        devOffsets_, dirs_.size());
-    CUDA_RUNTIME(cudaGetLastError());
+
+    size_t offset = 0;
+    for (const auto &msg : dirs_) {
+      const Dim3 ext = domain_->halo_extent(msg.dir_);
+      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*interior*/);
+      const dim3 dimBlock = make_block_dim(ext, 512);
+      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      assert(offset < size_);
+      dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream>>>(
+          &devBuf_[offset], domain_->dev_curr_datas(),
+          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
+          pos, ext);
+      CUDA_RUNTIME(cudaGetLastError());
+      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+        offset = next_align_of(offset, domain_->elem_size(qi));
+        offset += domain_->halo_bytes(msg.dir_, qi);
+      }
+    }
   }
 
   virtual size_t size() override { return size_; }
@@ -187,24 +164,19 @@ __global__ static void
 dev_unpacker_unpack_domain(void **dsts,       // buffer to pack into
                            void *src,         // raw pointer to each quanitity
                            size_t *elemSizes, // element size for each quantity
-                           const size_t nQuants,  // number of quantities
-                           const Dim3 rawSz,      // domain size (elements)
-                           const Dim3 *positions, // numHalos positions
-                           const Dim3 *extents,   // numhalos extents
-                           const size_t *offsets, // numHalos * nQuants offsets
-                           const size_t numHalos) {
-  size_t oi = 0; // offset index
-  for (size_t mi = 0; mi < numHalos; ++mi) {
-    Dim3 pos = positions[mi];
-    Dim3 ext = extents[mi];
-    for (size_t qi = 0; qi < nQuants; ++qi, ++oi) {
-      void *dst = dsts[qi];
-      const size_t elemSz = elemSizes[qi];
-      const size_t offset = offsets[oi];
-      void *srcp = &((char *)src)[offset];
-
-      dev_unpacker_grid_unpack(dst, rawSz, pos, ext, srcp, elemSz);
-    }
+                           const size_t nQuants, // number of quantities
+                           const Dim3 rawSz,     // domain size (elements)
+                           const Dim3 pos,       // halo position
+                           const Dim3 ext        // halo extent
+) {
+  size_t offset = 0;
+  for (size_t qi = 0; qi < nQuants; ++qi) {
+    void *dst = dsts[qi];
+    const size_t elemSz = elemSizes[qi];
+    offset = next_align_of(offset, elemSz);
+    void *srcp = &((char *)src)[offset];
+    dev_unpacker_grid_unpack(dst, rawSz, pos, ext, srcp, elemSz);
+    offset += elemSz * ext.flatten();
   }
 }
 
@@ -213,61 +185,30 @@ private:
   LocalDomain *domain_;
 
   std::vector<Message> dirs_;
-  size_t size_;
-  Dim3 *devPositions_;
-  Dim3 *devExtents_;
-  size_t *devOffsets_;
-  Dim3 shape_;
+  int64_t size_;
 
-  void *devBuf_;
+  char *devBuf_;
 
 public:
-  DeviceUnpacker()
-      : devPositions_(0), devExtents_(0), devOffsets_(0), devBuf_(0) {}
+  DeviceUnpacker() : domain_(nullptr), size_(-1), devBuf_(0) {}
 
   virtual void prepare(LocalDomain *domain,
                        const std::vector<Message> &messages) override {
     domain_ = domain;
     dirs_ = messages;
+    dirs_ = Message::remove_overlapping(dirs_);
     std::sort(dirs_.begin(), dirs_.end());
 
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    // compute the buffer size, and track halo positions and extents
-    std::vector<Dim3> positions;
-    std::vector<Dim3> extents;
-    std::vector<size_t> offsets;
+    // compute the required buffer size for all messages
     size_ = 0;
-    shape_ = Dim3(0,0,0);
     for (const auto &msg : dirs_) {
-      positions.push_back(domain_->halo_pos(msg.dir_, false /*interior*/));
-      const Dim3 haloExtent = domain_->halo_extent(msg.dir_);
-      shape_.x = max(shape_.x, haloExtent.x);
-      shape_.y = max(shape_.y, haloExtent.y);
-      shape_.z = max(shape_.z, haloExtent.z);
-      extents.push_back(haloExtent);
-      for (size_t i = 0; i < domain_->num_data(); ++i) {
-        size_t numBytes = domain_->halo_bytes(msg.dir_, i);
-        offsets.push_back(numBytes);
-        size_ += numBytes;
+      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+        size_ = next_align_of(size_, domain_->elem_size(qi));
+        size_ += domain_->halo_bytes(msg.dir_, qi);
       }
     }
-    assert(positions.size() == extents.size());
-    assert(offsets.size() == positions.size() * domain_->num_data());
-
-    // copy halo info to the GPU
-    size_t posBytes = positions.size() * sizeof(positions[0]);
-    size_t extBytes = extents.size() * sizeof(extents[0]);
-    size_t offBytes = offsets.size() * sizeof(offsets[0]);
-    CUDA_RUNTIME(cudaMalloc(&devPositions_, posBytes));
-    CUDA_RUNTIME(cudaMalloc(&devExtents_, extBytes));
-    CUDA_RUNTIME(cudaMalloc(&devOffsets_, offBytes));
-    CUDA_RUNTIME(cudaMemcpy(devPositions_, positions.data(), posBytes,
-                            cudaMemcpyHostToDevice));
-    CUDA_RUNTIME(cudaMemcpy(devExtents_, extents.data(), extBytes,
-                            cudaMemcpyHostToDevice));
-    CUDA_RUNTIME(cudaMemcpy(devOffsets_, offsets.data(), offBytes,
-                            cudaMemcpyHostToDevice));
 
     // allocate the buffer that will be unpacked
     CUDA_RUNTIME(cudaMalloc(&devBuf_, size_));
@@ -276,13 +217,23 @@ public:
   virtual void unpack(cudaStream_t stream) override {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    const dim3 dimBlock = make_block_dim(shape_, 512);
-    const dim3 dimGrid = (shape_ + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-    dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream>>>(
-        domain_->dev_curr_datas(), devBuf_, domain_->dev_elem_sizes(),
-        domain_->num_data(), domain_->raw_size(), devPositions_, devExtents_,
-        devOffsets_, dirs_.size());
-    CUDA_RUNTIME(cudaGetLastError());
+    size_t offset = 0;
+    for (const auto &msg : dirs_) {
+      const Dim3 ext = domain_->halo_extent(msg.dir_);
+      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*exterior*/);
+
+      const dim3 dimBlock = make_block_dim(ext, 512);
+      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream>>>(
+          domain_->dev_curr_datas(), &devBuf_[offset],
+          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
+          pos, ext);
+      CUDA_RUNTIME(cudaGetLastError());
+      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+        offset = next_align_of(offset, domain_->elem_size(qi));
+        offset += domain_->halo_bytes(msg.dir_, qi);
+      }
+    }
   }
 
   virtual size_t size() override { return size_; }

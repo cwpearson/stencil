@@ -1,5 +1,6 @@
 if (CMAKE_CUDA_COMPILER)
     add_executable(test_cuda test_cuda_main.cu 
+      test_cuda_align.cu
       test_cuda_allocator.cu
       test_cuda_array.cu 
       test_cuda_gpu_topo.cu 

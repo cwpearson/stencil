@@ -35,35 +35,38 @@ public:
       return other.dir_ * mask == dir_;
     }
   }
-};
 
-/*! \brief remove overlapping messages from `msgs`
+  /*! \brief remove overlapping messages from `msgs`
 
-    e.g., [1,0,0] (+x face) and [1,1,0] (+x+y edge) from the same src tp the
-   same destination overlap
-*/
-static std::vector<Message> remove_overlap(const std::vector<Message> &msgs) {
-  std::vector<Message> ret = msgs;
+      e.g., [1,0,0] (+x face) and [1,1,0] (+x+y edge) from the same src tp the
+     same destination overlap
+  */
+  static std::vector<Message>
+  remove_overlapping(const std::vector<Message> &msgs) {
+    std::vector<Message> ret = msgs;
 
-  // check every message to see which messages it contains
-  for (size_t i = 0; i < ret.size(); ++i) {
-    std::vector<size_t> containees;
-    for (size_t j = 0; j < ret.size(); ++j) {
-      if (i == j)
-        continue;
-      if (ret[i].contains(ret[j])) {
-        containees.push_back(j);
+    // check every message to see which messages it contains
+    for (size_t i = 0; i < ret.size(); ++i) {
+      std::vector<size_t> containees;
+      for (size_t j = 0; j < ret.size(); ++j) {
+        if (i == j)
+          continue;
+        if (ret[i].contains(ret[j])) {
+          containees.push_back(j);
+        }
+      }
+
+      // remove any contained messages from the back.
+      // if any are removed, start the search again
+      for (int64_t j = containees.size() - 1; j >= 0; --j) {
+        ret.erase(ret.begin() + containees[j]);
+        i = 0;
       }
     }
 
-    // remove any contained messages from the back
-    for (int64_t j = containees.size() - 1; j >= 0; --j) {
-      ret.erase(ret.begin() + containees[j]);
-    }
+    return ret;
   }
-
-  return ret;
-}
+};
 
 enum class MsgKind {
   ColocatedEvt = 0,
