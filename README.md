@@ -69,12 +69,27 @@ With the default profiling settings, we sometimes see a crash on Nsight Systems 
 Restrict profiling to CUDA, NVTX, and OS calls.
 
 ```
-nsys profile -t cuda,nvtx,osrt mpirun -n <int> src/astaroth-sim
+nsys profile -t cuda,nvtx,osrt mpirun -n <int> blah
 ```
+
+to enable IP sample, backtrace, and scheduling data collection
+```
+sudo sh -c 'echo 1 >/proc/sys/kernel/perf_event_paranoid'
+```
+
+Use the Nsight Systems application to view the resulting `qdrep` file.
+
+Make sure your `nsight-sys` version at least matches the `nsys` version used to collect the profile.
+
+### 2019.5.2
 
 Nsight Systems 2019.5.2 allows `-t mpi`, but on amd64 it causes the importer to hang.
 
-Use the Nsight Systems application to view the resulting `qdrep` file.
+### 2020.1.1
+
+```
+nsys profile -t nvtx,cuda,mpi mpirun -n <int> blah
+```
 
 ## Profiling with nvprof
 
