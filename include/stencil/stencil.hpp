@@ -722,6 +722,12 @@ cudaComputeModeExclusiveProcess = 3
     double start = MPI_Wtime();
 #endif
 
+	/*! Try to start sends in order from longest to shortest
+	 * we expect remote to be longest, followed by peer copy, followed by colo
+	 * colo is shorter than peer copy due to the node-aware data placement: 
+	 * if we try to place bigger exchanges nearby, they will be faster
+	 */
+
     // start remote send d2h
     fprintf(stderr, "rank=%d send remote d2h\n", rank_);
     nvtxRangePush("DD::exchange: remote send d2h");
@@ -729,6 +735,18 @@ cudaComputeModeExclusiveProcess = 3
       for (auto &kv : domSenders) {
         StatefulSender *sender = kv.second;
         sender->send();
+      }
+    }
+    nvtxRangePop();
+
+
+    // send same-rank messages
+    fprintf(stderr, "rank=%d send peer copy\n", rank_);
+    nvtxRangePush("DD::exchange: peer copy send");
+    for (auto &src : peerCopySenders_) {
+      for (auto &kv : src) {
+        PeerCopySender &sender = kv.second;
+        sender.send();
       }
     }
     nvtxRangePop();
@@ -744,18 +762,7 @@ cudaComputeModeExclusiveProcess = 3
     }
     nvtxRangePop();
 
-    // send same-rank messages
-    fprintf(stderr, "rank=%d send peer copy\n", rank_);
-    nvtxRangePush("DD::exchange: peer copy send");
-    for (auto &src : peerCopySenders_) {
-      for (auto &kv : src) {
-        PeerCopySender &sender = kv.second;
-        sender.send();
-      }
-    }
-    nvtxRangePop();
-
-    // send local messages
+    // send self messages
     fprintf(stderr, "rank=%d send peer access\n", rank_);
     nvtxRangePush("DD::exchange: peer access send");
     peerAccessSender_.send();
