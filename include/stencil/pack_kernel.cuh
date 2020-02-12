@@ -16,11 +16,11 @@ inline int64_t nextPowerOfTwo(int64_t x) {
 
 inline Dim3 make_block_dim(const Dim3 extent, int64_t threads) {
   Dim3 ret;
-  ret.x = min(threads, nextPowerOfTwo(extent.x));
+  ret.x = std::min(threads, nextPowerOfTwo(extent.x));
   threads /= ret.x;
-  ret.y = min(threads, nextPowerOfTwo(extent.y));
+  ret.y = std::min(threads, nextPowerOfTwo(extent.y));
   threads /= ret.y;
-  ret.z = min(threads, nextPowerOfTwo(extent.z));
+  ret.z = std::min(threads, nextPowerOfTwo(extent.z));
   assert(ret.x <= 1024);
   assert(ret.y <= 1024);
   assert(ret.z <= 1024);
@@ -65,9 +65,10 @@ static __device__ void grid_pack(void *__restrict__ dst,
   }
 }
 
-__global__ static void
-pack_kernel(void *__restrict__ dst, const void *__restrict__ src,
-                     const Dim3 srcSize, const Dim3 srcPos,
-                     const Dim3 srcExtent, const size_t elemSize) {
+__global__ static void pack_kernel(void *__restrict__ dst,
+                                   const void *__restrict__ src,
+                                   const Dim3 srcSize, const Dim3 srcPos,
+                                   const Dim3 srcExtent,
+                                   const size_t elemSize) {
   grid_pack(dst, src, srcSize, srcPos, srcExtent, elemSize);
 }
