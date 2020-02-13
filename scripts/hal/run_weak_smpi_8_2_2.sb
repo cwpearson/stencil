@@ -3,7 +3,7 @@
 #SBATCH --output="weak_smpi_8_2_2.%j.%N.out"
 #SBATCH --error="weak_smpi_8_2_2.%j.%N.err"
 #SBATCH --partition=gpu
-#SBATCH --time=00:10:00
+#SBATCH --time=00:5:00
 #SBATCH --nodes=8
 #SBATCH --ntasks-per-node=1
 #SBATCH --sockets-per-node=2
@@ -15,7 +15,7 @@
 
 module purge
 module load cuda
-module load spectrum_smpi
+module load spectrum_mpi
 
 cd /home/cpearson/repos/stencil/build-smpi
 git rev-parse HEAD

@@ -17,6 +17,6 @@ module purge
 module load cuda
 module load spectrum_smpi
 
-cd /home/cpearson/repos/stencil/build-smpica
+cd /home/cpearson/repos/stencil/build-smpi-ca
 git rev-parse HEAD
 mpirun ./src/weak
