@@ -75,10 +75,7 @@ public:
                        const std::vector<Message> &messages) override {
     domain_ = domain;
     dirs_ = messages;
-    std::cerr << dirs_.size() << "\n";
-    dirs_ = Message::remove_overlapping(dirs_);
     std::sort(dirs_.begin(), dirs_.end());
-    std::cerr << dirs_.size() << "\n";
 
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
@@ -196,7 +193,6 @@ public:
                        const std::vector<Message> &messages) override {
     domain_ = domain;
     dirs_ = messages;
-    dirs_ = Message::remove_overlapping(dirs_);
     std::sort(dirs_.begin(), dirs_.end());
 
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));

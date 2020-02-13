@@ -123,22 +123,25 @@ public:
 
     int deviceCount;
     CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
-    std::cerr << "[" << rank_ << "] cudaGetDeviceCount= " << deviceCount << "\n";
+    std::cerr << "[" << rank_ << "] cudaGetDeviceCount= " << deviceCount
+              << "\n";
 
-  /*
-cudaComputeModeDefault = 0
-    Default compute mode (Multiple threads can use cudaSetDevice() with this device) 
-cudaComputeModeExclusive = 1
-    Compute-exclusive-thread mode (Only one thread in one process will be able to use cudaSetDevice() with this device) 
-cudaComputeModeProhibited = 2
-    Compute-prohibited mode (No threads can use cudaSetDevice() with this device) 
-cudaComputeModeExclusiveProcess = 3
-    Compute-exclusive-process mode (Many threads in one process will be able to use cudaSetDevice() with this device) 
-  */
+    /*
+  cudaComputeModeDefault = 0
+      Default compute mode (Multiple threads can use cudaSetDevice() with this
+  device) cudaComputeModeExclusive = 1 Compute-exclusive-thread mode (Only one
+  thread in one process will be able to use cudaSetDevice() with this device)
+  cudaComputeModeProhibited = 2
+      Compute-prohibited mode (No threads can use cudaSetDevice() with this
+  device) cudaComputeModeExclusiveProcess = 3 Compute-exclusive-process mode
+  (Many threads in one process will be able to use cudaSetDevice() with this
+  device)
+    */
     cudaDeviceProp prop;
     for (int i = 0; i < deviceCount; ++i) {
       CUDA_RUNTIME(cudaGetDeviceProperties(&prop, i));
-      std::cerr << "[" << rank_ << "] cudaDeviceProp.computeMode=" << prop.computeMode << "\n";
+      std::cerr << "[" << rank_
+                << "] cudaDeviceProp.computeMode=" << prop.computeMode << "\n";
     }
 
     // Determine GPUs this DistributedDomain is reposible for
@@ -184,14 +187,13 @@ cudaComputeModeExclusiveProcess = 3
       std::cerr << "\n";
     }
 
-
 #if STENCIL_PRINT_TIMINGS == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
     // Try to enable peer access between all GPUs
     nvtxRangePush("peer_en");
-    for (const auto &srcGpu : gpus_){
+    for (const auto &srcGpu : gpus_) {
       for (const auto &dstGpu : nodeCudaIds) {
         gpu_topo::enable_peer(srcGpu, dstGpu);
       }
@@ -205,9 +207,9 @@ cudaComputeModeExclusiveProcess = 3
       printf("time.peer_en %f s\n", maxElapsed);
     }
 #endif
-  CUDA_RUNTIME(cudaGetLastError());
+    CUDA_RUNTIME(cudaGetLastError());
   }
-  
+
   ~DistributedDomain() {
     for (auto &m : remoteSenders_) {
       for (auto &kv : m) {
@@ -262,11 +264,9 @@ cudaComputeModeExclusiveProcess = 3
     nvtxRangePush("placement");
     Placement *placement = nullptr;
     if (strategy_ == PlacementStrategy::NodeAware) {
-      placement =
-          new NodeAware(size_, mpiTopology_, radius_, gpus_);
+      placement = new NodeAware(size_, mpiTopology_, radius_, gpus_);
     } else {
-      placement =
-          new Trivial(size_, mpiTopology_, radius_, gpus_);
+      placement = new Trivial(size_, mpiTopology_, radius_, gpus_);
     }
     assert(placement);
     nvtxRangePop();
@@ -406,7 +406,8 @@ cudaComputeModeExclusiveProcess = 3
               remoteOutboxes[di][dstIdx].push_back(sMsg);
               goto send_planned;
             }
-            std::cerr << "No method available to send required message\n";
+            std::cerr << "No method available to send required message "
+                      << sMsg.dir_ << "\n";
             exit(EXIT_FAILURE);
           send_planned: // successfully found a way to send
 
@@ -451,6 +452,36 @@ cudaComputeModeExclusiveProcess = 3
         }
       }
     }
+
+    // for all messaages going between the same subdomains, remove any
+    // overlapping data
+    peerAccessOutbox = Message::remove_overlapping(peerAccessOutbox);
+    for (auto &src : peerCopyOutboxes) {
+      for (auto &box : src) {
+        box = Message::remove_overlapping(box);
+      }
+    }
+    for (auto &src : coloOutboxes) {
+      for (auto &kv : src) {
+        kv.second = Message::remove_overlapping(kv.second);
+      }
+    }
+    for (auto &src : coloInboxes) {
+      for (auto &kv : src) {
+        kv.second = Message::remove_overlapping(kv.second);
+      }
+    }
+    for (auto &src : remoteOutboxes) {
+      for (auto &kv : src) {
+        kv.second = Message::remove_overlapping(kv.second);
+      }
+    }
+    for (auto &src : remoteInboxes) {
+      for (auto &kv : src) {
+        kv.second = Message::remove_overlapping(kv.second);
+      }
+    }
+
     nvtxRangePop(); // plan
 #if STENCIL_PRINT_TIMINGS == 1
     elapsed = MPI_Wtime() - start;
@@ -589,7 +620,8 @@ cudaComputeModeExclusiveProcess = 3
         const Dim3 dstIdx = kv.first;
         const int dstRank = placement->get_rank(dstIdx);
         const int dstGPU = placement->get_subdomain_id(dstIdx);
-        std::cerr << "rank " << rank_ << " create ColoSender to " << dstIdx << " on " << dstRank << " (" << dstGPU << ")\n";
+        std::cerr << "rank " << rank_ << " create ColoSender to " << dstIdx
+                  << " on " << dstRank << " (" << dstGPU << ")\n";
         coloSenders_[di].emplace(
             dstIdx,
             ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
@@ -598,7 +630,8 @@ cudaComputeModeExclusiveProcess = 3
         const Dim3 srcIdx = kv.first;
         const int srcRank = placement->get_rank(srcIdx);
         const int srcGPU = placement->get_subdomain_id(srcIdx);
-        std::cerr << "rank " << rank_ << " create ColoRecver from " << srcIdx << " on " << srcRank << " (" << srcGPU << ")\n";
+        std::cerr << "rank " << rank_ << " create ColoRecver from " << srcIdx
+                  << " on " << srcRank << " (" << srcGPU << ")\n";
         coloRecvers_[di].emplace(
             srcIdx,
             ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
@@ -640,7 +673,8 @@ cudaComputeModeExclusiveProcess = 3
       }
     }
     nvtxRangePop();
-    std::cerr << "DistributedDomain::realize: start_prepare ColocatedHaloSender/ColocatedHaloRecver\n";
+    std::cerr << "DistributedDomain::realize: start_prepare "
+                 "ColocatedHaloSender/ColocatedHaloRecver\n";
     nvtxRangePush("DistributedDomain::realize: prep colocated");
     assert(coloSenders_.size() == coloRecvers_.size());
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
@@ -662,17 +696,18 @@ cudaComputeModeExclusiveProcess = 3
         recver.start_prepare(coloInboxes[di][srcIdx]);
       }
     }
-    std::cerr << "rank=" << rank_ << " DistributedDomain::realize: finish_prepare ColocatedHaloSender/ColocatedHaloRecver\n";
+    std::cerr << "rank=" << rank_
+              << " DistributedDomain::realize: finish_prepare "
+                 "ColocatedHaloSender/ColocatedHaloRecver\n";
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
         const int srcDev = domains_[di].gpu();
-	const Dim3 srcIdx = placement->get_idx(rank_, di);
+        const Dim3 srcIdx = placement->get_idx(rank_, di);
         const int dstDev = placement->get_cuda(dstIdx);
-        std::cerr << "rank=" << rank_ 
-                  << " colo sender.finish_prepare " << srcIdx << " -> " << dstIdx
-                  << "\n";
+        std::cerr << "rank=" << rank_ << " colo sender.finish_prepare "
+                  << srcIdx << " -> " << dstIdx << "\n";
         sender.finish_prepare();
       }
       for (auto &kv : coloRecvers_[di]) {
@@ -685,7 +720,8 @@ cudaComputeModeExclusiveProcess = 3
       }
     }
     nvtxRangePop(); // prep colocated
-    std::cerr << "rank=" << rank_ <<  "DistributedDomain::realize: prepare RemoteSender\n";
+    std::cerr << "rank=" << rank_
+              << "DistributedDomain::realize: prepare RemoteSender\n";
     nvtxRangePush("DistributedDomain::realize: prep remote");
     assert(remoteSenders_.size() == remoteRecvers_.size());
     for (size_t di = 0; di < remoteSenders_.size(); ++di) {
@@ -722,11 +758,11 @@ cudaComputeModeExclusiveProcess = 3
     double start = MPI_Wtime();
 #endif
 
-	/*! Try to start sends in order from longest to shortest
-	 * we expect remote to be longest, followed by peer copy, followed by colo
-	 * colo is shorter than peer copy due to the node-aware data placement: 
-	 * if we try to place bigger exchanges nearby, they will be faster
-	 */
+    /*! Try to start sends in order from longest to shortest
+     * we expect remote to be longest, followed by peer copy, followed by colo
+     * colo is shorter than peer copy due to the node-aware data placement:
+     * if we try to place bigger exchanges nearby, they will be faster
+     */
 
     // start remote send d2h
     fprintf(stderr, "rank=%d send remote d2h\n", rank_);
@@ -738,7 +774,6 @@ cudaComputeModeExclusiveProcess = 3
       }
     }
     nvtxRangePop();
-
 
     // send same-rank messages
     fprintf(stderr, "rank=%d send peer copy\n", rank_);

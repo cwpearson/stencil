@@ -24,15 +24,18 @@ public:
   bool contains(const Message &other) const noexcept {
     assert(dir_.all_lt(2));
     assert(dir_.all_gt(-2));
-
-    if (dir_ == Dim3(0, 0, 0) || other.dir_ == Dim3(0, 0, 0)) {
-      return dir_ == other.dir_;
+    if (srcGPU_ == other.srcGPU_ && dstGPU_ == other.dstGPU_) {
+      if (dir_ == Dim3(0, 0, 0) || other.dir_ == Dim3(0, 0, 0)) {
+        return dir_ == other.dir_;
+      } else {
+        Dim3 mask;
+        mask.x = dir_.x != 0 ? 1 : 0;
+        mask.y = dir_.y != 0 ? 1 : 0;
+        mask.z = dir_.z != 0 ? 1 : 0;
+        return other.dir_ * mask == dir_;
+      }
     } else {
-      Dim3 mask;
-      mask.x = dir_.x != 0 ? 1 : 0;
-      mask.y = dir_.y != 0 ? 1 : 0;
-      mask.z = dir_.z != 0 ? 1 : 0;
-      return other.dir_ * mask == dir_;
+      return false;
     }
   }
 

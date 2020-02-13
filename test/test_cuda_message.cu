@@ -6,6 +6,7 @@
 
 TEST_CASE("message") {
 
+#define MESSAGE(x, y, z) Message(Dim3(x, y, z), 0, 0)
   REQUIRE(!MESSAGE(0, 0, 0).contains(MESSAGE(1, 0, 0)));
   REQUIRE(MESSAGE(0, 0, 0).contains(MESSAGE(0, 0, 0)));
 
@@ -46,6 +47,8 @@ TEST_CASE("message") {
   REQUIRE(!MESSAGE(1, 0, 0).contains(MESSAGE(-1, 1, -1)));
   REQUIRE(!MESSAGE(1, 0, 0).contains(MESSAGE(-1, 1, 0)));
   REQUIRE(!MESSAGE(1, 0, 0).contains(MESSAGE(-1, 1, 1)));
+
+  REQUIRE(!Message(Dim3(1, 0, 0), 0, 0).contains(Message(Dim3(1, 0, 0), 0, 1)));
 
   SECTION("overlap") {
     std::vector<Message> msgs;
