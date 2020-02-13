@@ -524,34 +524,6 @@ double match(const Mat2D<double> &x, const Mat2D<double> &y) {
   return acc / rowCorrs.size();
 }
 
-/*! return a copy of `m` with ret[map[i]][map[j]]=m[i][j]
- */
-Mat2D<double> permute(const Mat2D<double> &m, std::vector<size_t> map) {
-  assert(m.size() == map.size());
-  for (auto &r : m) {
-    assert(r.size() == map.size());
-  }
-
-  Mat2D<double> result(m.size());
-  for (auto &v : result) {
-    v.resize(m[0].size());
-  }
-
-  for (size_t r = 0; r < m.size(); ++r) {
-    for (size_t c = 0; c < m.size(); ++c) {
-      assert(r < map.size());
-      assert(c < map.size());
-      size_t nr = map[r];
-      size_t nc = map[c];
-      assert(nr < result.size());
-      assert(nc < result[nr].size());
-      result[r][c] = m[nr][nc];
-    }
-  }
-
-  return result;
-}
-
 class NodeAware : public Placement {
 private:
   NodePartition partition_;
@@ -769,12 +741,13 @@ public:
       // do placement separately for each node
       for (int node = 0; node < numNodes; ++node) {
 
-	const Dim3 sysIdx = partition_.sys_idx(node);
+        const Dim3 sysIdx = partition_.sys_idx(node);
         auto &ranks = nodeRanks[node]; // ranks in this node
         std::cerr << "placement on node " << node << " " << sysIdx << "\n";
-	std::cerr << "ranks:";
-	for (auto &e : ranks) std::cerr << " " << e;
-	std::cerr << "\n";
+        std::cerr << "ranks:";
+        for (auto &e : ranks)
+          std::cerr << " " << e;
+        std::cerr << "\n";
         assert(ranks.size() == ranksPerNode);
 
         // make a bandwidth matrix for the components in this node
@@ -786,7 +759,7 @@ public:
                  ++rj) { // rank j in this node
               for (size_t gj = 0; gj < gpusPerRank;
                    ++gj) { // gpu j in this rank
-		const size_t cj = rj * gpusPerRank + gj;
+                const size_t cj = rj * gpusPerRank + gj;
 
                 // recover the cuda device ID for this component
                 const int di = globalCudaIds[ranks[ri] * gpusPerRank + gi];
@@ -833,13 +806,15 @@ public:
         std::vector<size_t> components = get_mapping(comm, bandwidth);
 
         std::cerr << "components:";
-	for (auto &e : components) std::cerr << " " << e;
-	std::cerr << "\n";
+        for (auto &e : components)
+          std::cerr << " " << e;
+        std::cerr << "\n";
 
         for (size_t id = 0; id < gpusPerNode; ++id) {
           const Dim3 nodeIdx = partition_.node_idx(id);
           const Dim3 nodeDim = partition_.node_dim();
-          const Dim3 size = partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
+          const Dim3 size =
+              partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
 
           // each component is owned by a rank and has a local ID
           size_t component = components[id];
@@ -847,8 +822,10 @@ public:
           const int rank = ranks[ri];
           const int gpuId = component % gpusPerRank;
           const int cuda = globalCudaIds[rank * gpusPerRank + gpuId];
-          
-          std::cerr << "nodeIdx=" << nodeIdx  << " size=" << size << " rank=" << rank << " gpuId=" << gpuId << " cuda=" << cuda << "\n";
+
+          std::cerr << "nodeIdx=" << nodeIdx << " size=" << size
+                    << " rank=" << rank << " gpuId=" << gpuId
+                    << " cuda=" << cuda << "\n";
 
           rankAssignment[node * gpusPerNode + id] = rank;
           idForDomain[node * gpusPerNode + id] = gpuId;
@@ -879,7 +856,9 @@ public:
       cuda_[idx] = cuda;
 
       if (0 == mpiTopo.rank()) {
-        std::cerr << "idx=" << idx << " size=" << partition_.subdomain_size(idx) << " rank=" << rank << " subdomain=" << subdomain << " cuda=" << cuda << "\n";
+        std::cerr << "idx=" << idx << " size=" << partition_.subdomain_size(idx)
+                  << " rank=" << rank << " subdomain=" << subdomain
+                  << " cuda=" << cuda << "\n";
       }
 
       // convert rank and subdomain to idx
