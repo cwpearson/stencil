@@ -11,10 +11,10 @@
 
 #include "dim3.hpp"
 #include "mat2d.hpp"
-
 #include "gpu_topology.hpp"
 #include "local_domain.cuh"
 #include "mpi_topology.hpp"
+#include "stencil/qap.hpp"
 
 namespace collective {}
 
@@ -541,70 +541,6 @@ private:
     return count;
   }
 
-  /* a vector that maps indices in comm to indices in bw
-   */
-  std::vector<size_t>
-  get_mapping(const Mat2D<double> &comm,
-              const Mat2D<double> &bandwidth // the ranks in each node
-  ) {
-    assert(comm.size() == bandwidth.size());
-
-    int rank;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-    std::vector<size_t> map;
-    for (size_t i = 0; i < comm.size(); ++i) {
-      map.push_back(i);
-    }
-
-    std::vector<size_t> bestMap = map;
-    double bestFit = -2;
-    do {
-
-      auto checkBandwidth = permute(bandwidth, map);
-
-#if 0
-      if (0 == rank) {
-        std::cerr << "checking permutation";
-        for (auto &e : map) {
-          std::cerr << " " << e;
-        }
-        std::cerr << "\n";
-        std::cerr << "bandwidth:\n";
-        for (auto &r : checkBandwidth) {
-          for (auto &c : r) {
-            std::cerr << c << " ";
-          }
-          std::cerr << "\n";
-        }
-      }
-
-#endif
-
-      const double score = match(checkBandwidth, comm);
-#if 1
-      if (0 == rank)
-        std::cerr << "score=" << score << "\n";
-#endif
-      assert(score >= -2);
-      if (score > bestFit) {
-        bestFit = score;
-        bestMap = map;
-#if 0
-        if (0 == rank) {
-          std::cerr << "new best placement:\n";
-          for (auto &e : map) {
-            std::cerr << e << " ";
-          }
-          std::cerr << "\n";
-        }
-#endif
-      }
-    } while (std::next_permutation(map.begin(), map.end()));
-
-    return bestMap;
-  }
-
   // convert idx to rank
   std::map<Dim3, int> rank_;
 
@@ -803,7 +739,8 @@ public:
         }
 
         // which component each subdomain should be on
-        std::vector<size_t> components = get_mapping(comm, bandwidth);
+        Mat2D<double> distance = make_reciprocal(bandwidth);
+        std::vector<size_t> components = qap::solve(comm, distance);
 
         std::cerr << "components:";
         for (auto &e : components)

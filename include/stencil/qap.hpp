@@ -11,7 +11,7 @@
 namespace qap {
 
 namespace detail {
-double cost(const Mat2D<double> &w,      // weight
+inline double cost(const Mat2D<double> &w,      // weight
             const Mat2D<double> &d,      // distance
             const std::vector<size_t> &f // bijection
 ) {
@@ -36,7 +36,7 @@ double cost(const Mat2D<double> &w,      // weight
 }
 } // namespace detail
 
-std::vector<size_t> solve(const Mat2D<double> &w, Mat2D<double> &d) {
+inline std::vector<size_t> solve(const Mat2D<double> &w, Mat2D<double> &d) {
 
   assert(w.size() == d.size());
   if (w.size() > 0) {
