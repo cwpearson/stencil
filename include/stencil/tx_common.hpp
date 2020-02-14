@@ -84,7 +84,7 @@ enum class MsgKind {
   23 bits here.
 */
 template <MsgKind kind>
-static int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
+inline int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
   int ret = 0;
 
   // bit 31 is 0
@@ -126,7 +126,7 @@ static int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
   -1 -> 0b10
 
 */
-static int make_tag(int gpu, int idx, Dim3 dir) {
+inline int make_tag(int gpu, int idx, Dim3 dir) {
   static_assert(sizeof(int) == 4, "int is the wrong size");
   constexpr int IDX_BITS = 16;
   constexpr int GPU_BITS = 8;

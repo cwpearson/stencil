@@ -28,7 +28,7 @@ inline Dim3 make_block_dim(const Dim3 extent, int64_t threads) {
   return ret;
 }
 
-static __device__ void grid_pack(void *__restrict__ dst,
+inline __device__ void grid_pack(void *__restrict__ dst,
                                  const void *__restrict__ src,
                                  const Dim3 srcSize, const Dim3 srcPos,
                                  const Dim3 srcExtent, const size_t elemSize) {
@@ -65,7 +65,7 @@ static __device__ void grid_pack(void *__restrict__ dst,
   }
 }
 
-__global__ static void pack_kernel(void *__restrict__ dst,
+inline __global__ void pack_kernel(void *__restrict__ dst,
                                    const void *__restrict__ src,
                                    const Dim3 srcSize, const Dim3 srcPos,
                                    const Dim3 srcExtent,
