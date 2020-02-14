@@ -500,7 +500,7 @@ public:
 
     planFile << "domains\n";
     for (size_t di = 0; di < domains_.size(); ++di) {
-      planFile << di << ":" << domains_[di].gpu() << ":"
+      planFile << di << ":cuda" << domains_[di].gpu() << ":"
                << placement->get_idx(rank_, di) << " sz=" << domains_[di].size()
                << "\n";
     }
@@ -508,7 +508,11 @@ public:
 
     planFile << "== peerAccess ==\n";
     for (auto &m : peerAccessOutbox) {
-      planFile << m.srcGPU_ << "->" << m.dstGPU_ << " " << m.dir_ << "\n";
+      size_t numBytes = 0;
+      for (int qi = 0; qi < domains_[m.srcGPU_].num_data(); ++qi) {
+        numBytes += domains_[m.srcGPU_].halo_bytes(m.dir_, qi);
+      }
+      planFile << m.srcGPU_ << "->" << m.dstGPU_ << " " << m.dir_ << " " << numBytes << "B\n";
     }
     planFile << "\n";
 
