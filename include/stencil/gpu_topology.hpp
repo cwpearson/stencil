@@ -14,7 +14,7 @@ static std::map<int, std::map<int, bool>> peer_;
 
 /* return the distance between two GPUs
  */
-static double get_gpu_distance(const int src, const int dst) {
+inline double get_gpu_distance(const int src, const int dst) {
   const double SAME_DISTANCE = 0.1;
   const double NVLINK_DISTANCE = 1.0;
   const double INTERNAL_DISTANCE = 2.0;
@@ -94,7 +94,7 @@ double bandwidth(int src, int dst) {
   return 1.0 / detail::get_gpu_distance(src, dst);
 }
 
-static void enable_peer(const int src, const int dst) {
+inline void enable_peer(const int src, const int dst) {
   if (src == dst) {
     detail::peer_[src][dst] = true;
     detail::peer_[dst][src] = true;
@@ -127,7 +127,7 @@ static void enable_peer(const int src, const int dst) {
   CUDA_RUNTIME(cudaGetLastError());
 };
 
-static bool peer(const int src, const int dst) {
+inline bool peer(const int src, const int dst) {
   if (0 == detail::peer_.count(src)) {
     return false;
   } else if (0 == detail::peer_[src].count(dst)) {
