@@ -35,6 +35,7 @@ endif()
 
 add_executable(test_cpu test_cpu_main.cpp
   test_cpu_array.cpp
+  test_cpu_mat2d.cpp
   test_cpu_partition.cpp
   test_cpu_qap.cpp
   test_cpu_radius.cpp

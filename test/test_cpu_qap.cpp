@@ -15,9 +15,12 @@ TEST_CASE("qap") {
     // high cost between  0-1
     Mat2D<double> comm = {{0, 10, 1}, {10, 0, 1}, {1, 1, 0}};
 
+    INFO("reciprocal");
     Mat2D<double> dist = make_reciprocal(bw);
+    INFO("solve");
     auto f = qap::solve(comm, dist);
 
+    INFO("check");
     REQUIRE(f[0] == 0);
     REQUIRE(f[1] == 2);
     REQUIRE(f[2] == 1);
@@ -41,9 +44,12 @@ TEST_CASE("qap") {
     };
     // clang-format on
 
+    INFO("reciprocal");
     Mat2D<double> dist = make_reciprocal(bw);
+    INFO("solve");
     auto f = qap::solve(comm, dist);
 
+    INFO("check");
     REQUIRE(f[0] == 0);
     REQUIRE(f[1] == 2);
     REQUIRE(f[2] == 1);

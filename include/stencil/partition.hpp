@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "dim3.hpp"
-#include "mat2d.hpp"
 #include "gpu_topology.hpp"
 #include "local_domain.cuh"
+#include "mat2d.hpp"
 #include "mpi_topology.hpp"
 #include "stencil/qap.hpp"
 
@@ -497,11 +497,11 @@ double scc(const std::vector<double> &x, const std::vector<double> &y) {
   }
 }
 
+/*
 double match(const Mat2D<double> &x, const Mat2D<double> &y) {
 
-  assert(x.size() == y.size());
-  assert(x.size() > 0);
-  assert(x[0].size() == y[0].size());
+  assert(x.shape() == y.shape());
+  assert(x.size().x > 0);
 
   std::vector<double> rowCorrs(x.size()); // row correlations
 
@@ -523,6 +523,7 @@ double match(const Mat2D<double> &x, const Mat2D<double> &y) {
   }
   return acc / rowCorrs.size();
 }
+*/
 
 class NodeAware : public Placement {
 private:
@@ -687,7 +688,7 @@ public:
         assert(ranks.size() == ranksPerNode);
 
         // make a bandwidth matrix for the components in this node
-        Mat2D<double> bandwidth = make_mat2d(gpusPerNode, 0.0);
+        Mat2D<double> bandwidth(gpusPerNode, gpusPerNode, 0.0);
         for (size_t ri = 0; ri < ranksPerNode; ++ri) {  // rank i in this node
           for (size_t gi = 0; gi < gpusPerRank; ++gi) { // gpu i in this rank
             const size_t ci = ri * gpusPerRank + gi;
@@ -707,7 +708,7 @@ public:
         }
 
         // build a stencil communication matrix for the domains in this node
-        Mat2D<double> comm = make_mat2d(gpusPerNode, 0.0);
+        Mat2D<double> comm(gpusPerNode, gpusPerNode, 0.0);
         for (size_t i = 0; i < gpusPerNode; ++i) {
           const Dim3 srcIdx = sysIdx * nodeDim + partition_.node_idx(i);
           for (size_t j = 0; j < gpusPerNode; ++j) {
