@@ -10,7 +10,7 @@
 
 /*! same as calling pack(&dst[offsets[i]]...srcs[i]...elemSizes[i])
  */
-inline __global__ void
+static __global__ void
 multi_pack(void *__restrict__ dst,                      // dst buffer
            const size_t *__restrict__ offsets,          // offsets into dst
            void *__restrict__ *__restrict__ const srcs, // n src pointers
@@ -61,7 +61,7 @@ inline __device__ void grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
   }
 }
 
-inline __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
+static __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
                               const size_t dstPitch, const Dim3 dstPos,
                               const Dim3 dstExtent,
                               const void *__restrict__ src,
@@ -72,7 +72,7 @@ inline __global__ void unpack(void *__restrict__ dst, const Dim3 dstSize,
 
 /*! same as calling unpack(dsts[i]...srcs[offsets[i]]...elemSizes[i])
  */
-inline __global__ void
+static __global__ void
 multi_unpack(void **__restrict__ dsts, const Dim3 dstSize, const Dim3 dstPos, const Dim3 dstExtent,
              const void *__restrict__ const src, const size_t *__restrict__ offsets, 
              const size_t *__restrict__ elemSizes, const size_t n) {
@@ -124,7 +124,7 @@ translate_grid(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
 // take the 3D region src[srcPos...srcPos+extent] and translate it to the 3D
 // region dst[dstPos...dstPos+extent]
 // srcSize and dstSize may not be the same
-inline __global__ void
+static __global__ void
 translate(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
           const void *__restrict__ src, const Dim3 srcPos, const Dim3 srcSize,
           const Dim3 extent, // the extent of the region to be copied
@@ -133,7 +133,7 @@ translate(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
   translate_grid(dst, dstPos, dstSize, src, srcPos, srcSize, extent, elemSize);
 }
 
-inline __global__ void
+static __global__ void
 multi_translate(void *__restrict__ *__restrict__ dsts, const Dim3 dstPos,
                 const Dim3 dstSize, void *__restrict__ *__restrict__ const srcs,
                 const Dim3 srcPos, const Dim3 srcSize,

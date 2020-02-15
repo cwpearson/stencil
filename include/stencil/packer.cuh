@@ -39,7 +39,7 @@ public:
 
 /*! pack all quantities in a single domain into dst
  */
-inline __global__ void
+static __global__ void
 dev_packer_pack_domain(void *dst,            // buffer to pack into
                        void **srcs,          // raw pointer to each quanitity
                        size_t *elemSizes,    // element size for each quantity
@@ -157,7 +157,7 @@ dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
   }
 }
 
-inline __global__ void
+static __global__ void
 dev_unpacker_unpack_domain(void **dsts,       // buffer to pack into
                            void *src,         // raw pointer to each quanitity
                            size_t *elemSizes, // element size for each quantity

@@ -65,7 +65,7 @@ inline __device__ void grid_pack(void *__restrict__ dst,
   }
 }
 
-inline __global__ void pack_kernel(void *__restrict__ dst,
+static __global__ void pack_kernel(void *__restrict__ dst,
                                    const void *__restrict__ src,
                                    const Dim3 srcSize, const Dim3 srcPos,
                                    const Dim3 srcExtent,
