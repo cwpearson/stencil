@@ -160,7 +160,7 @@ module load cuda
 
 To control the compute mode, use `bsub -alloc_flags gpudefault` (see https://www.olcf.ornl.gov/for-users/system-user-guides/summitdev-quickstart-guide/#gpu-specific-jobs)
 
-To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...`
+To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.ornl.gov/systems/summit_user_guide.html, "CUDA-Aware MPI")
 
 ## Design Goals
   * v1 (AsHES)
