@@ -97,10 +97,9 @@ private:
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
 public:
-
 #if STENCIL_TIME == 1
-/* record total time spent on operations. Valid at MPI rank 0
-*/
+  /* record total time spent on operations. Valid at MPI rank 0
+   */
   double timeMpiTopo_;
   double timeNodeGpus_;
   double timePeerEn_;
@@ -115,14 +114,14 @@ public:
       : size_(x, y, z), flags_(MethodFlags::All) {
 
 #if STENCIL_TIME == 1
-  timeMpiTopo_ = 0;
-  timeNodeGpus_ = 0;
-  timePeerEn_ = 0;
-  timePlacement_ = 0;
-  timePlan_ = 0;
-  timeRealize_ = 0;
-  timeCreate_ = 0;
-  timeExchange_ = 0;
+    timeMpiTopo_ = 0;
+    timeNodeGpus_ = 0;
+    timePeerEn_ = 0;
+    timePlacement_ = 0;
+    timePlan_ = 0;
+    timeRealize_ = 0;
+    timeCreate_ = 0;
+    timeExchange_ = 0;
 #endif
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
@@ -537,7 +536,8 @@ public:
       for (int qi = 0; qi < domains_[m.srcGPU_].num_data(); ++qi) {
         numBytes += domains_[m.srcGPU_].halo_bytes(m.dir_, qi);
       }
-      planFile << m.srcGPU_ << "->" << m.dstGPU_ << " " << m.dir_ << " " << numBytes << "B\n";
+      planFile << m.srcGPU_ << "->" << m.dstGPU_ << " " << m.dir_ << " "
+               << numBytes << "B\n";
     }
     planFile << "\n";
 
@@ -787,14 +787,16 @@ public:
     double start = MPI_Wtime();
 #endif
 
-    /*! Try to start sends in order from longest to shortest
-     * we expect remote to be longest, followed by peer copy, followed by colo
-     * colo is shorter than peer copy due to the node-aware data placement:
-     * if we try to place bigger exchanges nearby, they will be faster
-     */
+/*! Try to start sends in order from longest to shortest
+ * we expect remote to be longest, followed by peer copy, followed by colo
+ * colo is shorter than peer copy due to the node-aware data placement:
+ * if we try to place bigger exchanges nearby, they will be faster
+ */
 
-    // start remote send d2h
+// start remote send d2h
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d send remote d2h\n", rank_);
+#endif
     nvtxRangePush("DD::exchange: remote send d2h");
     for (auto &domSenders : remoteSenders_) {
       for (auto &kv : domSenders) {
@@ -805,7 +807,9 @@ public:
     nvtxRangePop();
 
     // send same-rank messages
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d send peer copy\n", rank_);
+#endif
     nvtxRangePush("DD::exchange: peer copy send");
     for (auto &src : peerCopySenders_) {
       for (auto &kv : src) {
@@ -816,7 +820,9 @@ public:
     nvtxRangePop();
 
     // start colocated Senders
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d start colo send\n", rank_);
+#endif
     nvtxRangePush("DD::exchange: colo send");
     for (auto &domSenders : coloSenders_) {
       for (auto &kv : domSenders) {
@@ -827,13 +833,17 @@ public:
     nvtxRangePop();
 
     // send self messages
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d send peer access\n", rank_);
+#endif
     nvtxRangePush("DD::exchange: peer access send");
     peerAccessSender_.send();
     nvtxRangePop();
 
-    // start colocated recvers
+// start colocated recvers
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d start colo recv\n", rank_);
+#endif
     nvtxRangePush("DD::exchange: colo recv");
     for (auto &domRecvers : coloRecvers_) {
       for (auto &kv : domRecvers) {
@@ -844,7 +854,9 @@ public:
     nvtxRangePop();
 
     // start remote recv h2h
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d recv remote h2h\n", rank_);
+#endif
     nvtxRangePush("DD::exchange: remote recv h2h");
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
@@ -855,7 +867,9 @@ public:
     nvtxRangePop();
 
     // poll senders and recvers to move onto next step until all are done
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d start poll\n", rank_);
+#endif
     nvtxRangePush("DD::exchange: poll");
     bool pending = true;
     while (pending) {
@@ -864,13 +878,15 @@ public:
       // move recvers from h2h to h2d
       for (auto &domRecvers : remoteRecvers_) {
         for (auto &kv : domRecvers) {
-          const Dim3 srcIdx = kv.first;
           StatefulRecver *recver = kv.second;
           if (recver->active()) {
             pending = true;
             if (recver->next_ready()) {
+#if STENCIL_LOUD == 1
+              const Dim3 srcIdx = kv.first;
               std::cerr << "rank=" << rank_ << " src=" << srcIdx
                         << " recv_h2d\n";
+#endif
               recver->next();
               goto senders; // try to overlap recv_h2d with send_h2h
             }
@@ -881,13 +897,15 @@ public:
       // move senders from d2h to h2h
       for (auto &domSenders : remoteSenders_) {
         for (auto &kv : domSenders) {
-          const Dim3 dstIdx = kv.first;
           StatefulSender *sender = kv.second;
           if (sender->active()) {
             pending = true;
             if (sender->next_ready()) {
+#if STENCIL_LOUD == 1
+              const Dim3 dstIdx = kv.first;
               std::cerr << "rank=" << rank_ << " dst=" << dstIdx
                         << " send_h2h\n";
+#endif
               sender->next();
               goto recvers; // try to overlap recv_h2d with send_h2h
             }
@@ -898,7 +916,9 @@ public:
     nvtxRangePop(); // DD::exchange: poll
 
     // wait for sends
+#if STENCIL_LOUD == 1
     fprintf(stderr, "rank=%d wait for sameRankSender\n", rank_);
+#endif
     nvtxRangePush("peerAccessSender.wait()");
     peerAccessSender_.wait();
     nvtxRangePop();
@@ -913,15 +933,19 @@ public:
     nvtxRangePop(); // peerCopySender.wait()
 
     // wait for colocated
-    nvtxRangePush("colocated.wait()");
+#if STENCIL_LOUD == 1
     std::cerr << "colocated senders wait\n";
+#endif
+    nvtxRangePush("colocated.wait()");
     for (auto &domSenders : coloSenders_) {
       for (auto &kv : domSenders) {
         ColocatedHaloSender &sender = kv.second;
         sender.wait();
       }
     }
+#if STENCIL_LOUD == 1
     std::cerr << "colocated recvers wait\n";
+#endif
     for (auto &domRecvers : coloRecvers_) {
       for (auto &kv : domRecvers) {
         ColocatedHaloRecver &recver = kv.second;
@@ -954,7 +978,6 @@ public:
                MPI_COMM_WORLD);
     if (0 == rank_) {
       timeExchange_ += maxElapsed;
-
     }
 #endif
 

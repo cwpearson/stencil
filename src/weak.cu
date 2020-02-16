@@ -58,7 +58,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-
   x = x * pow(numGpus, 0.33333) + 0.5; // round to nearest
   y = y * pow(numGpus, 0.33333) + 0.5;
   z = z * pow(numGpus, 0.33333) + 0.5;
@@ -129,7 +128,9 @@ int main(int argc, char **argv) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     for (size_t iter = 0; iter < nIters; ++iter) {
-      std::cerr << "exchange\n";
+      if (0 == rank) {
+        std::cerr << "exchange " << iter << "\n";
+      }
       nvtxRangePush("exchange");
       dd.exchange();
       nvtxRangePop();
@@ -140,13 +141,13 @@ int main(int argc, char **argv) {
 #if STENCIL_TIME == 1
     if (0 == rank) {
       printf(
-        "weak x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d mpi_topo %f "
-        "node_gpus %f peer_en %f placement %f realize %f plan "
-        "%f create %f exchange %f\n",
-        x, y, z, nIters, numGpus, numNodes, size, dd.timeMpiTopo_, dd.timeNodeGpus_,
-        dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_, dd.timePlan_,
-        dd.timeCreate_, dd.timeExchange_);
-  }
+          "weak x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d mpi_topo %f "
+          "node_gpus %f peer_en %f placement %f realize %f plan "
+          "%f create %f exchange %f\n",
+          x, y, z, nIters, numGpus, numNodes, size, dd.timeMpiTopo_,
+          dd.timeNodeGpus_, dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_,
+          dd.timePlan_, dd.timeCreate_, dd.timeExchange_);
+    }
 #endif // STENCIL_TIME
 
   } // send domains out of scope before MPI_Finalize
