@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <iostream>
+#include <sstream>
 
 class OptionBase {
 public:
@@ -34,18 +35,32 @@ private:
   void set_val(int *, const std::string &val) { // convert to int
     *val_ = std::stoi(val);
   }
+  void set_val(std::string *, const std::string &val) { // convert to string
+    *val_ = val;
+  }
 };
 
 class Flag {
   std::string long_;
+  std::string short_;
+  std::string help_;
   bool *val_;
 
 public:
-  Flag(bool &val, const std::string &l) : long_(l), val_(&val) {}
+  Flag(bool &val, const std::string &l, const std::string &s) : long_(l), short_(s), val_(&val) {}
 
   const std::string &long_str() const noexcept { return long_; }
+  const std::string &short_str() const noexcept { return short_; }
 
   void set() const noexcept { *val_ = true; }
+
+  void help(const std::string &s) {
+    help_ = s;
+  }
+
+  const std::string &help_str() const noexcept {
+    return help_;
+  }
 };
 
 class PosnlBase {
@@ -90,13 +105,27 @@ private:
   void set_val(int *, const std::string &val) { // convert to int
     *val_ = std::stoi(val);
   }
+  void set_val(std::string *, const std::string &val) { // convert to string
+    *val_ = val;
+  }
 };
 
 class Parser {
 
+  std::string description_;
+  bool noUnrecognized_; // disallow unrecognized flags / opts
+  bool help_;
+
   std::vector<OptionBase *> opts_;
   std::vector<Flag> flags_;
   std::vector<PosnlBase *> posnls_;
+
+  static bool starts_with(const std::string &s, const std::string &prefix) {
+    if (s.rfind(prefix, 0) == 0) {
+      return true;
+    }
+    return false;
+  }
 
   OptionBase *match_opt(const char *arg) const {
     std::string sarg(arg);
@@ -111,22 +140,24 @@ class Parser {
   Flag *match_flag(const char *arg) {
     std::string sarg(arg);
     for (int64_t i = int64_t(flags_.size()) - 1; i >= 0; --i) {
-      if (flags_[i].long_str() == sarg) {
+      if (flags_[i].long_str() == sarg || flags_[i].short_str() == sarg) {
         return &flags_[i];
       }
     }
     return nullptr;
   }
 
-  static bool starts_with(const std::string &s, const std::string &prefix) {
-    if (s.rfind(prefix, 0) == 0) {
-      return true;
-    }
-    return false;
-  }
-
 public:
+
+  Parser() : noUnrecognized_(false), help_(false) {
+    add_flag(help_, "--help", "-h")->help("Print help message");
+  } 
+  Parser(const std::string &description) : description_(description), noUnrecognized_(false), help_(false) {
+    add_flag(help_, "--help", "-h")->help("Print help message");
+  } 
+
   bool parse(const int argc, const char *const *argv) {
+
     size_t pi = 0; // positional argument position
     bool optsOkay = true;
     for (int i = 1; i < argc; ++i) {
@@ -149,17 +180,27 @@ public:
           flag->set();
           continue;
         }
-        std::cerr << "unrecognized flag " << argv[i] << "\n";
+        if (noUnrecognized_) {
+          return false;
+        }
       } else { // otherwise try it as positional
         if (pi < posnls_.size()) {
           posnls_[pi]->set_val(argv[i]);
           ++pi;
         } else {
-          std::cerr << "encountered unexpected positional argument " << argv[i]
+          std::cerr << "encountered unexpected positional argument " << pi << ": " << argv[i]
                     << "\n";
         }
       }
     }
+
+    for (; pi < posnls_.size(); ++pi) {
+      if (posnls_[pi]->is_required()) {
+        std::cerr << "missing required positional argument " << pi << "\n";
+        return false;
+      }
+    }
+
     return true;
   };
 
@@ -167,12 +208,41 @@ public:
     opts_.push_back(new Option<T>(val, l));
   }
 
-  void add_flag(bool &val, const std::string &l) {
-    flags_.push_back(Flag(val, l));
+  Flag *add_flag(bool &val, const std::string &l, const std::string &s = "") {
+    flags_.push_back(Flag(val, l, s));
+    return &(flags_.back());
   }
 
   template <typename T> PosnlBase *add_positional(T &val) {
     posnls_.push_back(new Positional<T>(val));
-    return posnls_[posnls_.size() - 1];
+    return posnls_.back();
+  }
+
+  std::string help() const {
+    std::stringstream ss;
+
+    ss << description_ << "\n";
+
+    for (auto &o : opts_) {
+      ss << o->long_str() << "\n";
+    }
+
+    for (auto &f : flags_) {
+      ss << "  " << f.short_str() << ", " << f.long_str();
+      ss << "\t\t" << f.help_str();
+      ss << "\n";
+    }
+
+    return ss.str();
+  }
+
+  /*! \brief error on unrecognized flags and options
+  */
+  void no_unrecognized() {
+    noUnrecognized_ = true;
+  }
+
+  bool need_help() const noexcept {
+    return help_;
   }
 };
