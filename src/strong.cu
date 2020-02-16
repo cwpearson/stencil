@@ -19,10 +19,12 @@ int main(int argc, char **argv) {
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
-  int numSubdoms;
+  int numGpus;
+  int numNodes;
   {
     MpiTopology topo(MPI_COMM_WORLD);
-    numSubdoms = size / topo.colocated_size() * devCount;
+    numNodes = topo.size() / topo.colocated_size();
+    numGpus = size / topo.colocated_size() * devCount;
   }
 
   size_t x = 512;
@@ -33,9 +35,9 @@ int main(int argc, char **argv) {
   bool useKernel = false;
   bool usePeer = false;
   bool useColo = false;
-  #if STENCIL_USE_CUDA_AWARE_MPI == 1
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
   bool useCudaAware = false;
-  #endif
+#endif
   bool useStaged = false;
 
   Parser p;
@@ -50,7 +52,10 @@ int main(int argc, char **argv) {
   p.add_flag(useCudaAware, "--cuda-aware");
 #endif
   p.add_flag(useStaged, "--staged");
-  p.parse(argc, argv);
+  if (!p.parse(argc, argv)) {
+    std::cout << p.help() << "\n";
+    exit(EXIT_FAILURE);
+  }
 
   MethodFlags methods = MethodFlags::None;
   if (useStaged) {
@@ -80,7 +85,7 @@ int main(int argc, char **argv) {
     std::cerr << "WARN: not release mode\n";
 #endif
 
-    std::cout << numSubdoms << " subdomains " << size << " ranks: " << x << ","
+    std::cout << numGpus << " subdomains " << size << " ranks: " << x << ","
               << y << "," << z << "=" << x * y * z << "\n";
     if ((methods & MethodFlags::CudaMpi) != MethodFlags::None) {
       std::cout << "CudaMpi enabled\n";
@@ -126,14 +131,17 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    #if STENCIL_TIME == 1
-        if (0 == rank) {
-          printf("mpi_topo %f node_gpus %f peer_en %f placement %f realize %f plan "
-                 "%f create %f exchange %f\n",
-                 dd.timeMpiTopo_, dd.timeNodeGpus_, dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_, dd.timeExchange_);
-        }
-    #endif // STENCIL_TIME
-
+#if STENCIL_TIME == 1
+    if (0 == rank) {
+      printf(
+          "strong x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d mpi_topo %f "
+          "node_gpus %f peer_en %f placement %f realize %f plan "
+          "%f create %f exchange %f\n",
+          x, y, z, nIters, numGpus, numNodes, size, dd.timeMpiTopo_, dd.timeNodeGpus_,
+          dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_, dd.timePlan_,
+          dd.timeCreate_, dd.timeExchange_);
+    }
+#endif // STENCIL_TIME
 
   } // send domains out of scope before MPI_Finalize
 
