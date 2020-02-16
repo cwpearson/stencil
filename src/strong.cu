@@ -41,6 +41,7 @@ int main(int argc, char **argv) {
   bool useStaged = false;
 
   Parser p;
+  p.no_unrecognized();
   p.add_positional(x)->required();
   p.add_positional(y)->required();
   p.add_positional(z)->required();

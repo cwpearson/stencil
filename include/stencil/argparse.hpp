@@ -181,6 +181,7 @@ public:
           continue;
         }
         if (noUnrecognized_) {
+          std::cerr << "unrecognized " << argv[i] << "\n";
           return false;
         }
       } else { // otherwise try it as positional
