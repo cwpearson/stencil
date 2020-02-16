@@ -97,24 +97,49 @@ private:
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
 public:
+
+#if STENCIL_TIME == 1
+/* record total time spent on operations. Valid at MPI rank 0
+*/
+  double timeMpiTopo_;
+  double timeNodeGpus_;
+  double timePeerEn_;
+  double timePlacement_;
+  double timePlan_;
+  double timeRealize_;
+  double timeCreate_;
+  double timeExchange_;
+#endif
+
   DistributedDomain(size_t x, size_t y, size_t z)
       : size_(x, y, z), flags_(MethodFlags::All) {
+
+#if STENCIL_TIME == 1
+  timeMpiTopo_ = 0;
+  timeNodeGpus_ = 0;
+  timePeerEn_ = 0;
+  timePlacement_ = 0;
+  timePlan_ = 0;
+  timeRealize_ = 0;
+  timeCreate_ = 0;
+  timeExchange_ = 0;
+#endif
 
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
     mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     double elapsed = MPI_Wtime() - start;
     double maxElapsed = -1;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.mpi_topo %f s\n", maxElapsed);
+      timeMpiTopo_ += maxElapsed;
     }
 #endif
 
@@ -162,19 +187,19 @@ public:
 
 // create a list of cuda device IDs in use by the ranks on this node
 // TODO: assumes all ranks use the same number of GPUs
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
     std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
     MPI_Allgather(gpus_.data(), gpus_.size(), MPI_INT, nodeCudaIds.data(),
                   gpus_.size(), MPI_INT, mpiTopology_.colocated_comm());
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.node_gpus %f s\n", maxElapsed);
+      timeNodeGpus_ += maxElapsed;
     }
 #endif
     {
@@ -187,7 +212,7 @@ public:
       std::cerr << "\n";
     }
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -199,12 +224,12 @@ public:
       }
     }
     nvtxRangePop();
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.peer_en %f s\n", maxElapsed);
+      timePeerEn_ += maxElapsed;
     }
 #endif
     CUDA_RUNTIME(cudaGetLastError());
@@ -257,7 +282,7 @@ public:
     CUDA_RUNTIME(cudaGetLastError());
 
     // compute domain placement
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
@@ -271,17 +296,17 @@ public:
     assert(placement);
     nvtxRangePop();
     CUDA_RUNTIME(cudaGetLastError());
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     double maxElapsed = -1;
     double elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.placement %f s\n", maxElapsed);
+      timePlacement_ += maxElapsed;
     }
 #endif
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -313,16 +338,16 @@ public:
       d.realize();
     }
     CUDA_RUNTIME(cudaGetLastError());
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.realize %f s\n", maxElapsed);
+      timeRealize_ += maxElapsed;
     }
 #endif
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -483,12 +508,12 @@ public:
     }
 
     nvtxRangePop(); // plan
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.plan %f s\n", maxElapsed);
+      timePlan_ += maxElapsed;
     }
 #endif
 
@@ -561,7 +586,7 @@ public:
     }
     planFile.close();
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -742,12 +767,12 @@ public:
     }
     nvtxRangePop(); // prep remote
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.create %f s\n", maxElapsed);
+      timeCreate_ += maxElapsed;
     }
 #endif
   }
@@ -757,7 +782,7 @@ public:
   */
   void exchange() {
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
@@ -922,13 +947,14 @@ public:
     }
     nvtxRangePop(); // remote wait
 
-#if STENCIL_PRINT_TIMINGS == 1
+#if STENCIL_TIME == 1
     double maxElapsed = -1;
     double elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
     if (0 == rank_) {
-      printf("time.exchange %f s\n", maxElapsed);
+      timeExchange_ += maxElapsed;
+
     }
 #endif
 

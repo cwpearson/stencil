@@ -33,9 +33,9 @@ int main(int argc, char **argv) {
   bool useKernel = false;
   bool usePeer = false;
   bool useColo = false;
-  #if STENCIL_USE_CUDA_AWARE_MPI == 1
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
   bool useCudaAware = false;
-  #endif
+#endif
   bool useStaged = false;
 
   Parser p;
@@ -127,6 +127,17 @@ int main(int argc, char **argv) {
       dd.exchange();
       nvtxRangePop();
     }
+
+    MPI_Barrier(MPI_COMM_WORLD);
+
+#if STENCIL_TIME == 1
+    if (0 == rank) {
+      printf("mpi_topo %f node_gpus %f peer_en %f placement %f realize %f plan "
+             "%f create %f exchange %f\n",
+             dd.timeMpiTopo_, dd.timeNodeGpus_, dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_, dd.timeExchange_);
+    }
+#endif // STENCIL_TIME
+
   } // send domains out of scope before MPI_Finalize
 
   MPI_Finalize();
