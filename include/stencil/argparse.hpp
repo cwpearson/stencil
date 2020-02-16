@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <iostream>
 
 class OptionBase {
 public:
@@ -14,7 +15,25 @@ template <typename T> class Option : public OptionBase {
   T *val_;
 
 public:
-  void set_val(const std::string &valStr) override {}
+  Option(T &val, const std::string &l) : long_(l), val_(&val) {}
+  void set_val(const std::string &val) override { set_val((T *)nullptr, val); }
+  const std::string &long_str() override {
+      return long_;
+  }
+
+private:
+  void set_val(size_t *, const std::string &val) { // convert to size_t
+    *val_ = std::stoull(val);
+  }
+  void set_val(double *, const std::string &val) { // convert to double
+    *val_ = std::stod(val);
+  }
+  void set_val(float *, const std::string &val) { // convert to float
+    *val_ = std::stof(val);
+  }
+  void set_val(int *, const std::string &val) { // convert to int
+    *val_ = std::stoi(val);
+  }
 };
 
 class Flag {
@@ -83,7 +102,6 @@ class Parser {
     std::string sarg(arg);
     for (int64_t i = int64_t(opts_.size()) - 1; i >= 0; --i) {
       if (opts_[i]->long_str() == sarg) {
-        std::cerr << "matched opt " << opts_[i]->long_str() << "\n";
         return opts_[i];
       }
     }
@@ -108,14 +126,17 @@ class Parser {
   }
 
 public:
-  bool parse(const int argc, const char **argv) {
+  bool parse(const int argc, const char *const *argv) {
     size_t pi = 0; // positional argument position
     bool optsOkay = true;
     for (int i = 1; i < argc; ++i) {
+
+      // '--' indicates only positional arguments follow
       if (argv[i] == std::string("--")) {
         optsOkay = false;
         continue;
       }
+      // try interpreting as a flag or option if it looks like one
       if (optsOkay && starts_with(argv[i], "-")) {
         OptionBase *opt = match_opt(argv[i]);
         if (opt) {
@@ -129,7 +150,7 @@ public:
           continue;
         }
         std::cerr << "unrecognized flag " << argv[i] << "\n";
-      } else {
+      } else { // otherwise try it as positional
         if (pi < posnls_.size()) {
           posnls_[pi]->set_val(argv[i]);
           ++pi;

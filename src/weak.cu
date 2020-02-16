@@ -4,6 +4,7 @@
 
 #include <nvToolsExt.h>
 
+#include "stencil/argparse.hpp"
 #include "stencil/stencil.hpp"
 
 int main(int argc, char **argv) {
@@ -27,31 +28,52 @@ int main(int argc, char **argv) {
   size_t x = 512;
   size_t y = 512;
   size_t z = 512;
-  if (argc == 2) {
-    int val = std::stoi(argv[1]);
-    x = val;
-    y = val;
-    z = val;
-  } else if (4 == argc) {
-    x = std::stoi(argv[1]);
-    y = std::stoi(argv[2]);
-    z = std::stoi(argv[3]);
-  }
+
+  int nIters = 30;
+  bool useKernel = false;
+  bool usePeer = false;
+  bool useColo = false;
+  #if STENCIL_USE_CUDA_AWARE_MPI == 1
+  bool useCudaAware = false;
+  #endif
+  bool useStaged = false;
+
+  Parser p;
+  p.add_positional(x)->required();
+  p.add_positional(y)->required();
+  p.add_positional(z)->required();
+  p.add_positional(nIters);
+  p.add_flag(useKernel, "--kernel");
+  p.add_flag(usePeer, "--peer");
+  p.add_flag(useColo, "--colo");
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
+  p.add_flag(useCudaAware, "--cuda-aware");
+#endif
+  p.add_flag(useStaged, "--staged");
+  p.parse(argc, argv);
 
   x = x * pow(numSubdoms, 0.33333) + 0.5; // round to nearest
   y = y * pow(numSubdoms, 0.33333) + 0.5;
   z = z * pow(numSubdoms, 0.33333) + 0.5;
 
-  MethodFlags methods = MethodFlags::CudaMpi;
-#ifdef WEAK_METHOD_COLO
-  methods |= MethodFlags::CudaMpiColocated;
+  MethodFlags methods = MethodFlags::None;
+  if (useStaged) {
+    methods = MethodFlags::CudaMpi;
+  }
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
+  if (useCudaAware) {
+    methods = MethodFlags::CudaAwareMpi;
+  }
 #endif
-#ifdef WEAK_METHOD_PEER
-  methods |= MethodFlags::CudaMemcpyPeer;
-#endif
-#ifdef WEAK_METHOD_ALL
-  methods |= MethodFlags::All;
-#endif
+  if (useColo) {
+    methods |= MethodFlags::CudaMpiColocated;
+  }
+  if (usePeer) {
+    methods |= MethodFlags::CudaMemcpyPeer;
+  }
+  if (methods == MethodFlags::None) {
+    methods = MethodFlags::All;
+  }
 
   if (0 == rank) {
 #ifndef NDEBUG
