@@ -42,7 +42,7 @@ int main(int argc, char **argv) {
   p.add_positional(x)->required();
   p.add_positional(y)->required();
   p.add_positional(z)->required();
-  p.add_positional(nIters);
+  p.add_positional(nIters)->required();
   p.add_flag(useKernel, "--kernel");
   p.add_flag(usePeer, "--peer");
   p.add_flag(useColo, "--colo");
@@ -70,6 +70,9 @@ int main(int argc, char **argv) {
   }
   if (usePeer) {
     methods |= MethodFlags::CudaMemcpyPeer;
+  }
+  if (useKernel) {
+    methods |= MethodFlags::CudaKernel;
   }
   if (methods == MethodFlags::None) {
     methods = MethodFlags::All;
@@ -118,7 +121,7 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    for (size_t iter = 0; iter < 5; ++iter) {
+    for (size_t iter = 0; iter < nIters; ++iter) {
       std::cerr << "exchange\n";
       nvtxRangePush("exchange");
       dd.exchange();
