@@ -216,4 +216,5 @@ The Distance Between GPUs is computed by using Nvidia Management Library to dete
 This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
 
 ## Notes
-  * [CUDA-Aware OpenMPI](https://www.open-mpi.org/faq/?category=runcuda#mpi-cuda-support)
+  * [Open MPI: CUDA-Aware OpenMPI](https://www.open-mpi.org/faq/?category=runcuda#mpi-cuda-support)
+  * [Nvidia DevBlock: Benchmarking CUDA-Aware MPI](https://devblogs.nvidia.com/benchmarking-cuda-aware-mpi/)
