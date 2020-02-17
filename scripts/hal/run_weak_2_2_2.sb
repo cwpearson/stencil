@@ -20,4 +20,4 @@ module load cuda
 module load openmpi/4.0.0-gcc-4.8.5
 
 cd /home/cpearson/repos/stencil/build
-mpirun ./src/weak
+mpirun ./src/weak 512 512 512 10

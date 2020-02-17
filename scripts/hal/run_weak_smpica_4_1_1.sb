@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name="weak_smpica_2_2_2"
-#SBATCH --output="weak_smpica_2_2_2.%j.%N.out"
-#SBATCH --error="weak_smpica_2_2_2.%j.%N.err"
+#SBATCH --job-name="weak_smpica_4_1_1"
+#SBATCH --output="weak_smpica_4_1_1.%j.%N.out"
+#SBATCH --error="weak_smpica_4_1_1.%j.%N.err"
 #SBATCH --partition=gpu
 #SBATCH --time=00:05:00
-#SBATCH --nodes=2
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --sockets-per-node=2
 #SBATCH --cores-per-socket=20
