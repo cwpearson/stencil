@@ -5,6 +5,24 @@
 #include <iostream>
 #include <sstream>
 
+
+/*
+Done:
+  * flags with `-s`, `--long-flag` formats
+  * options with `--long-opt val` format
+  * positional arguments
+  * `--` to stop parsing options and flags
+
+Partially Done:
+  * Help string output
+
+To-do:
+  * modify argc, argv to remove consumed options
+  * support --long-option=value
+  * have the last positional argument fill a vector with remaining
+
+*/
+
 class OptionBase {
 public:
   virtual void set_val(const std::string &valStr) = 0;
