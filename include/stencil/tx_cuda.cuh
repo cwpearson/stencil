@@ -780,6 +780,7 @@ public:
     assert(packer_.data());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     MPI_Isend(packer_.data(), packer_.size(), MPI_BYTE, dstRank_, tag,
               MPI_COMM_WORLD, &req_);
@@ -869,6 +870,7 @@ public:
     assert(unpacker_.data());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, tag,
               MPI_COMM_WORLD, &req_);
