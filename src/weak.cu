@@ -161,9 +161,9 @@ int main(int argc, char **argv) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "kernel";
       }
-      if (methods && MethodFlags::All) {
+      if (methods == MethodFlags::All) {
         methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "all";        
+        methodStr += "all";
       }
       printf(
           "weak %s x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d mpi_topo %f "
