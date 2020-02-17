@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name="weak_2_1_2"
-#SBATCH --output="weak_2_1_2.%j.%N.out"
-#SBATCH --error="weak_2_1_2.%j.%N.err"
+#SBATCH --job-name="weak_smpica_2_1_2"
+#SBATCH --output="weak_smpica_2_1_2.%j.%N.out"
+#SBATCH --error="weak_smpica_2_1_2.%j.%N.err"
 #SBATCH --partition=gpu
 #SBATCH --time=00:05:00
 #SBATCH --nodes=2
@@ -13,9 +13,11 @@
 #SBATCH --export=ALL
 #SBATCH --gres=gpu:v100:2
 
+set -x -e -o
+
 module purge
 module load cuda
-module load openmpi/4.0.0-gcc-4.8.5
+module load spectrum_mpi
 
-cd /home/cpearson/repos/stencil/build
-mpirun ./src/weak 512 512 512 10
+cd /home/cpearson/repos/stencil/build-smpi-ca
+mpirun -gpu ./src/weak 512 512 512 10
