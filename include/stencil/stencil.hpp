@@ -51,6 +51,10 @@ inline MethodFlags operator&(MethodFlags a, MethodFlags b) {
   return static_cast<MethodFlags>(static_cast<int>(a) & static_cast<int>(b));
 }
 
+inline bool operator&&(MethodFlags a, MethodFlags b) {
+  return (a & b) != MethodFlags::None;
+}
+
 inline bool any(MethodFlags a) noexcept { return a != MethodFlags::None; }
 
 class DistributedDomain {

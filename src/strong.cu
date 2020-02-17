@@ -136,10 +136,35 @@ int main(int argc, char **argv) {
 
 #if STENCIL_TIME == 1
     if (0 == rank) {
+      std::string methodStr;
+      if (methods && MethodFlags::CudaMpi) {
+        methodStr += methodStr.empty() ? "" : ",";
+        methodStr += "staged";
+      }
+      if (methods && MethodFlags::CudaAwareMpi) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "cuda-aware";
+      }
+      if (methods && MethodFlags::CudaMpiColocated) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "colo";
+      }
+      if (methods && MethodFlags::CudaMemcpyPeer) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "peer";
+      }
+      if (methods && MethodFlags::CudaKernel) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "kernel";
+      }
+      if (methods && MethodFlags::All) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "all";        
+      }
       printf(
-          "strong x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d mpi_topo %f "
+          "strong %s x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d mpi_topo %f "
           "node_gpus %f peer_en %f placement %f realize %f plan "
-          "%f create %f exchange %f\n",
+          "%f create %f exchange %f\n", methodStr.c_str(),
           x, y, z, nIters, numGpus, numNodes, size, dd.timeMpiTopo_,
           dd.timeNodeGpus_, dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_,
           dd.timePlan_, dd.timeCreate_, dd.timeExchange_);
