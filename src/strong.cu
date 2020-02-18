@@ -32,6 +32,7 @@ int main(int argc, char **argv) {
   size_t z = 512;
 
   int nIters = 30;
+  bool useNaivePlacement = false;
   bool useKernel = false;
   bool usePeer = false;
   bool useColo = false;
@@ -49,6 +50,7 @@ int main(int argc, char **argv) {
   p.add_flag(useKernel, "--kernel");
   p.add_flag(usePeer, "--peer");
   p.add_flag(useColo, "--colo");
+  p.add_flag(useNaivePlacement, "--naive");
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
   p.add_flag(useCudaAware, "--cuda-aware");
 #endif
@@ -88,6 +90,11 @@ int main(int argc, char **argv) {
 
     std::cout << numGpus << " subdomains " << size << " ranks: " << x << ","
               << y << "," << z << "=" << x * y * z << "\n";
+    if (useNaivePlacement) {
+      std::cout << "naive placement\n";
+    } else {
+      std::cout << "node-aware placement\n";
+    }
     if ((methods & MethodFlags::CudaMpi) != MethodFlags::None) {
       std::cout << "CudaMpi enabled\n";
     }
@@ -112,7 +119,11 @@ int main(int argc, char **argv) {
 
     dd.set_methods(methods);
     dd.set_radius(radius);
-    dd.set_placement(PlacementStrategy::NodeAware);
+    if (useNaivePlacement) {
+      dd.set_placement(PlacementStrategy::Trivial);
+    } else {
+      dd.set_placement(PlacementStrategy::NodeAware);
+    }
 
     dd.add_data<float>();
     dd.add_data<float>();
@@ -161,13 +172,14 @@ int main(int argc, char **argv) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "all";
       }
-      printf(
-          "strong %s x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d mpi_topo %f "
-          "node_gpus %f peer_en %f placement %f realize %f plan "
-          "%f create %f exchange %f\n", methodStr.c_str(),
-          x, y, z, nIters, numGpus, numNodes, size, dd.timeMpiTopo_,
-          dd.timeNodeGpus_, dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_,
-          dd.timePlan_, dd.timeCreate_, dd.timeExchange_);
+      printf("strong %s x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d "
+             "mpi_topo %f "
+             "node_gpus %f peer_en %f placement %f realize %f plan "
+             "%f create %f exchange %f\n",
+             methodStr.c_str(), x, y, z, nIters, numGpus, numNodes, size,
+             dd.timeMpiTopo_, dd.timeNodeGpus_, dd.timePeerEn_,
+             dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
+             dd.timeExchange_);
     }
 #endif // STENCIL_TIME
 
