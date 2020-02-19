@@ -149,7 +149,8 @@ Show queue: `swqueue`
 
 ## On OLCF Summit
 
-[jsrunvisualizer](jsrunvisualizer.olcf.ornl.gov)
+* [jsrunvisualizer](jsrunvisualizer.olcf.ornl.gov)
+* [job-step-viewer](https://jobstepviewer.olcf.ornl.gov)
 
 Run scripts are in `srcipts/summit`.
 
