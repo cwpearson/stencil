@@ -749,6 +749,7 @@ public:
 
   virtual void wait() override {
     assert(State::Send == state_);
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     MPI_Wait(&req_, MPI_STATUS_IGNORE);
   }
 
@@ -856,6 +857,7 @@ public:
 
   bool d2d_done() {
     int flag;
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
     if (flag) {
       return true;
