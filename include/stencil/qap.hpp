@@ -59,4 +59,53 @@ inline std::vector<size_t> solve(const Mat2D<double> &w, Mat2D<double> &d) {
 
   return bestF;
 }
+
+inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d) {
+
+  assert(w.shape() == d.shape());
+  assert(w.shape().x == w.shape().y);
+
+  // initial guess
+  std::vector<size_t> bestF(w.shape().x);
+  for (size_t i = 0; i < w.shape().x; ++i) {
+    bestF[i] = i;
+  }
+  double bestCost = std::numeric_limits<double>::infinity();
+
+  bool improved;
+ do {
+    improved = false;
+
+    std::vector<size_t> imprF = bestF;
+    double imprCost = bestCost;
+
+    // find the best improvement for swapping a single location
+    for (size_t i = 0; i < w.shape().x; ++i) {
+      for (size_t j = i+1; j < w.shape().x; ++j) {
+        std::vector<size_t> f = bestF;
+        auto tmp = f[i];
+        f[i] = f[j];
+        f[j] = tmp;
+        const double cost = detail::cost(w,d,f);
+        if (cost < imprCost) {
+          imprF = f;
+          imprCost = cost;
+          improved = true;
+        }
+      }
+    }
+
+  if (improved) {
+    bestF = imprF;
+    bestCost = imprCost;
+  }
+
+  } while (improved);
+
+
+  return bestF;
+}
+
+
+
 } // namespace qap

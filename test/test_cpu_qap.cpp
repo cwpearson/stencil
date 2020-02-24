@@ -55,4 +55,35 @@ TEST_CASE("qap") {
     REQUIRE(f[2] == 1);
     REQUIRE(f[3] == 3);
   }
+
+  SECTION("p9_catch") {
+    // high bw between 0-2
+    // clang-format off
+    Mat2D<double> bw = {
+      {900,  75,  64,  64},
+      { 75, 900,  64,  64},
+      { 64,  64, 900,  75},
+      { 64,  64,  75, 900}
+    };
+    // high cost between  0-2, 1-3
+    Mat2D<double> comm = {
+      {  7,  5,  10,  1},
+      {  5,  7,  1,  10},
+      { 10,  1,  7,  5},
+      { 1,  10,  5, 7}
+    };
+    // clang-format on
+
+    INFO("reciprocal");
+    Mat2D<double> dist = make_reciprocal(bw);
+    INFO("solve");
+    auto f = qap::solve_catch(comm, dist);
+
+    INFO("check");
+    REQUIRE(f[0] == 3);
+    REQUIRE(f[1] == 1);
+    REQUIRE(f[2] == 2);
+    REQUIRE(f[3] == 0);
+  }
+
 }
