@@ -47,21 +47,27 @@ public:
   ~LocalDomain() {
     CUDA_RUNTIME(cudaGetLastError());
 
-    //int rank;
-    //MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // int rank;
+    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-    //std::cerr << "dtor rank=" << rank << " ~LocalDomain(): device=" << dev_ << "\n";
+    // std::cerr << "dtor rank=" << rank << " ~LocalDomain(): device=" << dev_
+    // << "\n";
     CUDA_RUNTIME(cudaSetDevice(dev_));
     for (auto p : currDataPtrs_) {
-      //std::cerr << "rank=" << rank << " ~LocalDomain(): cudaFree " << uintptr_t(p) << "\n";
-      if (p)  CUDA_RUNTIME(cudaFree(p));
+      // std::cerr << "rank=" << rank << " ~LocalDomain(): cudaFree " <<
+      // uintptr_t(p) << "\n";
+      if (p)
+        CUDA_RUNTIME(cudaFree(p));
     }
-    if (devCurrDataPtrs_) CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
+    if (devCurrDataPtrs_)
+      CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
 
     for (auto p : nextDataPtrs_) {
-      if (p) CUDA_RUNTIME(cudaFree(p));
+      if (p)
+        CUDA_RUNTIME(cudaFree(p));
     }
-    if (devDataElemSize_) CUDA_RUNTIME(cudaFree(devDataElemSize_));
+    if (devDataElemSize_)
+      CUDA_RUNTIME(cudaFree(devDataElemSize_));
     CUDA_RUNTIME(cudaGetLastError());
   }
 
@@ -197,7 +203,6 @@ public:
     return dataElemSize_[idx] * halo_extent(dir).flatten();
   }
 
-
   // return the 3d size of the compute domain, in terms of elements
   Dim3 size() const noexcept { return sz_; }
 
@@ -209,12 +214,11 @@ public:
   // the GPU this domain is on
   int gpu() const { return dev_; }
 
-  std::vector<unsigned char> interior_to_host(const size_t qi // quantity index
-  ) const {
-    
-    Dim3 pos = halo_pos(Dim3(0,0,0), true);
-    Dim3 ext = halo_extent(Dim3(0,0,0));
-    const size_t bytes = halo_bytes(Dim3(0,0,0), qi);
+  std::vector<unsigned char> region_to_host(const Dim3 &pos, const Dim3 &ext,
+                                            const size_t qi // quantity index
+                                            ) const {
+
+    const size_t bytes = halo_bytes(ext, qi);
 
     // pack quantity
     CUDA_RUNTIME(cudaSetDevice(gpu()));
@@ -222,16 +226,31 @@ public:
     CUDA_RUNTIME(cudaMalloc(&devBuf, bytes));
     const dim3 dimBlock = make_block_dim(ext, 512);
     const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-    pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos, ext, elem_size(qi));
+    pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos,
+                                       ext, elem_size(qi));
 
     // copy quantity to host
     std::vector<unsigned char> hostBuf(bytes);
-    CUDA_RUNTIME(cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
+    CUDA_RUNTIME(
+        cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
 
     // free device buffer
     CUDA_RUNTIME(cudaFree(devBuf));
 
     return hostBuf;
+  }
+
+  std::vector<unsigned char> interior_to_host(const size_t qi // quantity index
+                                              ) const {
+
+    Dim3 pos = halo_pos(Dim3(0, 0, 0), true);
+    Dim3 ext = halo_extent(Dim3(0, 0, 0));
+    return region_to_host(pos, ext, qi);
+  }
+
+  std::vector<unsigned char> quantity_to_host(const size_t qi // quantity index
+                                              ) const {
+    return region_to_host(Dim3(0, 0, 0), sz_, qi);
   }
 
   void realize() {
@@ -241,9 +260,9 @@ public:
 
     // allocate each data region
     CUDA_RUNTIME(cudaSetDevice(dev_));
-    //int rank;
-    //MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    //std::cerr << "r" << rank << " dev=" << dev_ << "\n";
+    // int rank;
+    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    // std::cerr << "r" << rank << " dev=" << dev_ << "\n";
     for (size_t i = 0; i < num_data(); ++i) {
       size_t elemSz = dataElemSize_[i];
 

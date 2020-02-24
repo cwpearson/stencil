@@ -97,6 +97,22 @@ public:
     return ret;
   }
 
+  Dim3 subdomain_origin(const Dim3 &idx) const noexcept {
+    Dim3 ret = size_ * idx;
+
+    if (rem_.x != 0 && idx.x >= rem_.x) {
+      ret.x -= (idx.x - rem_.x);
+    }
+    if (rem_.y != 0 && idx.y >= rem_.y) {
+      ret.y -= (idx.y - rem_.y);
+    }
+    if (rem_.z != 0 && idx.z >= rem_.z) {
+      ret.z -= (idx.z - rem_.z);
+    }
+
+    return ret;
+  }
+
   /* get a unique 1D integer for an index */
   size_t linearize(Dim3 idx) const {
     Dim3 dim = this->dim();
@@ -260,6 +276,22 @@ public:
     return ret;
   }
 
+  Dim3 subdomain_origin(const Dim3 &idx) const noexcept {
+    Dim3 ret = size_ * idx;
+
+    if (rem_.x != 0 && idx.x >= rem_.x) {
+      ret.x -= (idx.x - rem_.x);
+    }
+    if (rem_.y != 0 && idx.y >= rem_.y) {
+      ret.y -= (idx.y - rem_.y);
+    }
+    if (rem_.z != 0 && idx.z >= rem_.z) {
+      ret.z -= (idx.z - rem_.z);
+    }
+
+    return ret;
+  }
+
   Dim3 sys_idx(int64_t i) const noexcept { return dimensionize(i, sys_dim()); }
   Dim3 node_idx(int64_t i) const noexcept {
     return dimensionize(i, node_dim());
@@ -286,6 +318,9 @@ public:
 
   // get the size of a subdomain
   virtual Dim3 subdomain_size(const Dim3 &idx) = 0;
+
+  // get the origin of a subdomain
+  virtual Dim3 subdomain_origin(const Dim3 &idx) = 0;
 
   // upper bound for idx
   virtual Dim3 dim() = 0;
@@ -332,6 +367,11 @@ public:
   /* size of a subdomain */
   Dim3 subdomain_size(const Dim3 &idx) override {
     return partition_.subdomain_size(idx);
+  }
+
+  /* origin of a subdomain */
+  Dim3 subdomain_origin(const Dim3 &idx) override {
+    return partition_.subdomain_origin(idx);
   }
 
   Dim3 dim() override { return partition_.dim(); }
@@ -578,6 +618,11 @@ public:
 
   Dim3 subdomain_size(const Dim3 &idx) override {
     return partition_.subdomain_size(idx);
+  }
+
+  /* origin of a subdomain */
+  Dim3 subdomain_origin(const Dim3 &idx) override {
+    return partition_.subdomain_origin(idx);
   }
 
   Dim3 dim() override { return partition_.dim(); }
