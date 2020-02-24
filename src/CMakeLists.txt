@@ -7,3 +7,6 @@ target_link_libraries(weak stencil::stencil)
 
 add_executable(strong strong.cu)
 target_link_libraries(strong stencil::stencil)
+
+add_executable(pingpong pingpong.cu)
+target_link_libraries(pingpong stencil::stencil)
