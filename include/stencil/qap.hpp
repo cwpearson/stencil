@@ -91,7 +91,7 @@ inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d)
 
     // find the best improvement for swapping a single location
     for (size_t i = 0; i < w.shape().x; ++i) {
-      std::cerr << i << "\n";
+      // std::cerr << i << "\n";
       for (size_t j = i+1; j < w.shape().x; ++j) {
         
 
@@ -100,27 +100,38 @@ inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d)
         // remove contribution from entry i,j on cost
         std::vector<size_t> f = bestF;
         double cost = bestCost;
+        // for (size_t m = 0; m < w.shape().x; ++m) {
+        //   for (size_t n = 0; n < w.shape().x; ++n) {
+        //     if (m == i || m == j || n == i || n == j) {
+        //       cost -= detail::cost_product(w.at(m,n), d.at(f[m], f[n]));
+        //     }
+        //   }
+        // }
         for (size_t k = 0; k < w.shape().x; ++k) {
           cost -= detail::cost_product(w.at(i,k), d.at(f[i], f[k]));
           cost -= detail::cost_product(w.at(j,k), d.at(f[j], f[k]));
-          if (k != i) {
+          // don't double-count overlaps
+          if (k != i && k != j) {
             cost -= detail::cost_product(w.at(k,i), d.at(f[k], f[i]));
-          }
-          if (k != j) {
             cost -= detail::cost_product(w.at(k,j), d.at(f[k], f[j]));
           }
         }
         auto tmp = f[i];
         f[i] = f[j];
         f[j] = tmp;
-        // add contribution from swapped i,j
+        // for (size_t m = 0; m < w.shape().x; ++m) {
+        //   for (size_t n = 0; n < w.shape().x; ++n) {
+        //     if (m == i || m == j || n == i || n == j) {
+        //       cost += detail::cost_product(w.at(m,n), d.at(f[m], f[n]));
+        //     }
+        //   }
+        // }
         for (size_t k = 0; k < w.shape().x; ++k) {
           cost += detail::cost_product(w.at(i,k), d.at(f[i], f[k]));
           cost += detail::cost_product(w.at(j,k), d.at(f[j], f[k]));
-          if (k != i) {
+          // don't double-count overlaps
+          if (k != i && k != j) {
             cost += detail::cost_product(w.at(k,i), d.at(f[k], f[i]));
-          }
-          if (k != j) {
             cost += detail::cost_product(w.at(k,j), d.at(f[k], f[j]));
           }
         }
@@ -130,17 +141,21 @@ inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d)
         // }
         // const double cost = detail::cost(w,d,f);
         if (cost < imprCost) {
+          // std::cerr << cost << " " << imprCost << " " << i << " " << j << "\n";
           imprF = f;
           imprCost = cost;
           improved = true;
-          std::cerr << "ah!\n";
+
+          // goto nextiter;
         }
       }
     }
 
+// nextiter:
   if (improved) {
     bestF = imprF;
     bestCost = imprCost;
+    // std::cerr << bestCost << "\n";
   }
   
 

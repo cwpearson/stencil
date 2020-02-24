@@ -88,8 +88,16 @@ TEST_CASE("qap") {
 
   SECTION("big catch") {
 
-    Mat2D<double> bw(1536, 1536);
-    Mat2D<double> comm(1536, 1536);
+    Mat2D<double> bw(64, 64);
+    Mat2D<double> comm(64, 64);
+
+    for (size_t i = 0; i < bw.shape().x; ++i) {
+      for (size_t j = 0; j < bw.shape().x; ++j) {
+        bw.at(i,j) = rand();
+        comm.at(i,j) = rand();
+
+      }
+    }
 
     INFO("reciprocal");
     Mat2D<double> dist = make_reciprocal(bw);
