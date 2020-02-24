@@ -11,6 +11,15 @@
 namespace qap {
 
 namespace detail {
+
+inline double cost_product(double we, double de) {
+      if (0 == we || 0 == de) {
+        return 0;
+      } else {
+        return we * de;
+      }
+}
+
 inline double cost(const Mat2D<double> &w,      // weight
                    const Mat2D<double> &d,      // distance
                    const std::vector<size_t> &f // bijection
@@ -24,11 +33,12 @@ inline double cost(const Mat2D<double> &w,      // weight
   for (size_t a = 0; a < w.shape().y; ++a) {
     for (size_t b = 0; b < w.shape().x; ++b) {
       double p;
-      if (0 == w[a][b] || 0 == d[f[a]][f[b]]) {
-        p = 0;
-      } else {
-        p = w[a][b] * d[f[a]][f[b]];
-      }
+      p = cost_product(w.at(a,b), d.at(f[a],f[b]));
+      // if (0 == w.at(a,b) || 0 == d.at(f[a],f[b])) {
+      //   p = 0;
+      // } else {
+      //   p = w.at(a,b) * d.at(f[a],f[b]);
+      // }
       ret += p;
     }
   }
@@ -70,7 +80,7 @@ inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d)
   for (size_t i = 0; i < w.shape().x; ++i) {
     bestF[i] = i;
   }
-  double bestCost = std::numeric_limits<double>::infinity();
+  double bestCost = detail::cost(w,d,bestF);
 
   bool improved;
  do {
@@ -81,16 +91,49 @@ inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d)
 
     // find the best improvement for swapping a single location
     for (size_t i = 0; i < w.shape().x; ++i) {
+      std::cerr << i << "\n";
       for (size_t j = i+1; j < w.shape().x; ++j) {
+        
+
+        // adjust cost for swap
+        // we will be adjusting placements i and j
+        // remove contribution from entry i,j on cost
         std::vector<size_t> f = bestF;
+        double cost = bestCost;
+        for (size_t k = 0; k < w.shape().x; ++k) {
+          cost -= detail::cost_product(w.at(i,k), d.at(f[i], f[k]));
+          cost -= detail::cost_product(w.at(j,k), d.at(f[j], f[k]));
+          if (k != i) {
+            cost -= detail::cost_product(w.at(k,i), d.at(f[k], f[i]));
+          }
+          if (k != j) {
+            cost -= detail::cost_product(w.at(k,j), d.at(f[k], f[j]));
+          }
+        }
         auto tmp = f[i];
         f[i] = f[j];
         f[j] = tmp;
-        const double cost = detail::cost(w,d,f);
+        // add contribution from swapped i,j
+        for (size_t k = 0; k < w.shape().x; ++k) {
+          cost += detail::cost_product(w.at(i,k), d.at(f[i], f[k]));
+          cost += detail::cost_product(w.at(j,k), d.at(f[j], f[k]));
+          if (k != i) {
+            cost += detail::cost_product(w.at(k,i), d.at(f[k], f[i]));
+          }
+          if (k != j) {
+            cost += detail::cost_product(w.at(k,j), d.at(f[k], f[j]));
+          }
+        }
+        
+        // if(cost != detail::cost(w,d,f)) {
+        //   fprintf(stderr, "%.20f %.20f\n", cost, detail::cost(w,d,f));
+        // }
+        // const double cost = detail::cost(w,d,f);
         if (cost < imprCost) {
           imprF = f;
           imprCost = cost;
           improved = true;
+          std::cerr << "ah!\n";
         }
       }
     }
@@ -99,6 +142,7 @@ inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d)
     bestF = imprF;
     bestCost = imprCost;
   }
+  
 
   } while (improved);
 

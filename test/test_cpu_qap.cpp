@@ -56,7 +56,7 @@ TEST_CASE("qap") {
     REQUIRE(f[3] == 3);
   }
 
-  SECTION("p9_catch") {
+  SECTION("p9 catch") {
     // high bw between 0-2
     // clang-format off
     Mat2D<double> bw = {
@@ -84,6 +84,19 @@ TEST_CASE("qap") {
     REQUIRE(f[1] == 1);
     REQUIRE(f[2] == 2);
     REQUIRE(f[3] == 0);
+  }
+
+  SECTION("big catch") {
+
+    Mat2D<double> bw(1536, 1536);
+    Mat2D<double> comm(1536, 1536);
+
+    INFO("reciprocal");
+    Mat2D<double> dist = make_reciprocal(bw);
+    INFO("solve");
+    auto f = qap::solve_catch(comm, dist);
+
+    INFO("check");
   }
 
 }

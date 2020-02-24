@@ -100,7 +100,12 @@ public:
   Mat2D(Mat2D &&other) = default;
   Mat2D &operator=(Mat2D &&rhs) = default;
 
-  T &at(int64_t i, int64_t j) noexcept {
+  inline T &at(int64_t i, int64_t j) noexcept {
+    assert(i < shape_.x);
+    assert(j < shape_.y);
+    return data_[i * shape_.x + j];
+  }
+  inline const T &at(int64_t i, int64_t j) const noexcept {
     assert(i < shape_.x);
     assert(j < shape_.y);
     return data_[i * shape_.x + j];
@@ -139,7 +144,7 @@ public:
     operator[](shape_.y - 1) = row;
   }
 
-  const Shape &shape() const noexcept { return shape_; }
+  inline const Shape &shape() const noexcept { return shape_; }
 
   bool operator==(const Mat2D &rhs) const noexcept {
     if (shape_ != rhs.shape_) {
@@ -157,24 +162,18 @@ public:
 };
 
 inline Mat2D<double> make_reciprocal(const Mat2D<double> &m) {
-  Mat2D<double> ret;
+  Mat2D<double> ret(m.shape());
 
   for (size_t i = 0; i < m.shape().y; ++i) {
-    std::vector<double> row;
-
-    for (double e : m[i]) {
+    for (size_t j = 0; j < m.shape().x; ++j) {
+      double e = m.at(i,j);
       if (0 == e) {
-        row.push_back(std::numeric_limits<double>::infinity());
+        ret.at(i,j) = std::numeric_limits<double>::infinity();
       } else {
-        row.push_back(1.0 / e);
+        ret.at(i,j) = 1.0 / e;
       }
     }
-    ret.push_back(row);
   }
-
-  std::cerr << ret.shape().x << " " << ret.shape().y << "\n";
-
-  assert(ret.shape() == m.shape());
 
   return ret;
 }
