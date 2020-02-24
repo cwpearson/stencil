@@ -11,10 +11,6 @@ int main(int argc, char **argv) {
 
   MPI_Init(&argc, &argv);
 
-  int size;
-  int rank;
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
@@ -22,10 +18,11 @@ int main(int argc, char **argv) {
   int minN = 0;
   int maxN = 27;
   int nIters = 30;
+  int ranksPerNode = 1;
   std::string outpath;
 
   Parser p;
-  p.add_positional(outpath)->required();
+  p.add_positional(ranksPerNode)->required();
   p.add_option(minN, "--min");
   p.add_option(maxN, "--max");
   p.add_option(nIters, "--iters");
@@ -33,6 +30,13 @@ int main(int argc, char **argv) {
     std::cout << p.help() << "\n";
     exit(EXIT_FAILURE);
   }
+
+  int size;
+  int rank;
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  int node = rank / ranksPerNode;
+  int ri = rank % ranksPerNode;
 
   char hostname[MPI_MAX_PROCESSOR_NAME] = {0};
   int nameLen;
@@ -48,44 +52,41 @@ int main(int argc, char **argv) {
 
   double elapsed;
 
-  char *buf = new char[1ull << maxN];
-  for (int src = 0; src < size; ++src) {
-    for (int dst = src + 1; dst < size; ++dst) {
+  char *buf = new char[(1ull << maxN) / ranksPerNode];
+  for (int srcNode = 0; srcNode < size / ranksPerNode; ++srcNode) {
+    for (int dstNode = srcNode + 1; dstNode < size / ranksPerNode; ++dstNode) {
       if (0 == rank) {
-        std::cout << &hostnames[MPI_MAX_PROCESSOR_NAME * src] << "-"
-                  << &hostnames[MPI_MAX_PROCESSOR_NAME * dst];
+        std::cout << &hostnames[MPI_MAX_PROCESSOR_NAME * srcNode * ranksPerNode] << "-"
+                  << &hostnames[MPI_MAX_PROCESSOR_NAME * dstNode * ranksPerNode] << "-" << ranksPerNode;
       }
 
       for (int64_t n = minN; n <= maxN; ++n) {
-        size_t numBytes = 1ull << n;
+        size_t numBytes = (1ull << n) / ranksPerNode;
 
         MPI_Barrier(MPI_COMM_WORLD);
         double start = MPI_Wtime();
+        // all ranks on src and dst node pingpong
         for (size_t i = 0; i < nIters; ++i) {
-          if (src == rank) {
-            MPI_Send(buf, numBytes, MPI_BYTE, dst, 0, MPI_COMM_WORLD);
-            MPI_Recv(buf, numBytes, MPI_BYTE, dst, 0, MPI_COMM_WORLD,
+          if (srcNode == node) {
+            MPI_Send(buf, numBytes, MPI_BYTE, dstNode * ranksPerNode + ri, 0, MPI_COMM_WORLD);
+            MPI_Recv(buf, numBytes, MPI_BYTE, dstNode * ranksPerNode + ri, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
-          } else if (dst == rank) {
-            MPI_Recv(buf, numBytes, MPI_BYTE, src, 0, MPI_COMM_WORLD,
+          } else if (dstNode == node) {
+            MPI_Recv(buf, numBytes, MPI_BYTE, srcNode * ranksPerNode + ri, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
-            MPI_Send(buf, numBytes, MPI_BYTE, src, 0, MPI_COMM_WORLD);
+            MPI_Send(buf, numBytes, MPI_BYTE, srcNode * ranksPerNode + ri, 0, MPI_COMM_WORLD);
           }
         }
         elapsed = MPI_Wtime() - start;
 
-        // need to send elapsed time back to src
-        if (src != 0) {
-          if (src == rank && 0 != rank) {
-            MPI_Send(&elapsed, 1, MPI_DOUBLE, 0, 0, MPI_COMM_WORLD);
-          }
-          if (0 == rank) {
-            MPI_Recv(&elapsed, 1, MPI_DOUBLE, src, 0, MPI_COMM_WORLD,
-                     MPI_STATUS_IGNORE);
-          }
+        // get the max time at node 0
+	if (0 == rank) {
+          MPI_Reduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         } else {
-          // src is 0, so elapsed has the right value
+          double scratch;
+          MPI_Reduce(&elapsed, &scratch, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
         }
+
         if (0 == rank) {
           std::cout << " " << elapsed;
         }
