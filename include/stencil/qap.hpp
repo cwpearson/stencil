@@ -47,7 +47,7 @@ inline double cost(const Mat2D<double> &w,      // weight
 }
 } // namespace detail
 
-inline std::vector<size_t> solve(const Mat2D<double> &w, Mat2D<double> &d) {
+inline std::vector<size_t> solve(const Mat2D<double> &w, Mat2D<double> &d, double *costp = nullptr) {
 
   assert(w.shape() == d.shape());
   assert(w.shape().x == d.shape().y);
@@ -67,10 +67,14 @@ inline std::vector<size_t> solve(const Mat2D<double> &w, Mat2D<double> &d) {
     }
   } while (std::next_permutation(f.begin(), f.end()));
 
+  if (costp) {
+    *costp = bestCost;
+  }
+
   return bestF;
 }
 
-inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d) {
+inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d, double *costp = nullptr) {
 
   assert(w.shape() == d.shape());
   assert(w.shape().x == w.shape().y);
@@ -161,7 +165,9 @@ inline std::vector<size_t> solve_catch(const Mat2D<double> &w, Mat2D<double> &d)
 
   } while (improved);
 
-
+  if (costp) {
+    *costp = bestCost;
+  }
   return bestF;
 }
 

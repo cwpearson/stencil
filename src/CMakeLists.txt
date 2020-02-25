@@ -10,3 +10,6 @@ target_link_libraries(strong stencil::stencil)
 
 add_executable(pingpong pingpong.cu)
 target_link_libraries(pingpong stencil::stencil)
+
+add_executable(bench-qap bench_qap.cu)
+target_link_libraries(bench-qap stencil::stencil)
