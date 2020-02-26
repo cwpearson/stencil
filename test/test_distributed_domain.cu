@@ -23,8 +23,9 @@ int unpack_z(int a) { return (a >> 20) & 0x3FF; }
 
 template <typename T>
 __global__ void
-init_kernel(T *dst,          //<! [out] pointer to beginning of dst allocation
-            const Dim3 rawSz //<! [in] 3D size of the dst and src allocations
+init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
+            const Dim3 origin, //<! [in]
+            const Dim3 rawSz   //<! [in] 3D size of the dst and src allocations
 ) {
 
   constexpr size_t radius = 1;
@@ -54,7 +55,8 @@ init_kernel(T *dst,          //<! [out] pointer to beginning of dst allocation
 
         if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius &&
             y < rawSz.y - radius && x < rawSz.x - radius) {
-          _at(dst, x, y, z) = pack_xyz(x, y, z);
+          _at(dst, x, y, z) =
+              pack_xyz(origin.x + x, origin.y + y, origin.z + z);
         } else {
           _at(dst, x, y, z) = 0.0;
         }
@@ -96,11 +98,13 @@ TEST_CASE("exchange") {
   INFO("init");
   dim3 dimGrid(10, 10, 10);
   dim3 dimBlock(8, 8, 8);
-  for (auto &d : dd.domains()) {
+  for (size_t di = 0; di < dd.domains().size(); ++di) {
+    auto &d = dd.domains()[di];
     REQUIRE(d.get_curr(dh1) != nullptr);
     std::cerr << d.raw_size() << "\n";
     CUDA_RUNTIME(cudaSetDevice(d.gpu()));
-    init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), d.raw_size());
+    init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), dd.origins()[di],
+                                       d.raw_size());
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
 
@@ -108,11 +112,14 @@ TEST_CASE("exchange") {
 
   // test initialization
   INFO("test init interior");
-  for (auto &d : dd.domains()) {
+  for (size_t di = 0; di < dd.domains().size(); ++di) {
+    auto &d = dd.domains()[di];
     const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
+      std::cerr << "here\n";
       auto vec = d.interior_to_host(qi);
+      std::cerr << "here2\n";
 
       // make sure we can access data as a Q1
       std::vector<Q1> interior(ext.flatten());
@@ -146,7 +153,9 @@ TEST_CASE("exchange") {
   MPI_Barrier(MPI_COMM_WORLD);
 
   INFO("exchange");
+
   dd.exchange();
+  std::cerr << "here2\n";
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
   INFO("interior should be unchanged");
