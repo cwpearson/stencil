@@ -199,8 +199,8 @@ public:
     start = MPI_Wtime();
 #endif
     std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
-    MPI_Allgather(gpus_.data(), gpus_.size(), MPI_INT, nodeCudaIds.data(),
-                  gpus_.size(), MPI_INT, mpiTopology_.colocated_comm());
+    MPI_Allgather(gpus_.data(), int(gpus_.size()), MPI_INT, nodeCudaIds.data(),
+                  int(gpus_.size()), MPI_INT, mpiTopology_.colocated_comm());
 #if STENCIL_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
@@ -290,7 +290,7 @@ public:
    */
   Dim3 get_origin(int64_t i) const { return origins_[i]; }
 
-  void realize(bool useUnified = false) {
+  void realize() {
     CUDA_RUNTIME(cudaGetLastError());
 
     // compute domain placement
@@ -304,7 +304,7 @@ public:
       placement_ = new NodeAware(size_, mpiTopology_, radius_, gpus_);
     } else {
       assert(!placement_);
-      placement_ = new Trivial(size_, mpiTopology_, radius_, gpus_);
+      placement_ = new Trivial(size_, mpiTopology_, gpus_);
     }
     assert(placement_);
     nvtxRangePop();
@@ -324,7 +324,7 @@ public:
     start = MPI_Wtime();
 #endif
     CUDA_RUNTIME(cudaGetLastError());
-    for (int domId = 0; domId < gpus_.size(); domId++) {
+    for (int64_t domId = 0; domId < int64_t(gpus_.size()); domId++) {
 
       const Dim3 idx = placement_->get_idx(rank_, domId);
       const Dim3 sdSize = placement_->subdomain_size(idx);
@@ -334,7 +334,7 @@ public:
 
       const int cudaId = placement_->get_cuda(idx);
 
-      fprintf(stderr, "rank=%d gpu=%d (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
+      fprintf(stderr, "rank=%d gpu=%ld (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
               domId, cudaId, idx.x, idx.y, idx.z);
 
       LocalDomain sd(sdSize, cudaId);
@@ -562,8 +562,8 @@ public:
            ++dstGPU) {
         size_t numBytes = 0;
         for (const auto &msg : peerCopyOutboxes[srcGPU][dstGPU]) {
-          for (size_t i = 0; i < domains_[srcGPU].num_data(); ++i) {
-            size_t haloBytes = domains_[srcGPU].halo_bytes(msg.dir_, i);
+          for (int64_t i = 0; i < domains_[srcGPU].num_data(); ++i) {
+            int64_t haloBytes = domains_[srcGPU].halo_bytes(msg.dir_, i);
             numBytes += haloBytes;
           }
           planFile << srcGPU << "->" << dstGPU << " " << msg.dir_ << " "
@@ -614,7 +614,6 @@ public:
 
     // create all required remote senders/recvers
     for (size_t di = 0; di < domains_.size(); ++di) {
-      const Dim3 myIdx = placement_->get_idx(rank_, di);
       for (auto &kv : remoteOutboxes[di]) {
         const Dim3 dstIdx = kv.first;
         const int dstRank = placement_->get_rank(dstIdx);
@@ -659,7 +658,6 @@ public:
 
     // create all required colocated senders/recvers
     for (size_t di = 0; di < domains_.size(); ++di) {
-      const Dim3 myIdx = placement_->get_idx(rank_, di);
       for (auto &kv : coloOutboxes[di]) {
         const Dim3 dstIdx = kv.first;
         const int dstRank = placement_->get_rank(dstIdx);
