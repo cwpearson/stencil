@@ -13,8 +13,6 @@ module load cuda
 
 nodes=4
 gpus=6
-for ranks in 1 2 4 8 16 20; do
-  #jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs js_task_info ../../build/src/pingpong $ranks                        
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -d packed -b packed:1 ../../build/src/pingpong $ranks                        
+for ranks in 1 2 4 8 16; do
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -d packed -b packed:21 ../../build/src/pingpong --min 10 --max 25 --iters 20 $ranks
 done
-
