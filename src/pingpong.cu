@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
         }
 
         if (0 == rank) {
-          std::cout << " " << elapsed;
+          std::cout << " " << elapsed / nIters;
         }
       }
       if (0 == rank) {
