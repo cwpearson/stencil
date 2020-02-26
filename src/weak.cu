@@ -60,9 +60,9 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  x = x * pow(numGpus, 0.33333) + 0.5; // round to nearest
-  y = y * pow(numGpus, 0.33333) + 0.5;
-  z = z * pow(numGpus, 0.33333) + 0.5;
+  x = size_t(double(x) * pow(double(numGpus), 0.33333) + 0.5); // round to nearest
+  y = size_t(double(y) * pow(double(numGpus), 0.33333) + 0.5);
+  z = size_t(double(z) * pow(double(numGpus), 0.33333) + 0.5);
 
   MethodFlags methods = MethodFlags::None;
   if (useStaged) {
@@ -138,7 +138,7 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    for (size_t iter = 0; iter < nIters; ++iter) {
+    for (int iter = 0; iter < nIters; ++iter) {
       if (0 == rank) {
         std::cerr << "exchange " << iter << "\n";
       }

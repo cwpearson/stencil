@@ -1,5 +1,6 @@
 #include <chrono>
 #include <cmath>
+#include <cassert>
 
 #include <mpi.h>
 #include <nvToolsExt.h>
@@ -61,12 +62,13 @@ int main(int argc, char **argv) {
       }
 
       for (int64_t n = minN; n <= maxN; ++n) {
-        size_t numBytes = (1ull << n) / ranksPerNode;
+        assert(n < 32);
+        int numBytes = (1 << n) / ranksPerNode;
 
         MPI_Barrier(MPI_COMM_WORLD);
         double start = MPI_Wtime();
         // all ranks on src and dst node pingpong
-        for (size_t i = 0; i < nIters; ++i) {
+        for (int i = 0; i < nIters; ++i) {
           if (srcNode == node) {
             MPI_Send(buf, numBytes, MPI_BYTE, dstNode * ranksPerNode + ri, 0, MPI_COMM_WORLD);
             MPI_Recv(buf, numBytes, MPI_BYTE, dstNode * ranksPerNode + ri, 0, MPI_COMM_WORLD,

@@ -29,7 +29,7 @@
 inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::hex << std::setfill('0'); // needs to be set only once
   auto *ptr = reinterpret_cast<const unsigned char *>(obj);
-  for (int i = 0; i < n; i++, ptr++) {
+  for (size_t i = 0; i < n; i++, ptr++) {
     if (i % sizeof(uint64_t) == 0) {
       std::cerr << std::endl;
     }
@@ -298,6 +298,7 @@ class ColocatedDeviceRecver {
 private:
   int srcRank_;
   int srcGPU_;
+  int dstRank_;
   int dstGPU_; // domain ID
   int dstDev_; // cuda ID
 
@@ -315,7 +316,7 @@ public:
                         int dstGPU, // domain ID
                         int dstDev  // cuda ID
                         )
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), dstDev_(dstDev),
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), dstDev_(dstDev),
         event_(0) {}
   ~ColocatedDeviceRecver() {
     if (event_) {
@@ -325,7 +326,7 @@ public:
 
   /*! prepare to recieve devPtr
    */
-  void start_prepare(void *devPtr, const size_t numBytes) {
+  void start_prepare(void *devPtr) {
     // fprintf(stderr, "ColoDevRecv::start_prepare: send mem on %d(%d) to
     // r%dg%d\n", dstDev_, dstGPU_, srcRank_, srcGPU_);
     assert(devPtr);
@@ -429,7 +430,7 @@ public:
 
   void start_prepare(const std::vector<Message> &inbox) {
     unpacker_.prepare(domain_, inbox);
-    recver_.start_prepare(unpacker_.data(), unpacker_.size());
+    recver_.start_prepare(unpacker_.data());
   }
 
   void finish_prepare() { recver_.finish_prepare(); }
@@ -535,8 +536,6 @@ public:
   void send_d2h() {
     state_ = State::D2H;
     nvtxRangePush("RemoteSender::send_d2h");
-
-    const Dim3 rawSz = domain_->raw_size();
 
     // pack data into device buffer
     assert(stream_.device() == domain_->gpu());
@@ -687,7 +686,9 @@ public:
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    MPI_Irecv(hostBuf_, unpacker_.size(), MPI_BYTE, srcRank_, tag,
+    int numBytes = unpacker_.size();
+    assert(numBytes <= std::numeric_limits<int>::max());
+    MPI_Irecv(hostBuf_, int(numBytes), MPI_BYTE, srcRank_, tag,
               MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // RemoteRecver::recv_h2h
   }
@@ -783,7 +784,9 @@ public:
     assert(dstGPU_ < 8);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    MPI_Isend(packer_.data(), packer_.size(), MPI_BYTE, dstRank_, tag,
+    size_t numBytes = packer_.size();
+    assert(numBytes <= std::numeric_limits<int>::max());
+    MPI_Isend(packer_.data(), int(numBytes), MPI_BYTE, dstRank_, tag,
               MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiSender::send_d2d
   }
@@ -874,7 +877,7 @@ public:
     assert(dstGPU_ < 8);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    MPI_Irecv(unpacker_.data(), unpacker_.size(), MPI_BYTE, srcRank_, tag,
+    MPI_Irecv(unpacker_.data(), int(unpacker_.size()), MPI_BYTE, srcRank_, tag,
               MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
   }

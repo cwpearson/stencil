@@ -5,11 +5,11 @@
 #include <vector>
 
 struct Shape {
-  int64_t x;
-  int64_t y;
-  Shape(int64_t x, int64_t y) : x(x), y(y) {}
+  uint64_t x;
+  uint64_t y;
+  Shape(uint64_t _x, uint64_t _y) : x(_x), y(_y) {}
 
-  int64_t flatten() const noexcept { return x * y; }
+  uint64_t flatten() const noexcept { return x * y; }
   bool operator==(const Shape &rhs) const noexcept {
     return x == rhs.x && y == rhs.y;
   }
@@ -164,8 +164,8 @@ public:
 inline Mat2D<double> make_reciprocal(const Mat2D<double> &m) {
   Mat2D<double> ret(m.shape());
 
-  for (size_t i = 0; i < m.shape().y; ++i) {
-    for (size_t j = 0; j < m.shape().x; ++j) {
+  for (uint64_t i = 0; i < m.shape().y; ++i) {
+    for (uint64_t j = 0; j < m.shape().x; ++j) {
       double e = m.at(i,j);
       if (0 == e) {
         ret.at(i,j) = std::numeric_limits<double>::infinity();

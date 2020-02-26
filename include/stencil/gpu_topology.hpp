@@ -111,7 +111,7 @@ inline void enable_peer(const int src, const int dst) {
         detail::peer_[src][dst] = true;
         detail::peer_[dst][src] = true; // assume this will be enabled
         std::cerr << src << " -> " << dst << " peer access (peer)\n";
-      } else if (cudaErrorInvalidDevice) {
+      } else if (cudaErrorInvalidDevice == err) {
         cudaGetLastError(); // clear the error
         detail::peer_[src][dst] = false;
         std::cerr << src << " -> " << dst << " (invalid device)\n";

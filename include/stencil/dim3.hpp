@@ -22,8 +22,8 @@ public:
       : x(other.x), y(other.y), z(other.z) {}
 #endif
 
-  CUDA_CALLABLE_MEMBER Dim3(int64_t x, int64_t y, int64_t z)
-      : x(x), y(y), z(z) {}
+  CUDA_CALLABLE_MEMBER Dim3(int64_t _x, int64_t _y, int64_t _z)
+      : x(_x), y(_y), z(_z) {}
 
   Dim3() = default; // default ctor
   Dim3(const Dim3 &d) = default; // copy ctor
@@ -61,8 +61,8 @@ public:
     return result;
   }
 
-  CUDA_CALLABLE_MEMBER bool any() const { return x != 0 || x != 0 || z != 0; }
-  CUDA_CALLABLE_MEMBER bool all() const { return x != 0 && x != 0 && z != 0; }
+  CUDA_CALLABLE_MEMBER bool any() const { return x != 0 || y != 0 || z != 0; }
+  CUDA_CALLABLE_MEMBER bool all() const { return x != 0 && y != 0 && z != 0; }
 
   CUDA_CALLABLE_MEMBER size_t flatten() const { return x * y * z; }
 
@@ -197,7 +197,12 @@ public:
 
 #ifdef __CUDACC__
   /* convertible to CUDA dim3 */
-  CUDA_CALLABLE_MEMBER operator dim3() const { return dim3(x, y, z); }
+  CUDA_CALLABLE_MEMBER operator dim3() const { 
+    assert(x > 0);
+    assert(y > 0);
+    assert(z > 0);
+    
+    return dim3((unsigned int)x, (unsigned int)y, (unsigned int)z); }
 #endif
 
   CUDA_CALLABLE_MEMBER Dim3 wrap(const Dim3 &lims) {

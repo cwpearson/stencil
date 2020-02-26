@@ -46,7 +46,7 @@ TEMPLATE_TEST_CASE("colocated", "[mpi][cuda][template]", int32_t, int64_t) {
   INFO("sender.start_prepare");
   sender.start_prepare(n * sizeof(TestType));
   INFO("recver.start_prepare");
-  recver.start_prepare(buf1, n * sizeof(TestType));
+  recver.start_prepare(buf1);
 
   INFO("sender.finish_prepare");
   sender.finish_prepare();
