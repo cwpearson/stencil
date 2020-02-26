@@ -22,7 +22,7 @@ class LocalDomain {
   friend class DistributedDomain;
 
 private:
-  // my local data size
+  // my local data size (not including halo)
   Dim3 sz_;
 
   //!< radius of stencils that will be applied
@@ -32,7 +32,7 @@ private:
   // host versions
   std::vector<void *> currDataPtrs_;
   std::vector<void *> nextDataPtrs_;
-  std::vector<size_t> dataElemSize_;
+  std::vector<int64_t> dataElemSize_;
   // device versions
   void **devCurrDataPtrs_;
   size_t *devDataElemSize_;
@@ -73,10 +73,10 @@ public:
 
   /*
    */
-  size_t num_data() const {
+  int64_t num_data() const {
     assert(currDataPtrs_.size() == nextDataPtrs_.size());
     assert(dataElemSize_.size() == currDataPtrs_.size());
-    return currDataPtrs_.size();
+    return int64_t(currDataPtrs_.size());
   }
 
   template <typename T> DataHandle<T> add_data() {
@@ -87,11 +87,11 @@ public:
 
   \returns The index of the added data
   */
-  size_t add_data(size_t n) {
+  int64_t add_data(size_t n) {
     dataElemSize_.push_back(n);
     currDataPtrs_.push_back(nullptr);
     nextDataPtrs_.push_back(nullptr);
-    return dataElemSize_.size() - 1;
+    return int64_t(dataElemSize_.size()) - 1;
   }
 
   /*! \brief set the radius. Should only be called by DistributedDomain
@@ -199,7 +199,7 @@ public:
   }
 
   // return the number of bytes of the halo in direction `dir`
-  size_t halo_bytes(const Dim3 &dir, const size_t idx) const noexcept {
+  int64_t halo_bytes(const Dim3 &dir, const int64_t idx) const noexcept {
     return dataElemSize_[idx] * halo_extent(dir).flatten();
   }
 
@@ -218,7 +218,7 @@ public:
                                             const size_t qi // quantity index
                                             ) const {
 
-    const size_t bytes = halo_bytes(ext, qi);
+    const size_t bytes = elem_size(qi) * ext.flatten();
 
     // pack quantity
     CUDA_RUNTIME(cudaSetDevice(gpu()));
@@ -250,7 +250,11 @@ public:
 
   std::vector<unsigned char> quantity_to_host(const size_t qi // quantity index
                                               ) const {
-    return region_to_host(Dim3(0, 0, 0), sz_, qi);
+    Dim3 allocSz = sz_;
+    allocSz.x += 2 * radius_;
+    allocSz.y += 2 * radius_;
+    allocSz.z += 2 * radius_;
+    return region_to_host(Dim3(0, 0, 0), allocSz, qi);
   }
 
   void realize() {
@@ -263,10 +267,10 @@ public:
     // int rank;
     // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     // std::cerr << "r" << rank << " dev=" << dev_ << "\n";
-    for (size_t i = 0; i < num_data(); ++i) {
-      size_t elemSz = dataElemSize_[i];
+    for (int64_t i = 0; i < num_data(); ++i) {
+      int64_t elemSz = dataElemSize_[i];
 
-      size_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
+      int64_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
                           (sz_.z + 2 * radius_)) *
                          elemSz;
       char *c = nullptr;
