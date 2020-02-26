@@ -1,6 +1,8 @@
 # add -Wnull-deference for g++ >= 6
 # add -Wrestrict g++ >= 7
 # add -Wconversion
+# add -Wduplicated-cond for g++ >= 6
+# add -Wduplicated-branches for g++ >= 7
 
 macro(add_args tgt)
 target_compile_options(
@@ -12,8 +14,6 @@ target_compile_options(
     -Wpedantic;
     -Wcast-align;
     -Wdisabled-optimization;
-    -Wduplicated-branches;
-    -Wduplicated-cond;
     -Winit-self;
     -Wlogical-op;
     -Wmissing-include-dirs;
@@ -40,8 +40,6 @@ target_compile_options(
     -Xcompiler=-Wextra;
     -Xcompiler=-Wcast-align;
     -Xcompiler=-Wdisabled-optimization;
-    -Xcompiler=-Wduplicated-branches;
-    -Xcompiler=-Wduplicated-cond;
     -Xcompiler=-Wformat=2;
     -Xcompiler=-Winit-self;
     -Xcompiler=-Wlogical-op;
