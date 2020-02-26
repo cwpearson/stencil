@@ -17,7 +17,7 @@ public:
   virtual void pack(cudaStream_t stream) = 0;
 
   // number of bytes
-  virtual size_t size() = 0;
+  virtual int64_t size() = 0;
   virtual void *data() = 0;
 
   virtual ~Packer() {}
@@ -31,7 +31,7 @@ public:
 
   virtual void unpack(cudaStream_t stream) = 0;
 
-  virtual size_t size() = 0;
+  virtual int64_t size() = 0;
   virtual void *data() = 0;
 
   virtual ~Unpacker() {}
@@ -82,7 +82,7 @@ public:
     // compute the required buffer size for all messages
     size_ = 0;
     for (const auto &msg : dirs_) {
-      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
         size_ = next_align_of(size_, domain_->elem_size(qi));
         size_ += domain_->halo_bytes(msg.dir_, qi);
       }
@@ -95,7 +95,7 @@ public:
   virtual void pack(cudaStream_t stream) override {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    size_t offset = 0;
+    int64_t offset = 0;
     for (const auto &msg : dirs_) {
       const Dim3 ext = domain_->halo_extent(msg.dir_);
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*interior*/);
@@ -107,14 +107,14 @@ public:
           domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
           pos, ext);
       CUDA_RUNTIME(cudaGetLastError());
-      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
         offset = next_align_of(offset, domain_->elem_size(qi));
         offset += domain_->halo_bytes(msg.dir_, qi);
       }
     }
   }
 
-  virtual size_t size() override { return size_; }
+  virtual int64_t size() override { return size_; }
 
   virtual void *data() override { return devBuf_; }
 };
@@ -200,7 +200,7 @@ public:
     // compute the required buffer size for all messages
     size_ = 0;
     for (const auto &msg : dirs_) {
-      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
         size_ = next_align_of(size_, domain_->elem_size(qi));
         size_ += domain_->halo_bytes(msg.dir_, qi);
       }
@@ -213,7 +213,7 @@ public:
   virtual void unpack(cudaStream_t stream) override {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    size_t offset = 0;
+    int64_t offset = 0;
     for (const auto &msg : dirs_) {
       const Dim3 ext = domain_->halo_extent(msg.dir_);
       const Dim3 pos = domain_->halo_pos(msg.dir_, true /*exterior*/);
@@ -225,14 +225,14 @@ public:
           domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
           pos, ext);
       CUDA_RUNTIME(cudaGetLastError());
-      for (size_t qi = 0; qi < domain_->num_data(); ++qi) {
+      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
         offset = next_align_of(offset, domain_->elem_size(qi));
         offset += domain_->halo_bytes(msg.dir_, qi);
       }
     }
   }
 
-  virtual size_t size() override { return size_; }
+  virtual int64_t size() override { return size_; }
 
   virtual void *data() override { return devBuf_; }
 };
