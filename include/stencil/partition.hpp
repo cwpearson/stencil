@@ -377,7 +377,7 @@ public:
   Dim3 dim() override { return partition_.dim(); }
 
   Trivial(const Dim3 &size, // total domain size
-          MpiTopology &mpiTopo, size_t radius,
+          MpiTopology &mpiTopo,
           const std::vector<int> &rankCudaIds // which CUDA devices the calling
                                               // rank wants to contribute
   ) {
@@ -409,10 +409,10 @@ public:
     // determine what the subdomain id within each rank each subdomain is
     std::vector<int> rankAssignments;
     std::vector<int> rankIds;
-    for (int rank = 0; rank < workItemCounts.size(); ++rank) {
+    for (size_t rank = 0; rank < workItemCounts.size(); ++rank) {
       for (int i = 0; i < workItemCounts[rank]; ++i) {
         rankAssignments.push_back(rank);
-        rankIds.push_back(i);
+        rankIds.push_back(int(i));
       }
     }
     assert(rankAssignments.size() == numSubdomains);
@@ -457,26 +457,29 @@ public:
     assert(cudaAssignments.size() == numSubdomains);
     assert(rankIds.size() == numSubdomains);
     assert(rankAssignments.size() == numSubdomains);
-    for (size_t i = 0; i < numSubdomains; ++i) {
+    for (int i = 0; i < numSubdomains; ++i) {
       const int rank = rankAssignments[i];
       const int id = rankIds[i];
       const int cuda = cudaAssignments[i];
       const Dim3 idx = partition_.dimensionize(i);
-      const Dim3 size = partition_.subdomain_size(idx);
+      const Dim3 sdSize = partition_.subdomain_size(idx);
 
       if (0 == mpiTopo.rank()) {
         std::cerr << idx << "is sd" << id << " on r" << rank << " cuda" << cuda
-                  << ")" << size << "\n";
+                  << ")" << sdSize << "\n";
       }
 
+      assert(rank >= 0);
+      assert(id >= 0);
       assert(rank_.count(idx) == 0);
+      
       rank_[idx] = rank;
       assert(subdomain_id_.count(idx) == 0);
       subdomain_id_[idx] = id;
-      if (idx_.size() <= rank) {
+      if (idx_.size() <= size_t(rank)) {
         idx_.resize(rank + 1);
       }
-      if (idx_[rank].size() <= id) {
+      if (idx_[rank].size() <= size_t(id)) {
         idx_[rank].resize(id + 1);
       }
       idx_[rank][id] = idx;
@@ -496,7 +499,7 @@ double avg(const std::vector<double> &x) {
   for (auto &e : x) {
     acc += e;
   }
-  return acc / x.size();
+  return acc / double(x.size());
 }
 
 /*! corrected sample standard deviation
@@ -527,7 +530,7 @@ double scc(const std::vector<double> &x, const std::vector<double> &y) {
     num += (x[i] - xBar) * (y[i] - yBar);
   }
 
-  double den = (n - 1) * cssd(x) * cssd(y);
+  double den = double(n - 1) * cssd(x) * cssd(y);
 
   if (0 == num && 0 == den) {
     return 1;
@@ -578,7 +581,7 @@ private:
   double comm_cost(Dim3 dir, const Dim3 sz, const size_t radius) {
     assert(dir.all_lt(2));
     assert(dir.all_gt(-2));
-    double count = LocalDomain::halo_extent(dir, sz, radius).flatten();
+    double count = double(LocalDomain::halo_extent(dir, sz, radius).flatten());
     return count;
   }
 
@@ -654,20 +657,29 @@ public:
     char name[MPI_MAX_PROCESSOR_NAME] = {0};
     int nameLen;
     MPI_Get_processor_name(name, &nameLen);
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "DEBUG: NodeAware: got name " << name << "\n";
+    }
 
     // gather the names to root
     std::vector<char> allNames;
     allNames = std::vector<char>(MPI_MAX_PROCESSOR_NAME * mpiTopo.size(), 0);
     MPI_Gather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, allNames.data(),
                MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "DEBUG: NodeAware: gathered names to root\n";
+    }
 
     // get the name for each rank
     std::vector<std::string> rankNames;
     if (0 == mpiTopo.rank()) {
       for (int rank = 0; rank < mpiTopo.size(); ++rank) {
-        std::string name(allNames.data() + rank * MPI_MAX_PROCESSOR_NAME);
-        rankNames.push_back(name);
+        std::string _name(allNames.data() + rank * MPI_MAX_PROCESSOR_NAME);
+        rankNames.push_back(_name);
       }
+    }
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "DEBUG: NodeAware: built names for each rank\n";
     }
 
     // number each name
@@ -681,6 +693,9 @@ public:
         }
       }
     }
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "DEBUG: NodeAware: numbered each name\n";
+    }
 
     // store the node number for each rank
     std::vector<int> rankNode(mpiTopo.size());
@@ -692,6 +707,9 @@ public:
         rankNode[rank] = node;
         nodeRanks[node].push_back(rank);
       }
+    }
+    if (0 == mpiTopo.rank()) {
+      std::cerr << "DEBUG: NodeAware: build ranks in each node\n";
     }
 
     // gather up all CUDA ids that all ranks are contributing
@@ -795,8 +813,7 @@ public:
 
         for (size_t id = 0; id < gpusPerNode; ++id) {
           const Dim3 nodeIdx = partition_.node_idx(id);
-          const Dim3 nodeDim = partition_.node_dim();
-          const Dim3 size =
+          const Dim3 sdSize =
               partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
 
           // each component is owned by a rank and has a local ID
@@ -806,7 +823,7 @@ public:
           const int gpuId = component % gpusPerRank;
           const int cuda = globalCudaIds[rank * gpusPerRank + gpuId];
 
-          std::cerr << "nodeIdx=" << nodeIdx << " size=" << size
+          std::cerr << "nodeIdx=" << nodeIdx << " size=" << sdSize
                     << " rank=" << rank << " gpuId=" << gpuId
                     << " cuda=" << cuda << "\n";
 
