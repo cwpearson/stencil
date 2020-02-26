@@ -1,3 +1,17 @@
+add_executable(test_cpu test_cpu_main.cpp
+  test_cpu_array.cpp
+  test_cpu_argparse.cpp
+  test_cpu_mat2d.cpp
+  test_cpu_partition.cpp
+  test_cpu_qap.cpp
+  test_cpu_radius.cpp
+  test_cpu_tx.cpp
+)
+set_source_files_properties(test_cpu_partition.cpp PROPERTIES LANGUAGE CUDA)
+target_include_directories(test_cpu SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
+target_link_libraries(test_cpu stencil)
+add_test(NAME test_cpu COMMAND ${MPIEXEC_EXECUTABLE} -n 1 test_cpu -a)
+
 if (CMAKE_CUDA_COMPILER)
     add_executable(test_cuda test_cuda_main.cu 
       test_cuda_align.cu
@@ -11,11 +25,6 @@ if (CMAKE_CUDA_COMPILER)
       test_cuda_rcstream.cu
       test_cuda_translate.cu
     )
-    # test_cuda_packmemcpycopier.cu
-    # test_any_tx.cu
-    # test_cuda_regiontx.cu
-    # test_cuda_regioncopier.cu
-    # test_cuda_mtregiontx.cu
     target_include_directories(test_cuda SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda stencil)
     add_test(NAME test_cuda COMMAND ${MPIEXEC_EXECUTABLE} -n 1 cuda-memcheck test_cuda -a)
@@ -33,16 +42,5 @@ if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
     add_test(NAME test_cuda_mpi COMMAND ${MPIEXEC_EXECUTABLE} -n 2 cuda-memcheck test_cuda_mpi -a)
 endif()
 
-add_executable(test_cpu test_cpu_main.cpp
-  test_cpu_array.cpp
-  test_cpu_argparse.cpp
-  test_cpu_mat2d.cpp
-  test_cpu_partition.cpp
-  test_cpu_qap.cpp
-  test_cpu_radius.cpp
-  test_cpu_tx.cpp
-)
-set_source_files_properties(test_cpu_partition.cpp PROPERTIES LANGUAGE CUDA)
-target_include_directories(test_cpu SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
-target_link_libraries(test_cpu stencil)
-add_test(NAME test_cpu COMMAND ${MPIEXEC_EXECUTABLE} -n 1 test_cpu -a)
+
+
