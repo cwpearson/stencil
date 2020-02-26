@@ -138,14 +138,13 @@ void bench(const std::string &name, MatFunc func) {
 
     // benchmark exact solution
     if (s < 9) {
-      auto start = std::chrono::system_clock::now();
+      start = std::chrono::system_clock::now();
 
-      double cost;
       for (int i = 0; i < nIters; ++i) {
         auto f = qap::solve(w, d, &cost);
       }
 
-      std::chrono::duration<double> elapsed =
+      elapsed =
           std::chrono::system_clock::now() - start;
 
       std::cout << " " << elapsed.count() / nIters << " " << cost;
@@ -161,6 +160,8 @@ void bench(const std::string &name, MatFunc func) {
 }
 
 int main(int argc, char **argv) {
+  (void) argc;
+  (void) argv;
 
   bench("blkdiag", make_blkdiag);
   bench("random", make_random);
