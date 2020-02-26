@@ -216,6 +216,15 @@ The underlying stream is released when the reference count drops to zero.
 The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
 This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
 
+## C++ Guidelines
+
+* Don't put state in abstract classes
+  * [I.25: Prefer abstract classes as interfaces to class hierarchies](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#i25-prefer-abstract-classes-as-interfaces-to-class-hierarchies)
+  * [C.121: If a base class is used as an interface, make it a pure abstract class](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#c121-if-a-base-class-is-used-as-an-interface-make-it-a-pure-abstract-class)
+* use signed integer types for subscripts
+  * [ES.107: Don't use unsigned for subscripts, prefer gsl::index](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#es107-dont-use-unsigned-for-subscripts-prefer-gslindex)
+
+
 ## Notes
   * [Open MPI: CUDA-Aware OpenMPI](https://www.open-mpi.org/faq/?category=runcuda#mpi-cuda-support)
   * [Nvidia DevBlock: Benchmarking CUDA-Aware MPI](https://devblogs.nvidia.com/benchmarking-cuda-aware-mpi/)
