@@ -72,6 +72,10 @@ add_executable(pingpong pingpong.cu)
 target_link_libraries(pingpong stencil::stencil)
 add_args(pingpong)
 
+add_executable(bench-buf-exchange bench_buf_exchange.cu)
+target_link_libraries(bench-buf-exchange stencil::stencil)
+add_args(bench-buf-exchange)
+
 add_executable(bench-qap bench_qap.cu)
 target_link_libraries(bench-qap stencil::stencil)
 add_args(bench-qap)
