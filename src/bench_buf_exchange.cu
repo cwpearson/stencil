@@ -7,7 +7,18 @@
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/mat2d.hpp"
 
-double (*ExchangeFunc)(const Mat2D<int64_t> &comm, const int nIters);
+__global__ void clock_block(clock_t *d, clock_t clock_count)
+{
+    clock_t start_clock = clock64();
+    clock_t clock_offset = 0;
+    while (clock_offset < clock_count)
+    {
+        clock_offset = clock64() - start_clock;
+    }
+    if (d) {
+     *d = clock_offset;
+    }
+}
 
 Mat2D<double> exchange_cuda_memcpy_peer(double *total, const Mat2D<int64_t> &comm, const int nIters) {
 
@@ -134,176 +145,184 @@ int main(int argc, char **argv) {
   const int64_t M = K * K;
   const int64_t G = K * K * K;
 
-  // clang-format off
-  Mat2D<int64_t> distance {
-    {0, 1, 2, 2},
-    {1, 0, 2, 2},
-    {2, 2, 0, 1},
-    {2, 2, 1, 0},
-  };
-
   const int nGpus = 4;
-  Mat2D<int64_t> comm(nGpus, nGpus, 0);
 
-  const double lim = 0.005;
-  std::vector<int64_t> distBytes = {200*M, 100*M, 10*M};
-  std::vector<bool> distChanged(3,false);
+  const double period = 0.004;
+ 
+  // enable peer access
+  for (size_t src = 0; src < nGpus; ++src) {
+    for (size_t dst = 0; dst < nGpus; ++dst) {
+      if (src == dst) {
+        continue;
+      } else {
+        int canAccess;
+        CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
+        if (canAccess) {
+          CUDA_RUNTIME(cudaSetDevice(src));
+          cudaError_t err = cudaDeviceEnablePeerAccess(dst, 0 /*flags*/);
+          if (cudaSuccess == err || cudaErrorPeerAccessAlreadyEnabled == err) {
+            cudaGetLastError(); // clear the error
+          } else if (cudaErrorInvalidDevice == err) {
+            cudaGetLastError(); // clear the error
+          } else {
+            CUDA_RUNTIME(err);
+          }
+        } else {
+        }
+      }
+      CUDA_RUNTIME(cudaGetLastError());
+    }
+  }
 
-  while(true) {  
-    std::cout << "distBytes ";
-    for (auto &e : distBytes) std::cout << e/1024/1024 << "MB ";
-    std::cout << "\n";
+  cudaEvent_t latch;
+  CUDA_RUNTIME(cudaSetDevice(0));
+  CUDA_RUNTIME(cudaEventCreate(&latch));
+  Mat2D<cudaStream_t> streams(nGpus, nGpus, nullptr);
+  Mat2D<cudaEvent_t> startEvents(nGpus, nGpus, nullptr);
+  Mat2D<cudaEvent_t> stopEvents(nGpus, nGpus, nullptr);
+  Mat2D<void *> srcBufs(nGpus, nGpus, nullptr);
+  Mat2D<void *> dstBufs(nGpus, nGpus, nullptr);
+  Mat2D<int64_t> bufSizes(nGpus, nGpus, 0);
+  for (size_t i = 0; i < nGpus; ++i) {
+    for (size_t j = 0; j < nGpus; ++j) {
+      CUDA_RUNTIME(cudaSetDevice(i));
+      CUDA_RUNTIME(cudaStreamCreate(&streams.at(i, j)));
+      CUDA_RUNTIME(cudaEventCreate(&startEvents.at(i, j)));
+      CUDA_RUNTIME(cudaEventCreate(&stopEvents.at(i, j)));
+    }
+  }
 
-    for (int d = 0; d < 3; ++d) {
-      for (size_t i = 0; i < nGpus; ++i) {
+  // bytes to send
+  Mat2D<int64_t> x(nGpus, nGpus, 8*M);
+
+  // time taken for each transfer
+  Mat2D<double> y(nGpus, nGpus, 0);
+
+  int64_t cycles = 1e5;
+  while(true) {
+  
+    std::cout << "x\n";
+    for (size_t i = 0; i < nGpus; ++i) {
+      for (size_t j = 0; j < nGpus; ++j) {
+        printf("%ld ", x.at(i,j) / 1024 / 1024);
+      }
+      std::cout << "\n";
+    }
+
+    // set up buffers, 
+    for (int i = 0; i < nGpus; ++i) {
+      for (int j = 0; j < nGpus; ++j) {
+	if (bufSizes.at(i,j) < x.at(i,j)) {
+	  bufSizes.at(i,j) = x.at(i,j) * 2;
+	  std::cout << "increasing buffer size to " << bufSizes.at(i,j) << "\n";
+	  CUDA_RUNTIME(cudaFree(srcBufs.at(i,j)));
+	  CUDA_RUNTIME(cudaFree(dstBufs.at(i,j)));
+          CUDA_RUNTIME(cudaSetDevice(i));
+          CUDA_RUNTIME(cudaMalloc(&srcBufs.at(i, j), bufSizes.at(i,j)));	  
+          CUDA_RUNTIME(cudaSetDevice(j));
+          CUDA_RUNTIME(cudaMalloc(&dstBufs.at(i, j), bufSizes.at(i, j)));
+	}
+      }
+    }
+
+    while (true) {
+
+      // set up copies, wait on latch event
+      CUDA_RUNTIME(cudaSetDevice(0));
+      CUDA_RUNTIME(cudaEventDestroy(latch));
+      CUDA_RUNTIME(cudaEventCreate(&latch));
+      clock_block<<<1,1,0,0>>>(nullptr, cycles);
+      CUDA_RUNTIME(cudaEventRecord(latch, 0));
+      for (int i = 0; i < nGpus; ++i) {
         for (int j = 0; j < nGpus; ++j) {
-          if (distance.at(i,j) == d) {
-            comm.at(i,j) = distBytes[d]; 
-          }     
+          CUDA_RUNTIME(cudaSetDevice(i));
+          CUDA_RUNTIME(cudaStreamWaitEvent(streams.at(i,j), latch, 0));
+          CUDA_RUNTIME(cudaEventRecord(startEvents.at(i,j), streams.at(i,j)));
+          CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBufs.at(i,j), j, srcBufs.at(i,j), i, x.at(i,j), streams.at(i,j)));
+          CUDA_RUNTIME(cudaEventRecord(stopEvents.at(i,j), streams.at(i,j)));
+        }
+      }
+
+      // make sure kernel was long enough to cover setup of copies
+      cudaError_t err = cudaEventQuery(latch);
+      if (cudaErrorNotReady == err) {
+	cudaGetLastError(); // clear error
+        break;
+      } else if (cudaSuccess == err) {
+        cycles *= 2;
+	std::cout << "increasing cycle count to " << cycles << "\n";
+        // wait for copies to finish
+        for (size_t i = 0; i < nGpus; ++i) {
+          for (size_t j = 0; j < nGpus; ++j) {
+            CUDA_RUNTIME(cudaStreamSynchronize(streams.at(i, j)));
+          }
+        }
+      } else {
+        CUDA_RUNTIME(err);
+      }
+
+    }
+
+     // wait for copies to finish
+     for (size_t i = 0; i < nGpus; ++i) {
+       for (size_t j = 0; j < nGpus; ++j) {
+         CUDA_RUNTIME(cudaStreamSynchronize(streams.at(i, j)));
+       }
+     }
+
+
+    // get times
+    for (size_t i = 0; i < nGpus; ++i) {
+      for (size_t j = 0; j < nGpus; ++j) {
+        float ms;
+        CUDA_RUNTIME(cudaEventElapsedTime(&ms, startEvents.at(i, j),
+                                            stopEvents.at(i, j)));
+        y.at(i, j) = ms / 1000.0;
+      }
+    }
+
+    std::cout << "y\n";
+    for (size_t i = 0; i < nGpus; ++i) {
+      for (size_t j = 0; j < nGpus; ++j) {
+        printf("%.4e ", y.at(i,j));
+      }
+      std::cout << "\n";
+    }
+
+
+    // check if times are all close to target
+    bool done = true;
+    for (size_t i = 0; i < nGpus; ++i) {
+      for (size_t j = 0; j < nGpus; ++j) {
+        if (std::abs(y.at(i,j) - period) > period / 100.0) {
+          done = false;
         }
       }
     }
-    double actual;
-    exchange_cuda_memcpy_peer(&actual, comm, 30);
-    std::cout << "actual=" << actual << "\n";
-
-    // if actual time is close to target time, bail
-    if (std::abs(actual - lim) < (lim / 100)) {
+    if (done) {
       break;
     }
 
+    // take a step in moving each time towards the target time
+    double alpha = 0.2;
+    for (size_t i = 0; i < nGpus; ++i) {
+      for (size_t j = 0; j < nGpus; ++j) {
+        double dydx = y.at(i,j) / x.at(i,j);
 
-    // estimate the gradient
-    // dActual/dbytes
-    std::vector<double> grads(3);
-
-    for (int d = 0; d < 3; ++d) {
-      // modify communication volume of distance d
-      Mat2D<int64_t> gradcomm = comm;
-      int64_t bytes = distBytes[d];
-      int64_t gradBytes = bytes * 1.1;
-      for (size_t i = 0; i < nGpus; ++i) {
-        for (int j = 0; j < nGpus; ++j) {
-          if (distance.at(i,j) == d) {
-            gradcomm.at(i,j) = gradBytes; 
-          }     
-        }
-      }
-      double gradActual;
-      exchange_cuda_memcpy_peer(&gradActual, gradcomm, 10);
-
-      grads[d] = (gradActual - actual) / (gradBytes - bytes);
-      grads[d] = std::max(0.0, grads[d]);
-    }
-
-    std::cout << "grads= ";
-    for (auto &e : grads) std::cout << e << " ";
-    std::cout << "\n";
-
-    // compute the change in the number of bytes
-    std::vector<double> dx(3);
-    for (int d = 0; d < 3; ++d) {
-      if (actual > lim) { // too large, no change to anything with a grad of 0
-        dx[d] = grads[d] == 0 ? 0 : ((lim - actual) / grads[d]);
-      } else { // to small, only change things with a grad of 0
-      dx[d] = (lim - actual) / grads[d];
+        int64_t dx = (period - y.at(i,j)) / dydx;
+        x.at(i,j) += alpha * dx;
       }
     }
-    double sumDx = std::accumulate(dx.begin(), dx.end(), 0.0);
-
-    std::cout << "dx= ";
-    for (auto &e : dx) std::cout << e << " ";
-    std::cout << "\n";
-    std::cout << "sum=" << sumDx << "\n";
-
-
-    int64_t stepSize = 64 * M;
-    stepSize = (std::abs(actual-lim) / lim) * stepSize;
-    std::cerr << "stepSize=" << stepSize/1024 << "K\n";
-    // scale to step size
-    for (int d = 0; d < 3; ++d) {
-      if (std::isinf(dx[d])) {
-          dx[d] = std::signbit(dx[d]) ? -1 * stepSize : stepSize;
-      } else {
-        dx[d] = dx[d] * stepSize / std::abs(sumDx);
-      }
-    }
-    std::cout << "dx= ";
-    for (auto &e : dx) std::cout << e << " ";
-    std::cout << "\n";
-
-    for (int d = 0; d < 3; ++d) {
-      distBytes[d] += dx[d];
-    }
-
 
   }
 
-    // time the transfer under these conditions
-
-  Mat2D<double> ratios(nGpus, nGpus);
+  // print final communication sizes
   for (size_t i = 0; i < nGpus; ++i) {
-    for (int j = 0; j < nGpus; ++j) {
-      ratios.at(i, j) = double(comm.at(i,j)) / double(comm.at(0,0));
-    }
-  }
-  std::cout << "comm ratios\n";
-  for (size_t i = 0; i < nGpus; ++i) {
-    for (int j = 0; j < nGpus; ++j) {
-    printf("%.4e ", ratios.at(i, j));
+    for (size_t j = 0; j < nGpus; ++j) {
+	    std::cout << x.at(i,j) /1024 / 1024 << " ";
     }
     std::cout << "\n";
   }
 
-  return 0;
 
-  Mat2D<int64_t> allToAll1G {
-    {G, G, G, G},
-    {G, G, G, G},
-    {G, G, G, G},
-    {G, G, G, G},
-  };
-  Mat2D<int64_t> allToAll8M {
-    {8*M, 8*M, 8*M, 8*M},
-    {8*M, 8*M, 8*M, 8*M},
-    {8*M, 8*M, 8*M, 8*M},
-    {8*M, 8*M, 8*M, 8*M},
-  };
-  Mat2D<int64_t> stencil512x256x512 {
-    {12*M, 12*M, 6*M, 30*K},
-    {12*M, 12*M, 30*K, 8*M},
-    {6*M, 30*K, 12*M, 12*M},
-    {30*K, 6*M, 12*M, 12*M},
-  };
-  Mat2D<int64_t> local1G {
-    {G, G, 0, 0},
-    {G, G, 0, 0},
-    {0, 0, G, G},
-    {0, 0, G, G},
-  };
-  Mat2D<int64_t> local1Gremote100M {
-    {G, G, 100*M, 100*M},
-    {G, G, 100*M, 100*M},
-    {100*M, 100*M, G, G},
-    {100*M, 100*M, G, G},
-  };
-  // clang-format on
-
-  double time;
-
-  std::cout << "stencil\n";
-  //time = exchange_cuda_memcpy_peer(stencil512x256x512, 30);
-  std::cout << time << "\n";
-  std::cout << "All-to-all 8MiB\n";
-  //time = exchange_cuda_memcpy_peer(allToAll8M, 30);
-  std::cout << time << "\n";
-  std::cout << "All-to-all 1GiB\n";
-  //time = exchange_cuda_memcpy_peer(allToAll1G, 30);
-  std::cout << time << "\n";
-  std::cout << "Local 1GiB\n";
-  //time = exchange_cuda_memcpy_peer(local1G, 30);
-  std::cout << time << "\n";
-  std::cout << "Local 1GiB Remote 100M\n";
-  //time = exchange_cuda_memcpy_peer(local1Gremote100M, 30);
-  std::cout << time << "\n";
-}
+} 
