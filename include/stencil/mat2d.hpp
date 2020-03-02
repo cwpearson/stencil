@@ -101,13 +101,13 @@ public:
   Mat2D &operator=(Mat2D &&rhs) = default;
 
   inline T &at(int64_t i, int64_t j) noexcept {
-    assert(i < shape_.x);
-    assert(j < shape_.y);
+    assert(i < shape_.y);
+    assert(j < shape_.x);
     return data_[i * shape_.x + j];
   }
   inline const T &at(int64_t i, int64_t j) const noexcept {
-    assert(i < shape_.x);
-    assert(j < shape_.y);
+    assert(i < shape_.y);
+    assert(j < shape_.x);
     return data_[i * shape_.x + j];
   }
 
@@ -150,8 +150,8 @@ public:
     if (shape_ != rhs.shape_) {
       return false;
     }
-    for (int64_t i = 0; i < shape_.y; ++i) {
-      for (int64_t j = 0; j < shape_.x; ++j) {
+    for (uint64_t i = 0; i < shape_.y; ++i) {
+      for (uint64_t j = 0; j < shape_.x; ++j) {
         if (data_[i * shape_.x + j] != rhs.data_[i * shape_.x + j]) {
           return false;
         }
@@ -159,6 +159,16 @@ public:
     }
     return true;
   }
+
+  template <typename S>
+  Mat2D &operator/=(const S &s) {
+    for (uint64_t i = 0; i < shape_.y; ++i) {
+	    for (uint64_t j = 0; j < shape_.x; ++j) {
+		    data_[i * shape_.x + j] /= s;
+	    }
+  }
+  return *this;
+  } 
 };
 
 inline Mat2D<double> make_reciprocal(const Mat2D<double> &m) {
