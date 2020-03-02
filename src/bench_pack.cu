@@ -1,0 +1,102 @@
+#include <chrono>
+#include <sstream>
+
+#include <nvToolsExt.h>
+
+#include "stencil/argparse.hpp"
+#include "stencil/stencil.hpp"
+
+void bench(size_t *rBytes, double *rPackTime, double *rUnpackTime,
+           const Dim3 sz, const Dim3 dir, const int nIters) {
+
+  std::stringstream ss;
+  float ms;
+
+  LocalDomain ld(sz, 0);
+  ld.add_data<float>();
+  ld.set_radius(3);
+
+  ld.realize();
+
+  std::vector<Message> msgs;
+  msgs.push_back(Message(dir, 0, 0));
+
+  DevicePacker packer;
+  DeviceUnpacker unpacker;
+  packer.prepare(&ld, msgs);
+  unpacker.prepare(&ld, msgs);
+
+  if (rBytes)
+    *rBytes = packer.size();
+
+  RcStream stream(0);
+  cudaEvent_t startEvent, stopEvent;
+  CUDA_RUNTIME(cudaEventCreate(&startEvent));
+  CUDA_RUNTIME(cudaEventCreate(&stopEvent));
+
+  ss << dir << " pack";
+  nvtxRangePush(ss.str().c_str());
+  CUDA_RUNTIME(cudaEventRecord(startEvent, stream));
+  for (int n = 0; n < nIters; ++n) {
+    packer.pack(stream);
+  }
+  CUDA_RUNTIME(cudaEventRecord(stopEvent, stream));
+  CUDA_RUNTIME(cudaStreamSynchronize(stream));
+  nvtxRangePop();
+  CUDA_RUNTIME(cudaEventElapsedTime(&ms, startEvent, stopEvent));
+
+  if (rPackTime)
+    *rPackTime = double(ms) / 1000 / nIters;
+
+  ss << dir << " unpack";
+  nvtxRangePush(ss.str().c_str());
+  CUDA_RUNTIME(cudaEventRecord(startEvent, stream));
+  for (int n = 0; n < nIters; ++n) {
+    unpacker.unpack(stream);
+  }
+  CUDA_RUNTIME(cudaEventRecord(stopEvent, stream));
+  CUDA_RUNTIME(cudaStreamSynchronize(stream));
+  nvtxRangePop();
+  CUDA_RUNTIME(cudaEventElapsedTime(&ms, startEvent, stopEvent));
+
+  if (rUnpackTime)
+    *rUnpackTime = double(ms) / 1000 / nIters;
+
+  CUDA_RUNTIME(cudaEventDestroy(startEvent));
+  CUDA_RUNTIME(cudaEventDestroy(stopEvent));
+}
+
+int main(int argc, char **argv) {
+  (void)argc;
+  (void)argv;
+
+  Dim3 ext, dir;
+  double packTime, unpackTime;
+  size_t bytes;
+
+  ext = Dim3(100, 100, 100);
+  dir = Dim3(1, 0, 0);
+  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
+  std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
+            << unpackTime << "\n";
+
+  ext = Dim3(100, 100, 100);
+  dir = Dim3(1, 0, 0);
+  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
+  std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
+            << unpackTime << "\n";
+
+  ext = Dim3(100, 100, 100);
+  dir = Dim3(0, 1, 0);
+  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
+  std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
+            << unpackTime << "\n";
+
+  ext = Dim3(100, 100, 100);
+  dir = Dim3(0, 0, 1);
+  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
+  std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
+            << unpackTime << "\n";
+
+  return 0;
+}

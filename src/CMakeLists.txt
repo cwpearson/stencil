@@ -83,3 +83,7 @@ add_args(bench-qap)
 add_executable(bench-alltoallv bench_alltoallv.cu)
 target_link_libraries(bench-alltoallv stencil::stencil)
 add_args(bench-alltoallv)
+
+add_executable(bench-pack bench_pack.cu)
+target_link_libraries(bench-pack stencil::stencil)
+add_args(bench-pack)
