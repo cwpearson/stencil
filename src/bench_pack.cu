@@ -9,6 +9,7 @@
 void bench(size_t *rBytes, double *rPackTime, double *rUnpackTime,
            const Dim3 sz, const Dim3 dir, const int nIters) {
 
+
   std::stringstream ss;
   float ms;
 
@@ -70,31 +71,34 @@ int main(int argc, char **argv) {
   (void)argc;
   (void)argv;
 
+  int nIters = 30;
+
+  Parser p;
+  p.add_option(nIters, "--iters");
+  if (!p.parse(argc, argv)) {
+    std::cout << p.help();
+    exit(EXIT_FAILURE);
+  }
+
   Dim3 ext, dir;
   double packTime, unpackTime;
   size_t bytes;
 
-  ext = Dim3(100, 100, 100);
+  ext = Dim3(512, 512, 512);
   dir = Dim3(1, 0, 0);
-  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
+  bench(&bytes, &packTime, &unpackTime, ext, dir, nIters);
   std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
             << unpackTime << "\n";
 
-  ext = Dim3(100, 100, 100);
-  dir = Dim3(1, 0, 0);
-  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
-  std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
-            << unpackTime << "\n";
-
-  ext = Dim3(100, 100, 100);
+  ext = Dim3(512, 512, 512);
   dir = Dim3(0, 1, 0);
-  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
+  bench(&bytes, &packTime, &unpackTime, ext, dir, nIters);
   std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
             << unpackTime << "\n";
 
-  ext = Dim3(100, 100, 100);
+  ext = Dim3(512, 512, 512);
   dir = Dim3(0, 0, 1);
-  bench(&bytes, &packTime, &unpackTime, ext, dir, 30);
+  bench(&bytes, &packTime, &unpackTime, ext, dir, nIters);
   std::cout << ext << " " << dir << " " << bytes << " " << packTime << " "
             << unpackTime << "\n";
 
