@@ -124,21 +124,22 @@ dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
                          const Dim3 dstPos, const Dim3 dstExtent,
                          const void *__restrict__ src, const size_t elemSize) {
 
-  const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
-  const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
-  const size_t tx = blockDim.x * blockIdx.x + threadIdx.x;
+  const unsigned int tz = blockDim.z * blockIdx.z + threadIdx.z;
+  const unsigned int ty = blockDim.y * blockIdx.y + threadIdx.y;
+  const unsigned int tx = blockDim.x * blockIdx.x + threadIdx.x;
 
-  for (size_t zi = tz; zi < dstExtent.z; zi += blockDim.z * gridDim.z) {
-    for (size_t yi = ty; yi < dstExtent.y; yi += blockDim.y * gridDim.y) {
-      for (size_t xi = tx; xi < dstExtent.x; xi += blockDim.x * gridDim.x) {
-        size_t zo = zi + dstPos.z;
-        size_t yo = yi + dstPos.y;
-        size_t xo = xi + dstPos.x;
-        size_t oi = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
-        size_t ii = zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
-        // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
-        // xo,
-        //        yo, zo, oi);
+  assert(dstExtent.z >= 0);
+  assert(dstExtent.y >= 0);
+  assert(dstExtent.x >= 0);
+
+  for (unsigned int zi = tz; zi < dstExtent.z; zi += blockDim.z * gridDim.z) {
+    for (unsigned int yi = ty; yi < dstExtent.y; yi += blockDim.y * gridDim.y) {
+      for (unsigned int xi = tx; xi < dstExtent.x; xi += blockDim.x * gridDim.x) {
+        unsigned int zo = zi + dstPos.z;
+        unsigned int yo = yi + dstPos.y;
+        unsigned int xo = xi + dstPos.x;
+        unsigned int oi = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
+        unsigned int ii = zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
         if (4 == elemSize) {
           uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
           const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
@@ -167,7 +168,7 @@ dev_unpacker_unpack_domain(void **dsts,       // buffer to pack into
                            const Dim3 ext        // halo extent
 ) {
   size_t offset = 0;
-  for (size_t qi = 0; qi < nQuants; ++qi) {
+  for (unsigned int qi = 0; qi < nQuants; ++qi) {
     void *dst = dsts[qi];
     const size_t elemSz = elemSizes[qi];
     offset = next_align_of(offset, elemSz);
