@@ -133,17 +133,18 @@ dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
   assert(dstExtent.x >= 0);
 
   for (unsigned int zi = tz; zi < dstExtent.z; zi += blockDim.z * gridDim.z) {
+    unsigned int zo = zi + dstPos.z;
     for (unsigned int yi = ty; yi < dstExtent.y; yi += blockDim.y * gridDim.y) {
+      unsigned int yo = yi + dstPos.y;
       for (unsigned int xi = tx; xi < dstExtent.x; xi += blockDim.x * gridDim.x) {
-        unsigned int zo = zi + dstPos.z;
-        unsigned int yo = yi + dstPos.y;
         unsigned int xo = xi + dstPos.x;
         unsigned int oi = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
         unsigned int ii = zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
         if (4 == elemSize) {
           uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
           const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
-          pDst[oi] = pSrc[ii];
+          uint32_t v = pSrc[ii];
+	  pDst[oi] = v;
         } else if (8 == elemSize) {
           uint64_t *pDst = reinterpret_cast<uint64_t *>(dst);
           const uint64_t *pSrc = reinterpret_cast<const uint64_t *>(src);
