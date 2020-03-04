@@ -1,11 +1,20 @@
 #pragma once
 
+#include <thread>
 #include <vector>
 
 #include "align.cuh"
 #include "local_domain.cuh"
 #include "pack_kernel.cuh"
 #include "tx_common.hpp"
+
+//#define STENCIL_PACK_LOUD
+//#define STENCIL_UNPACK_LOUD
+
+inline void rand_sleep() {
+  int ms = rand() % 10;
+  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
 
 class Packer {
 public:
@@ -100,8 +109,14 @@ public:
       const Dim3 ext = domain_->halo_extent(msg.dir_);
       const Dim3 pos = domain_->halo_pos(msg.dir_, false /*interior*/);
       const dim3 dimBlock = make_block_dim(ext, 512);
-      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / Dim3(dimBlock);
       assert(offset < size_);
+#ifdef STENCIL_PACK_LOUD
+      rand_sleep();
+      std::cerr << "DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext
+                << " pos=" << pos << " @" << offset << "\n";
+      rand_sleep();
+#endif
       dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream>>>(
           &devBuf_[offset], domain_->dev_curr_datas(),
           domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
@@ -136,15 +151,17 @@ dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
     unsigned int zo = zi + dstPos.z;
     for (unsigned int yi = ty; yi < dstExtent.y; yi += blockDim.y * gridDim.y) {
       unsigned int yo = yi + dstPos.y;
-      for (unsigned int xi = tx; xi < dstExtent.x; xi += blockDim.x * gridDim.x) {
+      for (unsigned int xi = tx; xi < dstExtent.x;
+           xi += blockDim.x * gridDim.x) {
         unsigned int xo = xi + dstPos.x;
         unsigned int oi = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
-        unsigned int ii = zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
+        unsigned int ii =
+            zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
         if (4 == elemSize) {
           uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
           const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
           uint32_t v = pSrc[ii];
-	  pDst[oi] = v;
+          pDst[oi] = v;
         } else if (8 == elemSize) {
           uint64_t *pDst = reinterpret_cast<uint64_t *>(dst);
           const uint64_t *pSrc = reinterpret_cast<const uint64_t *>(src);
@@ -195,6 +212,8 @@ public:
                        const std::vector<Message> &messages) override {
     domain_ = domain;
     dirs_ = messages;
+
+    // sort so we unpack in the same order as the sender packed
     std::sort(dirs_.begin(), dirs_.end());
 
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
@@ -217,8 +236,18 @@ public:
 
     int64_t offset = 0;
     for (const auto &msg : dirs_) {
-      const Dim3 ext = domain_->halo_extent(msg.dir_);
-      const Dim3 pos = domain_->halo_pos(msg.dir_, true /*exterior*/);
+
+      const Dim3 dir =
+          msg.dir_ * -1; // unpack into the opposite halo as was sent
+      const Dim3 ext = domain_->halo_extent(dir);
+      const Dim3 pos = domain_->halo_pos(dir, true /*exterior*/);
+
+#ifdef STENCIL_UNPACK_LOUD
+      rand_sleep();
+      std::cerr << "DeviceUnpacker::unpack(): dir=" << msg.dir_
+                << " ext=" << ext << " pos=" << pos << " @" << offset << "\n";
+      rand_sleep();
+#endif
 
       const dim3 dimBlock = make_block_dim(ext, 512);
       const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
@@ -229,7 +258,7 @@ public:
       CUDA_RUNTIME(cudaGetLastError());
       for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
         offset = next_align_of(offset, domain_->elem_size(qi));
-        offset += domain_->halo_bytes(msg.dir_, qi);
+        offset += domain_->halo_bytes(dir, qi);
       }
     }
   }
