@@ -21,6 +21,9 @@ int unpack_y(int a) { return (a >> 10) & 0x3FF; }
 
 int unpack_z(int a) { return (a >> 20) & 0x3FF; }
 
+/*! set dst[x,y,z] = origin + [x,y,z] in interior
+and halo to -1
+*/
 template <typename T>
 __global__ void
 init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
@@ -46,9 +49,12 @@ init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
   const size_t bdx = blockDim.x;
   const size_t tix = threadIdx.x;
 
+#ifndef _at
 #define _at(arr, _x, _y, _z) arr[_z * rawSz.y * rawSz.x + _y * rawSz.x + _x]
+#else
+#error "_at already defined"
+#endif
 
-  // initialize the compute domain and set halos to zero
   for (size_t z = biz * bdz + tiz; z < rawSz.z; z += gdz * bdz) {
     for (size_t y = biy * bdy + tiy; y < rawSz.y; y += gdy * bdy) {
       for (size_t x = bix * bdx + tix; x < rawSz.x; x += gdx * bdx) {
@@ -56,9 +62,10 @@ init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
         if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius &&
             y < rawSz.y - radius && x < rawSz.x - radius) {
           _at(dst, x, y, z) =
-              pack_xyz(origin.x + x, origin.y + y, origin.z + z);
+              pack_xyz(origin.x + x - radius, origin.y + y - radius,
+                       origin.z + z - radius);
         } else {
-          _at(dst, x, y, z) = 0.0;
+          _at(dst, x, y, z) = -1;
         }
       }
     }
@@ -73,6 +80,8 @@ TEST_CASE("exchange") {
   int size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  srand(time(NULL) + rank);
 
   size_t radius = 1;
   typedef float Q1;
@@ -114,36 +123,24 @@ TEST_CASE("exchange") {
   INFO("test init interior");
   for (size_t di = 0; di < dd.domains().size(); ++di) {
     auto &d = dd.domains()[di];
+    const Dim3 origin = dd.origins()[di];
     const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
-      std::cerr << "here\n";
       auto vec = d.interior_to_host(qi);
-      std::cerr << "here2\n";
 
       // make sure we can access data as a Q1
       std::vector<Q1> interior(ext.flatten());
       REQUIRE(vec.size() == interior.size() * sizeof(Q1));
       std::memcpy(interior.data(), vec.data(), vec.size());
 
-      // int64_t z = 0;
-      // for (int64_t y = 0; y < ext.y; ++y) {
-      //   for (int64_t x = 0; x < ext.x; ++x) {
-      //     Q1 val = interior[z * (ext.y * ext.x) + y * (ext.x) + x];
-      //     if (0 == rank)
-      //       std::cout << val << " ";
-      //   }
-      //   if (0 == rank)
-      //     std::cout << "\n";
-      // }
-
       for (int64_t z = 0; z < ext.z; ++z) {
         for (int64_t y = 0; y < ext.y; ++y) {
           for (int64_t x = 0; x < ext.x; ++x) {
             Q1 val = interior[z * (ext.y * ext.x) + y * (ext.x) + x];
-            REQUIRE(unpack_x(val) == x + radius);
-            REQUIRE(unpack_y(val) == y + radius);
-            REQUIRE(unpack_z(val) == z + radius);
+            REQUIRE(unpack_x(val) == x + origin.x);
+            REQUIRE(unpack_y(val) == y + origin.y);
+            REQUIRE(unpack_z(val) == z + origin.z);
           }
         }
       }
@@ -155,11 +152,12 @@ TEST_CASE("exchange") {
   INFO("exchange");
 
   dd.exchange();
-  std::cerr << "here2\n";
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
   INFO("interior should be unchanged");
-  for (auto &d : dd.domains()) {
+  for (size_t di = 0; di < dd.domains().size(); ++di) {
+    auto &d = dd.domains()[di];
+    const Dim3 origin = dd.origins()[di];
     const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
@@ -174,9 +172,9 @@ TEST_CASE("exchange") {
         for (int64_t y = 0; y < ext.y; ++y) {
           for (int64_t x = 0; x < ext.x; ++x) {
             Q1 val = interior[z * (ext.y * ext.x) + y * (ext.x) + x];
-            REQUIRE(unpack_x(val) == x + radius);
-            REQUIRE(unpack_y(val) == y + radius);
-            REQUIRE(unpack_z(val) == z + radius);
+            REQUIRE(unpack_x(val) == x + origin.x);
+            REQUIRE(unpack_y(val) == y + origin.y);
+            REQUIRE(unpack_z(val) == z + origin.z);
           }
         }
       }
@@ -185,32 +183,36 @@ TEST_CASE("exchange") {
 
   INFO("check halo regions");
 
-  /*
-  for (auto &sd : dd.domains()) {
+  for (size_t di = 0; di < dd.domains().size(); ++di) {
+    auto &d = dd.domains()[di];
+    const Dim3 origin = dd.origins()[di];
 
-    std::vector<Q1> quantity = sd.quantity_to_host(0);
+    Dim3 ext = d.size();
+    ext.x += 2 * radius;
+    ext.y += 2 * radius;
+    ext.z += 2 * radius;
 
-    for (int dz = -1; dz <= 1; ++dz) {
-      for (int dy = -1; dy <= 1; ++dy) {
-        for (int dz = -1; dz <= 1; ++dz) {
-          const Dim3 dir(dx, dy, dz);
-          const Dim3 pos = sd.halo_pos(dir);
-          const Dim3 ext = sd.halo_extent(dir);
-          const Dim3 sz = sd.raw_size();
+    for (size_t qi = 0; qi < d.num_data(); ++qi) {
+      auto vec = d.quantity_to_host(qi);
+      // access quantity data as a Q1
+      std::vector<Q1> quantity(ext.flatten());
+      REQUIRE(vec.size() == quantity.size() * sizeof(Q1));
+      std::memcpy(quantity.data(), vec.data(), vec.size());
 
-          for (int zi = pos.z; zi < pos.z + ext.z; ++zi) {
-            for (int yi = pos.z; yi < pos.z + ext.z; ++yi) {
-              for (int xi = pos.z; xi < pos.z + ext.z; ++xi) {
-                Q1 val = quantity[zi * (sz.y * sz.x) + yi * (sz.x) + xi];
-                REQUIRE(unpack_x(val) == x + radius);
-                REQUIRE(unpack_y(val) == y + radius);
-                REQUIRE(unpack_z(val) == z + radius);
-              }
-            }
+      for (int64_t z = 0; z < ext.z; ++z) {
+        for (int64_t y = 0; y < ext.y; ++y) {
+          for (int64_t x = 0; x < ext.x; ++x) {
+            Dim3 xyz = Dim3(x, y, z);
+            Dim3 coord = xyz - Dim3(radius, radius, radius) + origin;
+            coord = coord.wrap(Dim3(10, 10, 10));
+
+            Q1 val = quantity[z * (ext.y * ext.x) + y * (ext.x) + x];
+            REQUIRE(unpack_x(val) == coord.x);
+            REQUIRE(unpack_y(val) == coord.y);
+            REQUIRE(unpack_z(val) == coord.z);
           }
         }
       }
     }
   }
-  */
 }
