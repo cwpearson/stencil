@@ -18,57 +18,6 @@ public:
   bool operator==(const Message &rhs) const noexcept {
     return dir_ == rhs.dir_ && srcGPU_ == rhs.srcGPU_ && dstGPU_ == rhs.dstGPU_;
   }
-
-  /*! if this message would contain the same data as another message
-   */
-  bool contains(const Message &other) const noexcept {
-    assert(dir_.all_lt(2));
-    assert(dir_.all_gt(-2));
-    if (srcGPU_ == other.srcGPU_ && dstGPU_ == other.dstGPU_) {
-      if (dir_ == Dim3(0, 0, 0) || other.dir_ == Dim3(0, 0, 0)) {
-        return dir_ == other.dir_;
-      } else {
-        Dim3 mask;
-        mask.x = dir_.x != 0 ? 1 : 0;
-        mask.y = dir_.y != 0 ? 1 : 0;
-        mask.z = dir_.z != 0 ? 1 : 0;
-        return other.dir_ * mask == dir_;
-      }
-    } else {
-      return false;
-    }
-  }
-
-  /*! \brief remove overlapping messages from `msgs`
-
-      e.g., [1,0,0] (+x face) and [1,1,0] (+x+y edge) from the same src tp the
-     same destination overlap
-  */
-  static std::vector<Message>
-  remove_overlapping(const std::vector<Message> &msgs) {
-    std::vector<Message> ret = msgs;
-
-    // check every message to see which messages it contains
-    for (size_t i = 0; i < ret.size(); ++i) {
-      std::vector<size_t> containees;
-      for (size_t j = 0; j < ret.size(); ++j) {
-        if (i == j)
-          continue;
-        if (ret[i].contains(ret[j])) {
-          containees.push_back(j);
-        }
-      }
-
-      // remove any contained messages from the back.
-      // if any are removed, start the search again
-      for (int64_t j = containees.size() - 1; j >= 0; --j) {
-        ret.erase(ret.begin() + containees[j]);
-        i = 0;
-      }
-    }
-
-    return ret;
-  }
 };
 
 enum class MsgKind {
