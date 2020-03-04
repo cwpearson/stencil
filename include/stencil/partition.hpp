@@ -472,7 +472,7 @@ public:
       assert(rank >= 0);
       assert(id >= 0);
       assert(rank_.count(idx) == 0);
-      
+
       rank_[idx] = rank;
       assert(subdomain_id_.count(idx) == 0);
       subdomain_id_[idx] = id;
@@ -636,8 +636,9 @@ public:
       const std::vector<int> &rankCudaIds // which CUDA devices the calling
                                           // rank wants to contribute
   ) {
-
+    std::cerr << "DEBUG: NodeAware: entered ctor \n";
     MPI_Barrier(MPI_COMM_WORLD);
+    std::cerr << "DEBUG: NodeAware: after barrier \n";
 
     // TODO: actually check that everyone has the same number of GPUs
     const int gpusPerRank = rankCudaIds.size();
@@ -663,7 +664,9 @@ public:
 
     // gather the names to root
     std::vector<char> allNames;
-    allNames = std::vector<char>(MPI_MAX_PROCESSOR_NAME * mpiTopo.size(), 0);
+    if (0 == mpiTopo.rank()) {
+      allNames.resize(MPI_MAX_PROCESSOR_NAME * mpiTopo.size());
+    }
     MPI_Gather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, allNames.data(),
                MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
     if (0 == mpiTopo.rank()) {
