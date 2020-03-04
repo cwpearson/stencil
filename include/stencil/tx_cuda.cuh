@@ -81,7 +81,7 @@ public:
       const Dim3 dstSz = dstDomain->raw_size();
       const Dim3 srcSz = srcDomain->raw_size();
       const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
-      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_, true /*exterior*/);
+      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_ * -1, true /*exterior*/);
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
       RcStream &stream = streams_[srcDomain->gpu()];
       const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
@@ -316,8 +316,8 @@ public:
                         int dstGPU, // domain ID
                         int dstDev  // cuda ID
                         )
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), dstDev_(dstDev),
-        event_(0) {}
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
+        dstDev_(dstDev), event_(0) {}
   ~ColocatedDeviceRecver() {
     if (event_) {
       CUDA_RUNTIME(cudaEventDestroy(event_));
@@ -688,8 +688,8 @@ public:
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     int numBytes = unpacker_.size();
     assert(numBytes <= std::numeric_limits<int>::max());
-    MPI_Irecv(hostBuf_, int(numBytes), MPI_BYTE, srcRank_, tag,
-              MPI_COMM_WORLD, &req_);
+    MPI_Irecv(hostBuf_, int(numBytes), MPI_BYTE, srcRank_, tag, MPI_COMM_WORLD,
+              &req_);
     nvtxRangePop(); // RemoteRecver::recv_h2h
   }
 };
