@@ -101,7 +101,7 @@ inline void enable_peer(const int src, const int dst) {
     std::cerr << src << " -> " << dst << " peer access (same)\n";
   } else {
     int canAccess;
-    std::cerr << "check peer " << src << "->" << dst <<"\n";
+    std::cerr << "check peer " << src << "->" << dst << "\n";
     CUDA_RUNTIME(cudaDeviceCanAccessPeer(&canAccess, src, dst));
     if (canAccess) {
       CUDA_RUNTIME(cudaSetDevice(src));
