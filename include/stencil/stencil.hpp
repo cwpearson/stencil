@@ -119,7 +119,8 @@ public:
 #endif
 
   DistributedDomain(size_t x, size_t y, size_t z)
-      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All) {
+      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All),
+        strategy_(PlacementStrategy::NodeAware) {
 
 #if STENCIL_TIME == 1
     timeMpiTopo_ = 0;
@@ -292,6 +293,8 @@ public:
 
   void realize() {
     CUDA_RUNTIME(cudaGetLastError());
+
+    // TODO: make sure everyone has the same Placement Strategy
 
     // compute domain placement
 #if STENCIL_TIME == 1
@@ -489,35 +492,6 @@ public:
             (void)0;
           }
         }
-      }
-    }
-
-    // for all messaages going between the same subdomains, remove any
-    // overlapping data
-    peerAccessOutbox = Message::remove_overlapping(peerAccessOutbox);
-    for (auto &src : peerCopyOutboxes) {
-      for (auto &box : src) {
-        box = Message::remove_overlapping(box);
-      }
-    }
-    for (auto &src : coloOutboxes) {
-      for (auto &kv : src) {
-        kv.second = Message::remove_overlapping(kv.second);
-      }
-    }
-    for (auto &src : coloInboxes) {
-      for (auto &kv : src) {
-        kv.second = Message::remove_overlapping(kv.second);
-      }
-    }
-    for (auto &src : remoteOutboxes) {
-      for (auto &kv : src) {
-        kv.second = Message::remove_overlapping(kv.second);
-      }
-    }
-    for (auto &src : remoteInboxes) {
-      for (auto &kv : src) {
-        kv.second = Message::remove_overlapping(kv.second);
       }
     }
 
