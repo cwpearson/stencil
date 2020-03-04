@@ -15,7 +15,6 @@ public:
   int64_t z;
 
 public:
-
 #ifdef __CUDACC__
   /* cuda dim3 ctor */
   CUDA_CALLABLE_MEMBER Dim3(const dim3 other)
@@ -25,11 +24,11 @@ public:
   CUDA_CALLABLE_MEMBER Dim3(int64_t _x, int64_t _y, int64_t _z)
       : x(_x), y(_y), z(_z) {}
 
-  Dim3() = default; // default ctor
-  Dim3(const Dim3 &d) = default; // copy ctor
-  Dim3(Dim3 &&d) = default; // move ctor
+  Dim3() = default;                         // default ctor
+  Dim3(const Dim3 &d) = default;            // copy ctor
+  Dim3(Dim3 &&d) = default;                 // move ctor
   Dim3 &operator=(const Dim3 &d) = default; // copy assign
-  Dim3 &operator=(Dim3 &&d) = default; // move assign
+  Dim3 &operator=(Dim3 &&d) = default;      // move assign
 
   void swap(Dim3 &d) {
     std::swap(x, d.x);
@@ -85,7 +84,7 @@ public:
   CUDA_CALLABLE_MEMBER bool all_lt(const int64_t rhs) const {
     return x < rhs && y < rhs && z < rhs;
   }
-  
+
   CUDA_CALLABLE_MEMBER bool all_lt(const Dim3 rhs) const {
     return x < rhs.x && y < rhs.y && z < rhs.z;
   }
@@ -197,12 +196,13 @@ public:
 
 #ifdef __CUDACC__
   /* convertible to CUDA dim3 */
-  CUDA_CALLABLE_MEMBER operator dim3() const { 
+  CUDA_CALLABLE_MEMBER operator dim3() const {
     assert(x > 0);
     assert(y > 0);
     assert(z > 0);
-    
-    return dim3((unsigned int)x, (unsigned int)y, (unsigned int)z); }
+
+    return dim3((unsigned int)x, (unsigned int)y, (unsigned int)z);
+  }
 #endif
 
   CUDA_CALLABLE_MEMBER Dim3 wrap(const Dim3 &lims) {
