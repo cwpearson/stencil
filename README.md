@@ -1,6 +1,9 @@
 # stencil
 
+[![Build Status](https://travis-ci.com/cwpearson/stencil.svg?token=oXpZxp44qzps6HC63xis&branch=master)](https://travis-ci.com/cwpearson/stencil)
+
 A prototype MPI/CUDA stencil halo exchange library
+
 
 ## Quick Start (weak scaling)
 
