@@ -3,6 +3,7 @@
 # 3.10+ findopenmp gained support for language-specific components
 # 3.11+ for CMake not to add -fopenmp to the nvcc flags
 # 3.13+ for target_link_directories
+# 3.13 doesn't detect openmpi in 18.04 on travis
 cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 project(stencil LANGUAGES CXX VERSION 0.1.0.0)
@@ -126,11 +127,11 @@ if(MPI_FOUND)
   # target_link_libraries(stencil INTERFACE MPI::MPI_CXX)
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_MPI=1)
   message(STATUS "MPI found, compiling with STENCIL_USE_MPI=1")
-  message(STATUS ${MPI_CXX_LIBRARIES})
-  message(STATUS ${MPIEXEC_EXECUTABLE})
+  message(STATUS "MPI_CXX_LIBRARIES=" ${MPI_CXX_LIBRARIES})
+  message(STATUS "MPIEXEC_EXECUTABLE=" ${MPIEXEC_EXECUTABLE})
 else()
-  target_compile_definitions(STENCIL INTERFACE -DSTENCIL_USE_MPI=0)
-  message(STATUS "MPI found,  compiling with STENCIL_USE_MPI=0")
+  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_MPI=0)
+  message(STATUS "MPI not found,  compiling with STENCIL_USE_MPI=0")
 endif()
 
 ## Add include directories
