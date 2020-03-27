@@ -129,10 +129,10 @@ int main(int argc, char **argv) {
       dd.set_placement(PlacementStrategy::NodeAware);
     }
 
-    dd.add_data<float>();
-    dd.add_data<float>();
-    dd.add_data<float>();
-    dd.add_data<float>();
+    dd.add_data<float>("d0");
+    dd.add_data<float>("d1");
+    dd.add_data<float>("d2");
+    dd.add_data<float>("d3");
 
     dd.realize();
 

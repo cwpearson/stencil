@@ -166,6 +166,17 @@ To control the compute mode, use `bsub -alloc_flags gpudefault` (see https://www
 
 To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.ornl.gov/systems/summit_user_guide.html, "CUDA-Aware MPI")
 
+## ParaView
+
+* `File` > `Open` to open the grouped files.
+  * Select the delimiters, then hit apply on the properties pane
+* `Filters` > `Alphabetical` > `Table to Points`
+  * Select the x,y,z columns in the `Properties` pane.
+  * `Apply`
+  * Select some rows in the table.
+  * In the layout, `Add selection`.
+
+
 ## Design Goals
   * v1 (AsHES)
     * [x] joint stencils over multiple data types (Astaroth)

@@ -89,7 +89,7 @@ TEST_CASE("exchange") {
   INFO("ctor");
   DistributedDomain dd(10, 10, 10);
   dd.set_radius(radius);
-  auto dh1 = dd.add_data<Q1>();
+  auto dh1 = dd.add_data<Q1>("d0");
   dd.set_methods(MethodFlags::CudaMpi);
 
   INFO("realize");

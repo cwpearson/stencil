@@ -116,10 +116,10 @@ int main(int argc, char **argv) {
     dd.set_radius(radius);
     dd.set_placement(strategy);
 
-    dd.add_data<float>();
-    dd.add_data<float>();
-    dd.add_data<float>();
-    dd.add_data<float>();
+    dd.add_data<float>("d0");
+    dd.add_data<float>("d1");
+    dd.add_data<float>("d2");
+    dd.add_data<float>("d3");
 
     dd.realize();
 
@@ -137,6 +137,10 @@ int main(int argc, char **argv) {
       std::this_thread::sleep_for(dur);
       nvtxRangePop();
     }
+
+    dd.write_paraview("rho");
+
+
   } // send domains out of scope before MPI_Finalize
 
   MPI_Finalize();

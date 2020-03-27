@@ -86,6 +86,9 @@ private:
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
 
+  // the names of each quantity
+  std::vector<std::string> dataName_;
+
   MethodFlags flags_;
   PlacementStrategy strategy_;
 
@@ -261,9 +264,10 @@ public:
 
   void set_radius(size_t r) { radius_ = r; }
 
-  template <typename T> DataHandle<T> add_data() {
+  template <typename T> DataHandle<T> add_data(const std::string &name = "") {
     dataElemSize_.push_back(sizeof(T));
-    return DataHandle<T>(dataElemSize_.size() - 1);
+    dataName_.push_back(name);
+    return DataHandle<T>(dataElemSize_.size() - 1, name);
   }
 
   /* Choose comm methods from MethodFlags. Call before realize()
@@ -972,5 +976,74 @@ public:
     nvtxRangePush("barrier");
     MPI_Barrier(MPI_COMM_WORLD);
     nvtxRangePop(); // barrier
+  }
+
+  void write_paraview(const std::string &prefix) {
+    nvtxRangePush("write_paraview");
+
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    int64_t num = rank * domains_.size();
+
+    for (size_t di = 0; di < domains_.size(); ++di) {
+      int64_t id = rank * domains_.size() + di;
+      const std::string path = prefix + std::to_string(id) + ".txt";
+
+      LocalDomain &domain = domains_[di];
+
+      std::vector<std::vector<unsigned char>> quantities;
+      for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
+        quantities.push_back(domain.interior_to_host(qi));
+      }
+
+      std::cerr << "write_paraview(): open " << path << "\n";
+      FILE *outf = fopen(path.c_str(), "w");
+
+      // column headers
+      fprintf(outf, "z y x");
+      for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
+        std::string colName = domain.dataName_[qi];
+        if (colName.empty()) {
+          colName = "data" + std::to_string(qi);
+        }
+        fprintf(outf, " %s", colName.c_str());
+      }
+      fprintf(outf, "\n");
+
+      // print rows
+      for (int64_t lz = 0; lz < domain.sz_.z; ++lz) {
+        for (int64_t ly = 0; ly < domain.sz_.y; ++ly) {
+          for (int64_t lx = 0; lx < domain.sz_.x; ++lx) {
+            Dim3 pos = origins_[di] + Dim3(lx, ly, lz);
+
+            fprintf(outf, "%ld %ld %ld", pos.z, pos.y, pos.x);
+
+            for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
+              if (8 == domain.elem_size(qi)) {
+                double val = reinterpret_cast<double *>(
+                    quantities.data())[lz * (domain.sz_.x * domain.sz_.x) +
+                                       ly * domain.sz_.x + lx];
+                // if (std::isnan(val))
+                //   val = 0;
+                fprintf(outf, " %f", val);
+              } else if (4 == domain.elem_size(qi)) {
+                float val = reinterpret_cast<float *>(
+                    quantities.data())[lz * (domain.sz_.x * domain.sz_.x) +
+                                       ly * domain.sz_.x + lx];
+                // if (std::isnan(val))
+                //   val = 0;
+                fprintf(outf, " %f", val);
+              }
+            }
+
+            fprintf(outf, "\n");
+          }
+        }
+      }
+    }
+
+    nvtxRangePop();
   }
 };

@@ -13,9 +13,16 @@ template <typename T> class DataHandle {
   friend class DistributedDomain;
   friend class LocalDomain;
   size_t id_;
+  std::string name_;
 
 public:
-  DataHandle(size_t i) : id_(i) {}
+  DataHandle(size_t i, const std::string &name = "") : id_(i), name_(name) {}
+};
+
+enum class DataType {
+  None,
+  Float,
+  Double,
 };
 
 class LocalDomain {
@@ -33,6 +40,7 @@ private:
   std::vector<void *> currDataPtrs_;
   std::vector<void *> nextDataPtrs_;
   std::vector<int64_t> dataElemSize_;
+  std::vector<std::string> dataName_;
   // device versions
   void **devCurrDataPtrs_;
   size_t *devDataElemSize_;
@@ -79,20 +87,23 @@ public:
     return int64_t(currDataPtrs_.size());
   }
 
-  template <typename T> DataHandle<T> add_data() {
-    return DataHandle<T>(add_data(sizeof(T)));
-  }
-
   /*! Add an untyped data field with an element size of n.
 
   \returns The index of the added data
   */
-  int64_t add_data(size_t n) {
+  int64_t add_data(size_t n, const std::string &name = "") {
+    dataName_.push_back(name);
     dataElemSize_.push_back(n);
     currDataPtrs_.push_back(nullptr);
     nextDataPtrs_.push_back(nullptr);
     return int64_t(dataElemSize_.size()) - 1;
   }
+
+  template <typename T> DataHandle<T> add_data(const std::string &name = "") {
+    return DataHandle<T>(add_data(sizeof(T)), name);
+  }
+
+
 
   /*! \brief set the radius. Should only be called by DistributedDomain
    */
@@ -240,6 +251,8 @@ public:
     return hostBuf;
   }
 
+  /*! Copy the compute region to the host
+  */
   std::vector<unsigned char> interior_to_host(const size_t qi // quantity index
                                               ) const {
 
@@ -248,6 +261,8 @@ public:
     return region_to_host(pos, ext, qi);
   }
 
+  /*! Copy an entire quantity, including halo region, to host
+  */
   std::vector<unsigned char> quantity_to_host(const size_t qi // quantity index
                                               ) const {
     Dim3 allocSz = sz_;
