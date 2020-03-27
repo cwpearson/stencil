@@ -1,6 +1,5 @@
 add_executable(test_cpu test_cpu_main.cpp
   test_cpu_array.cpp
-  test_cpu_argparse.cpp
   test_cpu_mat2d.cpp
   test_cpu_partition.cpp
   test_cpu_qap.cpp

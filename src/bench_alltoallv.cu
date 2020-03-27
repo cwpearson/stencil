@@ -3,7 +3,7 @@
 #include <cmath>
 #include <numeric>
 
-#include "stencil/argparse.hpp"
+#include "argparse/argparse.hpp"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/mat2d.hpp"
 
@@ -129,6 +129,8 @@ void exchange_cuda_memcpy_peer(double *rtotal, Mat2D<double> *rtimes, const Mat2
 }
 
 int main(int argc, char **argv) {
+  (void) argc;
+  (void) argv;
 
   const int64_t K = 1024;
   const int64_t M = K * K;

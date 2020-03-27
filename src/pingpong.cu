@@ -5,7 +5,7 @@
 #include <mpi.h>
 #include <nvToolsExt.h>
 
-#include "stencil/argparse.hpp"
+#include "argparse/argparse.hpp"
 #include "stencil/cuda_runtime.hpp"
 
 int main(int argc, char **argv) {

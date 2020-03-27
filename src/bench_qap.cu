@@ -2,7 +2,7 @@
 #include <cmath>
 #include <random>
 
-#include "stencil/argparse.hpp"
+#include "argparse/argparse.hpp"
 #include "stencil/qap.hpp"
 
 struct Mats {

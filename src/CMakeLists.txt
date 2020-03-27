@@ -52,11 +52,12 @@ target_compile_options(
     -Xcompiler=-Wvla;
   >
 )
+
+target_include_directories(${tgt} SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
 endmacro()
 
 
 add_executable(astaroth-sim astaroth_sim.cu)
-target_include_directories(astaroth-sim SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
 target_link_libraries(astaroth-sim stencil::stencil)
 add_args(astaroth-sim)
 

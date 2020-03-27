@@ -4,7 +4,7 @@
 
 #include <nvToolsExt.h>
 
-#include "stencil/argparse.hpp"
+#include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
 int main(int argc, char **argv) {
