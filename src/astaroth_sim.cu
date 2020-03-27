@@ -8,6 +8,62 @@
 
 #include "stencil/stencil.hpp"
 
+/*! set dst[x,y,z] = sin(x + origin.x)
+and halo to -1
+*/
+template <typename T>
+__global__ void
+init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
+            const Dim3 origin, //<! [in]
+            const Dim3 rawSz,   //<! [in] 3D size of the dst and src allocations
+            const double period //<! sin wave period
+) {
+
+  constexpr size_t radius = 1;
+  const Dim3 domSz = rawSz - Dim3(2 * radius, 2 * radius, 2 * radius);
+
+  const size_t gdz = gridDim.z;
+  const size_t biz = blockIdx.z;
+  const size_t bdz = blockDim.z;
+  const size_t tiz = threadIdx.z;
+
+  const size_t gdy = gridDim.y;
+  const size_t biy = blockIdx.y;
+  const size_t bdy = blockDim.y;
+  const size_t tiy = threadIdx.y;
+
+  const size_t gdx = gridDim.x;
+  const size_t bix = blockIdx.x;
+  const size_t bdx = blockDim.x;
+  const size_t tix = threadIdx.x;
+
+#ifndef _at
+#define _at(arr, _x, _y, _z) arr[_z * rawSz.y * rawSz.x + _y * rawSz.x + _x]
+#else
+#error "_at already defined"
+#endif
+
+  for (size_t z = biz * bdz + tiz; z < rawSz.z; z += gdz * bdz) {
+    for (size_t y = biy * bdy + tiy; y < rawSz.y; y += gdy * bdy) {
+      for (size_t x = bix * bdx + tix; x < rawSz.x; x += gdx * bdx) {
+
+        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius &&
+            y < rawSz.y - radius && x < rawSz.x - radius) {
+          _at(dst, x, y, z) =
+              sin((origin.x + x - radius) * 2 * 3.14159/ period);
+        } else {
+          _at(dst, x, y, z) = -10;
+        }
+      }
+    }
+  }
+
+#undef _at
+}
+
+
+
+
 int main(int argc, char **argv) {
 
   cxxopts::Options options("MyProgram", "One line description of MyProgram");
@@ -116,14 +172,27 @@ int main(int argc, char **argv) {
     dd.set_radius(radius);
     dd.set_placement(strategy);
 
-    dd.add_data<float>("d0");
-    dd.add_data<float>("d1");
-    dd.add_data<float>("d2");
-    dd.add_data<float>("d3");
+    auto dh0 = dd.add_data<float>("d0");
+    // auto dh1 = dd.add_data<float>("d1");
+    // auto dh2 = dd.add_data<float>("d2");
+    // auto dh3 = dd.add_data<float>("d3");
 
     dd.realize();
 
     MPI_Barrier(MPI_COMM_WORLD);
+
+    std::cerr << "init\n";
+    dim3 dimGrid(10, 10, 10);
+    dim3 dimBlock(8, 8, 8);
+    for (size_t di = 0; di < dd.domains().size(); ++di) {
+      auto &d = dd.domains()[di];
+      CUDA_RUNTIME(cudaSetDevice(d.gpu()));
+      init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh0), dd.origins()[di],
+                                         d.raw_size(), 10);
+      CUDA_RUNTIME(cudaDeviceSynchronize());
+    }
+
+    dd.write_paraview("init");
 
     for (size_t iter = 0; iter < 5; ++iter) {
       std::cerr << "exchange\n";
@@ -138,8 +207,7 @@ int main(int argc, char **argv) {
       nvtxRangePop();
     }
 
-    dd.write_paraview("rho");
-
+    dd.write_paraview("final");
 
   } // send domains out of scope before MPI_Finalize
 

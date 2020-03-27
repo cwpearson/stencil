@@ -239,11 +239,14 @@ public:
     const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
     pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos,
                                        ext, elem_size(qi));
+    CUDA_RUNTIME(cudaDeviceSynchronize());
 
     // copy quantity to host
     std::vector<unsigned char> hostBuf(bytes);
     CUDA_RUNTIME(
         cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
+
+    float *ptr = reinterpret_cast<float*>(hostBuf.data());
 
     // free device buffer
     CUDA_RUNTIME(cudaFree(devBuf));
@@ -256,8 +259,8 @@ public:
   std::vector<unsigned char> interior_to_host(const size_t qi // quantity index
                                               ) const {
 
-    Dim3 pos = halo_pos(Dim3(0, 0, 0), true);
-    Dim3 ext = halo_extent(Dim3(0, 0, 0));
+    const Dim3 pos = halo_pos(Dim3(0, 0, 0), true);
+    const Dim3 ext = halo_extent(Dim3(0, 0, 0));
     return region_to_host(pos, ext, qi);
   }
 

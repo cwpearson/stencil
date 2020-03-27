@@ -1001,6 +1001,7 @@ public:
 
       LocalDomain &domain = domains_[di];
 
+      std::cerr << "write_paraview(): copy interiors to host\n";
       std::vector<std::vector<unsigned char>> quantities;
       for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
         quantities.push_back(domain.interior_to_host(qi));
@@ -1033,7 +1034,7 @@ public:
             for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
               if (8 == domain.elem_size(qi)) {
                 double val = reinterpret_cast<double *>(
-                    quantities.data())[lz * (domain.sz_.x * domain.sz_.x) +
+                    quantities[qi].data())[lz * (domain.sz_.y * domain.sz_.x) +
                                        ly * domain.sz_.x + lx];
                 if (zeroNaNs && std::isnan(val)) {
                   val = 0.0;
@@ -1041,7 +1042,7 @@ public:
                 fprintf(outf, "%s%f", delim, val);
               } else if (4 == domain.elem_size(qi)) {
                 float val = reinterpret_cast<float *>(
-                    quantities.data())[lz * (domain.sz_.x * domain.sz_.x) +
+                    quantities[qi].data())[lz * (domain.sz_.y * domain.sz_.x) +
                                        ly * domain.sz_.x + lx];
                 if (zeroNaNs && std::isnan(val)) {
                   val = 0.0f;
