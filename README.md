@@ -168,17 +168,17 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
 
 ## ParaView
 
-* `File` > `Open` to open the grouped files.
+* `File` > `Open`. Do not open as a group, open individually.
   * Select the delimiters, then hit apply on the properties pane
+* Group the files into a single dataset.
+  * Select the two files, then `Filters` > `Group Datasets`.
 * `Filters` > `Alphabetical` > `Table to Points`
   * Select the x,y,z columns in the `Properties` pane.
   * `Apply`
-  * Select some rows in the table.
-  * In the layout, `Add selection`.
 
 
 ## Design Goals
-  * v1 (AsHES)
+  * v1 (iWAPT)
     * [x] joint stencils over multiple data types (Astaroth)
     * [x] uneven partitioning
     * [x] edge communication (Astaroth)
@@ -193,9 +193,10 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
     * [x] Control which GPUs a distributed domain should use
       * `DistributedDomain::use_gpus(const std::vector<int> &gpus)` 
     * [x] Control which exchange method should be used
+  * v2
+    * [x] ParaView output files `DistributedDomain::write_paraview(const std::string &prefix)`
     
   * future work
-    * [ ] take snapshots
     * [ ] `cudaMemcpy3D` and family for data transfers & allocations
       * supports pitched arrays
     * [ ] Autodetect CUDA-Aware MPI support
@@ -242,3 +243,6 @@ This is combined with other NVML APIs to determine if two GPUs are directly conn
 ## Notes
   * [Open MPI: CUDA-Aware OpenMPI](https://www.open-mpi.org/faq/?category=runcuda#mpi-cuda-support)
   * [Nvidia DevBlock: Benchmarking CUDA-Aware MPI](https://devblogs.nvidia.com/benchmarking-cuda-aware-mpi/)
+
+## Acks
+  * [cwpearson/argparse](github.com/cwpearson/argparse)

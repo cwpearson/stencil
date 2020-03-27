@@ -978,7 +978,15 @@ public:
     nvtxRangePop(); // barrier
   }
 
-  void write_paraview(const std::string &prefix) {
+  /* Dump distributed domain to a series of paraview files
+     
+     The files are named prefixN.txt, where N is a unique number for each subdomain
+     `zero_nans` causes nans to be replaced with 0.0
+  */
+  void write_paraview(const std::string &prefix, bool zeroNaNs = false) {
+
+    const char delim[] = ",";
+
     nvtxRangePush("write_paraview");
 
     int rank, size;
@@ -1002,39 +1010,43 @@ public:
       FILE *outf = fopen(path.c_str(), "w");
 
       // column headers
-      fprintf(outf, "z y x");
+      fprintf(outf, "z%sy%sx", delim, delim);
       for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
         std::string colName = domain.dataName_[qi];
         if (colName.empty()) {
           colName = "data" + std::to_string(qi);
         }
-        fprintf(outf, " %s", colName.c_str());
+        fprintf(outf, "%s%s", delim, colName.c_str());
       }
       fprintf(outf, "\n");
+
+      const Dim3 origin = origins_[di];
 
       // print rows
       for (int64_t lz = 0; lz < domain.sz_.z; ++lz) {
         for (int64_t ly = 0; ly < domain.sz_.y; ++ly) {
           for (int64_t lx = 0; lx < domain.sz_.x; ++lx) {
-            Dim3 pos = origins_[di] + Dim3(lx, ly, lz);
+            Dim3 pos = origin + Dim3(lx, ly, lz);
 
-            fprintf(outf, "%ld %ld %ld", pos.z, pos.y, pos.x);
+            fprintf(outf, "%ld%s%ld%s%ld", pos.z, delim, pos.y, delim, pos.x);
 
             for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
               if (8 == domain.elem_size(qi)) {
                 double val = reinterpret_cast<double *>(
                     quantities.data())[lz * (domain.sz_.x * domain.sz_.x) +
                                        ly * domain.sz_.x + lx];
-                // if (std::isnan(val))
-                //   val = 0;
-                fprintf(outf, " %f", val);
+                if (zeroNaNs && std::isnan(val)) {
+                  val = 0.0;
+                }
+                fprintf(outf, "%s%f", delim, val);
               } else if (4 == domain.elem_size(qi)) {
                 float val = reinterpret_cast<float *>(
                     quantities.data())[lz * (domain.sz_.x * domain.sz_.x) +
                                        ly * domain.sz_.x + lx];
-                // if (std::isnan(val))
-                //   val = 0;
-                fprintf(outf, " %f", val);
+                if (zeroNaNs && std::isnan(val)) {
+                  val = 0.0f;
+                }
+                fprintf(outf, "%s%f", delim, val);
               }
             }
 
