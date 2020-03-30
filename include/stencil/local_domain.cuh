@@ -225,6 +225,15 @@ public:
   // the GPU this domain is on
   int gpu() const { return dev_; }
 
+  /* Swap current and next pointers
+  */
+  void swap() noexcept {
+    assert(currDataPtrs_.size() == nextDataPtrs_.size());
+    for (size_t i = 0; i < currDataPtrs_.size(); ++i) {
+      std::swap(currDataPtrs_[i], nextDataPtrs_[i]);
+    }
+  }
+
   std::vector<unsigned char> region_to_host(const Dim3 &pos, const Dim3 &ext,
                                             const size_t qi // quantity index
                                             ) const {

@@ -216,3 +216,36 @@ TEST_CASE("exchange") {
     }
   }
 }
+
+
+TEST_CASE("swap") {
+  int rank;
+  int size;
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+  srand(time(NULL) + rank);
+
+  size_t radius = 1;
+  typedef float Q1;
+
+  INFO("ctor");
+  DistributedDomain dd(10, 10, 10);
+  dd.set_radius(radius);
+  auto dh1 = dd.add_data<Q1>("d0");
+  dd.set_methods(MethodFlags::CudaMpi);
+
+  INFO("realize");
+  dd.realize();
+
+  INFO("device sync");
+  for (auto &d : dd.domains()) {
+    CUDA_RUNTIME(cudaSetDevice(d.gpu()));
+    CUDA_RUNTIME(cudaDeviceSynchronize());
+  }
+
+  INFO("barrier");
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  dd.swap();
+}

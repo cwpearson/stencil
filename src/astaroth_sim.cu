@@ -198,6 +198,7 @@ int main(int argc, char **argv) {
       std::cerr << "exchange\n";
       nvtxRangePush("exchange");
       dd.exchange();
+      dd.swap();
       nvtxRangePop();
 
       std::cerr << "kernels\n";

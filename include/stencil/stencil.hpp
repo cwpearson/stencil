@@ -768,6 +768,14 @@ public:
 #endif
   }
 
+  /* Swap current and next pointers
+  */
+  void swap() {
+    for (auto &d : domains_) {
+      d.swap();
+    }
+  }
+
   /*!
   do a halo exchange and return
   */
