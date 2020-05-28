@@ -257,6 +257,7 @@ public:
     }
   }
 
+  const Dim3 &size() const noexcept {return size_;}
   std::vector<LocalDomain> &domains() { return domains_; }
 
 
