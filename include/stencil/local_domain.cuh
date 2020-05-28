@@ -186,6 +186,20 @@ public:
     return Rect3(lo, hi);
   }
 
+ /* return the coordinates of the whole domain, including the halo
+ */
+  Rect3 get_full_region() const noexcept {
+    Dim3 lo = origin();
+    Dim3 hi = origin() + size();
+    lo.x -= radius_;
+    lo.y -= radius_;
+    lo.z -= radius_;
+    hi.x += radius_;
+    hi.y += radius_;
+    hi.z += radius_;
+    return Rect3(lo, hi);
+  }
+
   // return the position of the halo relative to get_data() in direction `dir`
   Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
     Dim3 ret;
