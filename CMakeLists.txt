@@ -3,7 +3,6 @@
 # 3.10+ findopenmp gained support for language-specific components
 # 3.11+ for CMake not to add -fopenmp to the nvcc flags
 # 3.13+ for target_link_directories
-# 3.13 doesn't detect openmpi in 18.04 on travis
 cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 project(stencil LANGUAGES CXX VERSION 0.1.0.0)
