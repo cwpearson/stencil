@@ -13,7 +13,9 @@ void bench(size_t *rBytes, double *rPackTime, double *rUnpackTime,
   std::stringstream ss;
   float ms;
 
-  LocalDomain ld(sz, 0);
+  const Dim3 origin(0,0,0);
+
+  LocalDomain ld(sz, origin, 0);
   ld.add_data<float>();
   ld.set_radius(3);
 

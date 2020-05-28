@@ -5,15 +5,16 @@
 
 TEST_CASE("packer", "[packer]") {
   Dim3 arrSz(3, 4, 5);
+  Dim3 origin(0,0,0);
 
-  LocalDomain ld(arrSz, 0);
+  LocalDomain ld(arrSz, origin, 0);
   ld.set_radius(2);
   ld.add_data<float>();
   ld.add_data<char>();
   ld.add_data<double>();
   ld.realize();
 
-  LocalDomain dst(arrSz, 0);
+  LocalDomain dst(arrSz, origin, 0);
   dst.set_radius(2);
   dst.add_data<float>();
   dst.add_data<char>();

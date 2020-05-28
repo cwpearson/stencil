@@ -6,6 +6,8 @@
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
 #include "stencil/pack_kernel.cuh"
+#include "stencil/rect3.hpp"
+#include "stencil/accessor.hpp"
 
 class DistributedDomain;
 
@@ -32,6 +34,9 @@ private:
   // my local data size (not including halo)
   Dim3 sz_;
 
+  // my local data's origin (not including halo)
+  Dim3 origin_;
+
   //!< radius of stencils that will be applied
   size_t radius_;
 
@@ -48,8 +53,8 @@ private:
   int dev_; // CUDA device
 
 public:
-  LocalDomain(Dim3 sz, int dev)
-      : sz_(sz), dev_(dev), devCurrDataPtrs_(nullptr),
+  LocalDomain(Dim3 sz, Dim3 origin, int dev)
+      : sz_(sz), origin_(origin), dev_(dev), devCurrDataPtrs_(nullptr),
         devDataElemSize_(nullptr) {}
 
   ~LocalDomain() {
@@ -87,6 +92,10 @@ public:
     return int64_t(currDataPtrs_.size());
   }
 
+  const Dim3 &origin() const noexcept {
+    return origin_;
+  }
+
   /*! Add an untyped data field with an element size of n.
 
   \returns The index of the added data
@@ -113,7 +122,7 @@ public:
 
   /*! \brief retrieve a pointer to current domain values (to read in stencil)
    */
-  template <typename T> T *get_curr(const DataHandle<T> handle) {
+  template <typename T> T *get_curr(const DataHandle<T> handle) const {
     assert(dataElemSize_.size() > handle.id_);
     assert(currDataPtrs_.size() > handle.id_);
     void *ptr = currDataPtrs_[handle.id_];
@@ -148,6 +157,33 @@ public:
   void *next_data(size_t idx) const {
     assert(idx < nextDataPtrs_.size());
     return nextDataPtrs_[idx];
+  }
+
+  template<typename T> Accessor<T> get_curr_accessor(const DataHandle<T> &dh) const noexcept {
+    T *raw = get_curr(dh);
+
+    // the origin stored in the localdomain does not include the halo,
+    // but the accessor needs to know how to skip the halo region
+    Dim3 org = origin();
+    org.x -= radius_;
+    org.y -= radius_;
+    org.z -= radius_;
+
+    // the total allocation size, for indexing in the accessor
+    Dim3 pitch = sz_;
+    pitch.x += 2 * radius_;
+    pitch.y += 2 * radius_;
+    pitch.z += 2 * radius_;
+
+    return Accessor<T>(raw, org, pitch);
+  }
+ 
+ /* return the coordinates of the compute region (not including the halo)
+ */
+  Rect3 get_compute_region() const noexcept {
+    Dim3 lo = origin();
+    Dim3 hi = origin() + size();
+    return Rect3(lo, hi);
   }
 
   // return the position of the halo relative to get_data() in direction `dir`

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ostream>
+#include <cassert>
 
 #ifdef __CUDACC__
 #define CUDA_CALLABLE_MEMBER __host__ __device__
@@ -16,7 +17,7 @@ public:
 
 public:
 #ifdef __CUDACC__
-  /* cuda dim3 ctor */
+  /* ctor from CUDA dim3 */
   CUDA_CALLABLE_MEMBER Dim3(const dim3 other)
       : x(other.x), y(other.y), z(other.z) {}
 #endif
@@ -233,3 +234,5 @@ inline std::ostream &operator<<(std::ostream &os, const Dim3 &d) {
   os << '[' << d.x << ',' << d.y << ',' << d.z << ']';
   return os;
 }
+
+#undef CUDA_CALLABLE_MEMBER

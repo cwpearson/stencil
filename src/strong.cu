@@ -134,7 +134,7 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    for (size_t iter = 0; iter < nIters; ++iter) {
+    for (int iter = 0; iter < nIters; ++iter) {
       if (0 == rank) {
         std::cerr << "exchange " << iter << "\n";
       }

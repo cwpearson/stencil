@@ -5,9 +5,10 @@
 TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
 
   const Dim3 sz(30, 40, 50);
+  const Dim3 origin(0,0,0);
   const int gpu = 0;
   const size_t radius = 4;
-  LocalDomain d0(sz, gpu);
+  LocalDomain d0(sz, origin, gpu);
 
   d0.set_radius(radius);
   auto handle = d0.add_data<TestType>();
@@ -267,7 +268,8 @@ TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int, double) {
 
   // create a domain
   INFO("ctor");
-  LocalDomain ld(Dim3(10, 10, 10), /*gpu*/ 0);
+  const Dim3 origin(0,0,0);
+  LocalDomain ld(Dim3(10, 10, 10), origin, /*gpu*/ 0);
   ld.set_radius(1);
   auto h = ld.add_data<TestType>();
   INFO("realize");

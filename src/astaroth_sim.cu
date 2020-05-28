@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
     for (size_t di = 0; di < dd.domains().size(); ++di) {
       auto &d = dd.domains()[di];
       CUDA_RUNTIME(cudaSetDevice(d.gpu()));
-      init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh0), dd.origins()[di],
+      init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh0), d.origin(),
                                          d.raw_size(), 10);
       CUDA_RUNTIME(cudaDeviceSynchronize());
     }

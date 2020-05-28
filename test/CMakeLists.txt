@@ -13,9 +13,11 @@ add_test(NAME test_cpu COMMAND ${MPIEXEC_EXECUTABLE} -n 1 test_cpu -a)
 
 if (CMAKE_CUDA_COMPILER)
     add_executable(test_cuda test_cuda_main.cu 
+      test_cuda_accessor.cu
       test_cuda_align.cu
       test_cuda_allocator.cu
       test_cuda_array.cu 
+      test_derivative.cu 
       test_cuda_gpu_topo.cu 
       test_cuda_local_domain.cu 
       test_cuda_pack.cu 

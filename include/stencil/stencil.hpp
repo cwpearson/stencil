@@ -80,8 +80,6 @@ private:
   std::vector<LocalDomain> domains_;
   // the index of the domain in the distributed domain
   std::vector<Dim3> domainIdx_;
-  // the origin of the domain
-  std::vector<Dim3> origins_;
 
   // the size in bytes of each data type
   std::vector<size_t> dataElemSize_;
@@ -260,7 +258,8 @@ public:
   }
 
   std::vector<LocalDomain> &domains() { return domains_; }
-  const std::vector<Dim3> &origins() const { return origins_; }
+
+
 
   void set_radius(size_t r) { radius_ = r; }
 
@@ -293,7 +292,7 @@ public:
 
   /* return the coordinate in the domain that subdomain i's interior starts at
    */
-  Dim3 get_origin(int64_t i) const { return origins_[i]; }
+  const Dim3& get_origin(int64_t i) const { return domains_[i].origin(); }
 
   void realize() {
     CUDA_RUNTIME(cudaGetLastError());
@@ -335,6 +334,7 @@ public:
 
       const Dim3 idx = placement_->get_idx(rank_, domId);
       const Dim3 sdSize = placement_->subdomain_size(idx);
+      const Dim3 sdOrigin = placement_->subdomain_origin(idx);
 
       // placement algorithm should agree with me what my GPU is
       assert(placement_->get_cuda(idx) == gpus_[domId]);
@@ -344,14 +344,13 @@ public:
       fprintf(stderr, "rank=%d gpu=%ld (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
               domId, cudaId, idx.x, idx.y, idx.z);
 
-      LocalDomain sd(sdSize, cudaId);
+      LocalDomain sd(sdSize, sdOrigin, cudaId);
       sd.set_radius(radius_);
       for (size_t dataIdx = 0; dataIdx < dataElemSize_.size(); ++dataIdx) {
         sd.add_data(dataElemSize_[dataIdx]);
       }
 
       domains_.push_back(sd);
-      origins_.push_back(placement_->subdomain_origin(idx));
     }
     CUDA_RUNTIME(cudaGetLastError());
     // realize local domains
@@ -1029,7 +1028,7 @@ public:
       }
       fprintf(outf, "\n");
 
-      const Dim3 origin = origins_[di];
+      const Dim3 origin = domains_[di].origin();
 
       // print rows
       for (int64_t lz = 0; lz < domain.sz_.z; ++lz) {

@@ -30,7 +30,6 @@ init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
             const Dim3 origin, //<! [in]
             const Dim3 rawSz   //<! [in] 3D size of the dst and src allocations
 ) {
-
   constexpr size_t radius = 1;
   const Dim3 domSz = rawSz - Dim3(2 * radius, 2 * radius, 2 * radius);
 
@@ -112,7 +111,7 @@ TEST_CASE("exchange") {
     REQUIRE(d.get_curr(dh1) != nullptr);
     std::cerr << d.raw_size() << "\n";
     CUDA_RUNTIME(cudaSetDevice(d.gpu()));
-    init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), dd.origins()[di],
+    init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), d.origin(),
                                        d.raw_size());
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
@@ -123,7 +122,7 @@ TEST_CASE("exchange") {
   INFO("test init interior");
   for (size_t di = 0; di < dd.domains().size(); ++di) {
     auto &d = dd.domains()[di];
-    const Dim3 origin = dd.origins()[di];
+    const Dim3 origin = d.origin();
     const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
@@ -157,7 +156,7 @@ TEST_CASE("exchange") {
   INFO("interior should be unchanged");
   for (size_t di = 0; di < dd.domains().size(); ++di) {
     auto &d = dd.domains()[di];
-    const Dim3 origin = dd.origins()[di];
+    const Dim3 origin = d.origin();
     const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
@@ -185,7 +184,7 @@ TEST_CASE("exchange") {
 
   for (size_t di = 0; di < dd.domains().size(); ++di) {
     auto &d = dd.domains()[di];
-    const Dim3 origin = dd.origins()[di];
+    const Dim3 origin = d.origin();
 
     Dim3 ext = d.size();
     ext.x += 2 * radius;

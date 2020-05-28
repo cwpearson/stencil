@@ -755,14 +755,14 @@ public:
 
         // make a bandwidth matrix for the components in this node
         Mat2D<double> bandwidth(gpusPerNode, gpusPerNode, 0.0);
-        for (size_t ri = 0; ri < ranksPerNode; ++ri) {  // rank i in this node
-          for (size_t gi = 0; gi < gpusPerRank; ++gi) { // gpu i in this rank
-            const size_t ci = ri * gpusPerRank + gi;
-            for (size_t rj = 0; rj < ranksPerNode;
+        for (int64_t ri = 0; ri < ranksPerNode; ++ri) {  // rank i in this node
+          for (int64_t gi = 0; gi < gpusPerRank; ++gi) { // gpu i in this rank
+            const int64_t ci = ri * gpusPerRank + gi;
+            for (int64_t rj = 0; rj < ranksPerNode;
                  ++rj) { // rank j in this node
-              for (size_t gj = 0; gj < gpusPerRank;
+              for (int64_t gj = 0; gj < gpusPerRank;
                    ++gj) { // gpu j in this rank
-                const size_t cj = rj * gpusPerRank + gj;
+                const int64_t cj = rj * gpusPerRank + gj;
 
                 // recover the cuda device ID for this component
                 const int di = globalCudaIds[ranks[ri] * gpusPerRank + gi];
@@ -775,9 +775,9 @@ public:
 
         // build a stencil communication matrix for the domains in this node
         Mat2D<double> comm(gpusPerNode, gpusPerNode, 0.0);
-        for (size_t i = 0; i < gpusPerNode; ++i) {
+        for (int64_t i = 0; i < gpusPerNode; ++i) {
           const Dim3 srcIdx = sysIdx * nodeDim + partition_.node_idx(i);
-          for (size_t j = 0; j < gpusPerNode; ++j) {
+          for (int64_t j = 0; j < gpusPerNode; ++j) {
             const Dim3 dstIdx = sysIdx * nodeDim + partition_.node_idx(j);
 
             Dim3 dir = dstIdx - srcIdx;
@@ -814,7 +814,7 @@ public:
           std::cerr << " " << e;
         std::cerr << "\n";
 
-        for (size_t id = 0; id < gpusPerNode; ++id) {
+        for (int64_t id = 0; id < gpusPerNode; ++id) {
           const Dim3 nodeIdx = partition_.node_idx(id);
           const Dim3 sdSize =
               partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
@@ -865,9 +865,11 @@ public:
       }
 
       // convert rank and subdomain to idx
-      if (idx_.size() <= rank)
+      assert(rank >= 0);
+      if (idx_.size() <= size_t(rank))
         idx_.resize(rank + 1);
-      if (idx_[rank].size() <= subdomain)
+      assert(subdomain >= 0);
+      if (idx_[rank].size() <= size_t(subdomain))
         idx_[rank].resize(subdomain + 1);
       idx_[rank][subdomain] = idx;
     }
