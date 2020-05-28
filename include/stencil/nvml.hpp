@@ -14,16 +14,14 @@ inline void checkNvml(nvmlReturn_t result, const char *file, const int line) {
 
 #define NVML(stmt) checkNvml(stmt, __FILE__, __LINE__);
 
-static bool once = false;
+namespace nvml{
 
-class Initer {
-public:
-  Initer() {
-    if (!once) {
-      NVML(nvmlInit());
-      once = true;
-    }
+inline void lazy_init() {
+  static bool once = false;
+  if (!once) {
+    NVML(nvmlInit());
+    once = true;
   }
-};
+}
 
-Initer initer;
+}

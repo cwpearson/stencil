@@ -15,6 +15,8 @@ static std::map<int, std::map<int, bool>> peer_;
 /* return the distance between two GPUs
  */
 inline double get_gpu_distance(const int src, const int dst) {
+  nvml::lazy_init();
+
   const double SAME_DISTANCE = 0.1;
   const double NVLINK_DISTANCE = 1.0;
   const double INTERNAL_DISTANCE = 2.0;
@@ -90,7 +92,7 @@ inline double get_gpu_distance(const int src, const int dst) {
 
 }; // namespace detail
 
-double bandwidth(int src, int dst) {
+inline double bandwidth(int src, int dst) {
   return 1.0 / detail::get_gpu_distance(src, dst);
 }
 
