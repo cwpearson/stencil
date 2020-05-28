@@ -195,24 +195,43 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
     * [x] Control which exchange method should be used
   * v2
     * [x] ParaView output files `DistributedDomain::write_paraview(const std::string &prefix)`
-    
+    * [ ] support uneven radius (branch=`feature/multi-radius`)
+    * [ ] "Accessor Object" for data
+      * [ ] Index according to point in compute domain
+    * [ ] Support overlapped computation and communication
+      * interface for extracting interior/exterior of compute region for kernel invocations
+    * [ ] allow a manual partition before placement
+      * constrain to single subdomain per GPU
+
   * future work
-    * [ ] `cudaMemcpy3D` and family for data transfers & allocations
-      * supports pitched arrays
     * [ ] Autodetect CUDA-Aware MPI support
       * testing at build time with `ompi_info`
       * `MPI_T_cvar_read` / `MPI_T_cvar_get_info` ?
-    * [ ] Non-rectangular regions
-    * [ ] Remove requirement of CUDA (HPCG)
-    * [ ] support uneven radius
-    * [ ] Indexing object passed to kernels
-      * could allow halo allocations to be stored non-contiguously
     * [ ] N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
-      * would prevent the use of `cudaMemcpy3D` and family
     * [ ] selectable halo multiplier
       * fewer, larger messages and less frequent barriers
       * larger halo allocations
     * [ ] pitched arrays
+      * hide in accessor
+    * [ ] factor out placement solver code
+
+
+* needs info
+  * mesh refinement
+    * we would rely on the user to specify the conditions
+    * inferface for asking for refinement?
+    * how to rebalance load and communication
+  * [ ] Remove requirement of CUDA (HPCG)
+    * would require test machine with non-homogeneous intra-node communication
+  * mapping multiple subdomains to each GPU
+
+* wontfix
+  * `cudaMemcpy3D`
+    * pros: good for up to 3D, supports pitched allocations
+    * cons: 4D will become a bunch of 3D transfers.
+    * fix: we will always pack/unpack into 1D buffer
+  * [ ] Non-rectangular regions
+    * probably getting to close to a general task-based runtime at that point (like Legion)
 
 
 ## Interesting Things
