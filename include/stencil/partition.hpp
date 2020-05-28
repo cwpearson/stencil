@@ -578,7 +578,7 @@ private:
   /* Return a number proportional to the bytes in a halo exchange, along
    * direction `dir` for a domain of size `sz` with radius `radius`
    */
-  double comm_cost(Dim3 dir, const Dim3 sz, const size_t radius) {
+  double comm_cost(Dim3 dir, const Dim3 sz, const Radius radius) {
     assert(dir.all_lt(2));
     assert(dir.all_gt(-2));
     double count = double(LocalDomain::halo_extent(dir, sz, radius).flatten());
@@ -632,7 +632,7 @@ public:
 
   NodeAware(
       const Dim3 &size, // total domain size
-      MpiTopology &mpiTopo, size_t radius,
+      MpiTopology &mpiTopo, Radius radius,
       const std::vector<int> &rankCudaIds // which CUDA devices the calling
                                           // rank wants to contribute
   ) {

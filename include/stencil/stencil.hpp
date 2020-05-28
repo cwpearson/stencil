@@ -22,6 +22,7 @@
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
 #include "stencil/tx.hpp"
+#include "stencil/radius.hpp"
 
 enum class MethodFlags {
   None = 0,
@@ -72,8 +73,8 @@ private:
 
   Placement *placement_;
 
-  // the stencil radius
-  size_t radius_;
+  // the stencil radius in each direction
+  Radius radius_;
 
   // typically one per GPU
   // the actual data associated with this rank
@@ -257,12 +258,21 @@ public:
     }
   }
 
-  const Dim3 &size() const noexcept {return size_;}
+  const Dim3 &size() const noexcept { return size_; }
   std::vector<LocalDomain> &domains() { return domains_; }
 
+  /* set the radius in all directions to r
+   */
+  void set_radius(size_t r) {
 
-
-  void set_radius(size_t r) { radius_ = r; }
+    for (int z = -1; z <= 1; ++z) {
+      for (int y = -1; y <= 1; ++y) {
+        for (int x = -1; x <= 1; ++x) {
+          radius_.dir(x,y,z) = r;
+        }
+      }
+    }
+  }
 
   template <typename T> DataHandle<T> add_data(const std::string &name = "") {
     dataElemSize_.push_back(sizeof(T));
@@ -293,7 +303,7 @@ public:
 
   /* return the coordinate in the domain that subdomain i's interior starts at
    */
-  const Dim3& get_origin(int64_t i) const { return domains_[i].origin(); }
+  const Dim3 &get_origin(int64_t i) const { return domains_[i].origin(); }
 
   void realize() {
     CUDA_RUNTIME(cudaGetLastError());
@@ -769,7 +779,7 @@ public:
   }
 
   /* Swap current and next pointers
-  */
+   */
   void swap() {
     for (auto &d : domains_) {
       d.swap();
@@ -987,9 +997,9 @@ public:
   }
 
   /* Dump distributed domain to a series of paraview files
-     
-     The files are named prefixN.txt, where N is a unique number for each subdomain
-     `zero_nans` causes nans to be replaced with 0.0
+
+     The files are named prefixN.txt, where N is a unique number for each
+     subdomain `zero_nans` causes nans to be replaced with 0.0
   */
   void write_paraview(const std::string &prefix, bool zeroNaNs = false) {
 
@@ -1043,7 +1053,7 @@ public:
               if (8 == domain.elem_size(qi)) {
                 double val = reinterpret_cast<double *>(
                     quantities[qi].data())[lz * (domain.sz_.y * domain.sz_.x) +
-                                       ly * domain.sz_.x + lx];
+                                           ly * domain.sz_.x + lx];
                 if (zeroNaNs && std::isnan(val)) {
                   val = 0.0;
                 }
@@ -1051,7 +1061,7 @@ public:
               } else if (4 == domain.elem_size(qi)) {
                 float val = reinterpret_cast<float *>(
                     quantities[qi].data())[lz * (domain.sz_.y * domain.sz_.x) +
-                                       ly * domain.sz_.x + lx];
+                                           ly * domain.sz_.x + lx];
                 if (zeroNaNs && std::isnan(val)) {
                   val = 0.0f;
                 }
