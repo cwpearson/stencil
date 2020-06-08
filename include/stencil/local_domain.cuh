@@ -10,8 +10,8 @@
 #include "stencil/radius.hpp"
 #include "stencil/rect3.hpp"
 
-// #define SPEW(x) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << ": " <<  x << "\n";
-#define SPEW(x)
+#define LOG_SPEW(x) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << ": " <<  x << "\n";
+// #define LOG_SPEW(x)
 
 class DistributedDomain;
 
@@ -96,6 +96,8 @@ public:
     return int64_t(currDataPtrs_.size());
   }
 
+
+  
   const Dim3 &origin() const noexcept { return origin_; }
 
   /*! Add an untyped data field with an element size of n.
@@ -119,7 +121,7 @@ public:
    */
   void set_radius(size_t r) { radius_ = Radius::constant(r); }
   void set_radius(const Radius &r) { 
-    SPEW("in " << __FUNCTION__);
+    LOG_SPEW("in " << __FUNCTION__);
     radius_ = r; }
 
   const Radius &radius() const noexcept { return radius_; }
@@ -205,6 +207,7 @@ public:
     return Rect3(lo, hi);
   }
 
+#if 0
   // return the position of the halo relative to get_data() in direction `dir`
   Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
     Dim3 ret;
@@ -245,33 +248,65 @@ public:
 
     return ret;
   }
+  #endif
 
-  // used by some placement code to compute a hypothetical communication cost
+  // return the position of the halo relative to get_data() on the `dir` side of the
+  // LocalDomain (e.g., dir [1,0,0] returns the position of the region on the +x side)
+  Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
+    assert(dir.all_gt(-2));
+    assert(dir.all_lt(2));
+
+    Dim3 ret;
+
+    // +xhalo is the left edge + -x radius + the interior
+    // +x interior is just the left edge + interior size
+    if (1 == dir.x) {
+      ret.x = sz_.x + (halo ? radius_.x(-1) : 0);
+    } else if (-1 == dir.x) {
+      ret.x = halo ? 0 : radius_.x(-1);
+    } else if (0 == dir.x) {
+      ret.x = radius_.x(-1);
+    } else {
+      __builtin_unreachable();
+    }
+
+    if (1 == dir.y) {
+      ret.y = sz_.y + (halo ? radius_.y(-1) : 0);
+    } else if (-1 == dir.y) {
+      ret.y = halo ? 0 : radius_.y(-1);
+    } else if (0 == dir.y) {
+      ret.y = radius_.y(-1);
+    } else {
+      __builtin_unreachable();
+    }
+
+    if (1 == dir.z) {
+      ret.z = sz_.z + (halo ? radius_.z(-1) : 0);
+    } else if (-1 == dir.z) {
+      ret.z = halo ? 0 : radius_.z(-1);
+    } else if (0 == dir.z) {
+      ret.z = radius_.z(-1);
+    } else {
+      __builtin_unreachable();
+    }
+
+    return ret;
+  }
+
+  /* get the point-size of the halo region on side `dir`, with a compute region of size `sz` and a kernel radius `radius`.
+  dir=[0,0,0] returns sz
+  */
   static Dim3 halo_extent(const Dim3 &dir, const Dim3 &sz,
                           const Radius &radius) {
     assert(dir.x >= -1 && dir.x <= 1);
     assert(dir.y >= -1 && dir.y <= 1);
     assert(dir.z >= -1 && dir.z <= 1);
     Dim3 ret;
-
-    if (0 == dir.x) {
-      ret.x = sz.x;
-    } else {
-      ret.x = radius.x(dir.x);
-    }
-
-    if (0 == dir.y) {
-      ret.y = sz.y;
-    } else {
-      ret.y = radius.y(dir.y);
-    }
-
-    if (0 == dir.z) {
-      ret.z = sz.z;
-    } else {
-      ret.z = radius.z(dir.z);
-    }
-
+    
+    ret.x = (0 == dir.x) ? sz.x : radius.x(dir.x);
+    ret.y = (0 == dir.y) ? sz.y : radius.y(dir.y);
+    ret.z = (0 == dir.z) ? sz.z : radius.z(dir.z);
+    LOG_SPEW("ret=" << ret << " sz=" << sz);
     return ret;
   }
 
@@ -358,7 +393,7 @@ public:
   }
 
   void realize() {
-    SPEW("in realize()");
+    LOG_SPEW("in realize()");
     CUDA_RUNTIME(cudaGetLastError());
     assert(currDataPtrs_.size() == nextDataPtrs_.size());
     assert(dataElemSize_.size() == nextDataPtrs_.size());
@@ -371,13 +406,19 @@ public:
     for (int64_t i = 0; i < num_data(); ++i) {
       assert(i < dataElemSize_.size());
       int64_t elemSz = dataElemSize_[i];
-      SPEW("elemSz=" << elemSz);
+      LOG_SPEW("elemSz=" << elemSz);
+      LOG_SPEW("radius +x=" << radius_.x(1));
+      LOG_SPEW("radius -x=" << radius_.x(-1));
+      LOG_SPEW("radius +y=" << radius_.y(1));
+      LOG_SPEW("radius -y=" << radius_.y(-1));
+      LOG_SPEW("radius +z=" << radius_.z(1));
+      LOG_SPEW("radius -z=" << radius_.z(-1));
 
       int64_t elemBytes = ((sz_.x + radius_.x(-1) + radius_.x(1)) *
                            (sz_.y + radius_.y(-1) + radius_.y(1)) *
                            (sz_.z + radius_.z(-1) + radius_.z(1))) *
                           elemSz;
-      SPEW("allocate " << elemBytes << " bytes");
+      LOG_SPEW("allocate " << elemBytes << " bytes");
       char *c = nullptr;
       char *n = nullptr;
       CUDA_RUNTIME(cudaMalloc(&c, elemBytes));
@@ -402,4 +443,4 @@ public:
   }
 };
 
-#undef SPEW
+#undef LOG_SPEW
