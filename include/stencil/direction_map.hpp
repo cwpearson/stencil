@@ -2,7 +2,8 @@
 
 #include <array>
 
-// #define SPEW(x) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " <<  x << "\n";
+// #define SPEW(x) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] "
+// <<  x << "\n";
 #define SPEW(x)
 
 /*! store a T associated with each direction vector
@@ -14,6 +15,19 @@ private:
 
 public:
   typedef int index_type;
+
+  DirectionMap() = default;
+
+  /* construct filled with `val` */
+  DirectionMap(const T &val) {
+    for (int z = 0; z <= 2; ++z) {
+      for (int y = 0; y <= 2; ++y) {
+        for (int x = 0; x <= 2; ++x) {
+          data_[z][y][x] = val;
+        }
+      }
+    }
+  }
 
   bool operator==(const DirectionMap &rhs) const noexcept {
     return data_ == rhs.data_;
