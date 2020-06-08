@@ -21,8 +21,55 @@
 #include "stencil/mpi_topology.hpp"
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
-#include "stencil/tx.hpp"
 #include "stencil/radius.hpp"
+#include "stencil/tx.hpp"
+
+#ifndef STENCIL_OUTPUT_LEVEL
+#define STENCIL_OUTPUT_LEVEL 0
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 0
+#define LOG_SPEW(x)                                                            \
+  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_SPEW(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 1
+#define LOG_DEBUG(x)                                                           \
+  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_DEBUG(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 2
+#define LOG_INFO(x)                                                            \
+  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_INFO(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 3
+#define LOG_WARN(x)                                                            \
+  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_WARN(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 4
+#define LOG_ERROR(x)                                                           \
+  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_ERROR(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 5
+#define LOG_FATAL(x)                                                           \
+  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
+  exit(1);
+#else
+#define LOG_FATAL(x) exit(1);
+#endif
 
 enum class MethodFlags {
   None = 0,
@@ -263,16 +310,9 @@ public:
 
   /* set the radius in all directions to r
    */
-  void set_radius(size_t r) {
+  void set_radius(size_t r) noexcept { radius_ = Radius::constant(r); }
 
-    for (int z = -1; z <= 1; ++z) {
-      for (int y = -1; y <= 1; ++y) {
-        for (int x = -1; x <= 1; ++x) {
-          radius_.dir(x,y,z) = r;
-        }
-      }
-    }
-  }
+  void set_radius(const Radius &r) noexcept { radius_ = r; }
 
   template <typename T> DataHandle<T> add_data(const std::string &name = "") {
     dataElemSize_.push_back(sizeof(T));
@@ -429,6 +469,16 @@ public:
               continue; // no message
             }
 
+            // Only send to do sends when the stencil radius in the opposite
+            // direction is non-zero for example, if +x radius is 2, our -x
+            // neighbor needs a halo region from us, so we need to plan to send
+            // in that direction
+            if (0 == radius_.dir(dir * -1)) {
+              continue; // no sends or recvs for this dir
+            }
+
+            // TODO: this assumes we have periodic boundaries
+            // we can filter out some messages here if we do not
             const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
             const int dstRank = placement_->get_rank(dstIdx);
             const int dstGPU = placement_->get_subdomain_id(dstIdx);
@@ -458,15 +508,22 @@ public:
             }
             if (any_methods(MethodFlags::CudaMpi | MethodFlags::CudaAwareMpi)) {
               assert(di < remoteOutboxes.size());
-              remoteOutboxes[di].emplace(dstIdx, std::vector<Message>());
               remoteOutboxes[di][dstIdx].push_back(sMsg);
+              LOG_SPEW("Plan send <remote> "
+                       << myIdx << " (r" << rank_ << "d" << di << "g" << myDev
+                       << ")"
+                       << " -> " << dstIdx << " (r" << dstRank << "d" << dstGPU
+                       << "g" << dstDev << ")"
+                       << " (dir=" << dir << ", rad" << dir * -1 << "="
+                       << radius_.dir(dir * -1) << ")");
               goto send_planned;
             }
-            std::cerr << "No method available to send required message "
-                      << sMsg.dir_ << "\n";
-            exit(EXIT_FAILURE);
+            LOG_FATAL("No method available to send required message "
+                      << sMsg.dir_ << "\n");
           send_planned: // successfully found a way to send
 
+            // TODO: this assumes we have periodic boundaries
+            // we can filter out some messages here if we do not
             const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
             const int srcRank = placement_->get_rank(srcIdx);
             const int srcGPU = placement_->get_subdomain_id(srcIdx);
@@ -498,10 +555,12 @@ public:
               assert(di < remoteInboxes.size());
               remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
               remoteInboxes[di][srcIdx].push_back(sMsg);
+              LOG_SPEW("Plan recv <remote> "
+                       << srcIdx << "->" << myIdx << " (dir=" << dir << "): r"
+                       << dir * -1 << "=" << radius_.dir(dir * -1));
               goto recv_planned;
             }
-            std::cerr << "No method available to recv required message\n";
-            exit(EXIT_FAILURE);
+            LOG_FATAL("No method available to recv required message");
           recv_planned: // found a way to recv
             (void)0;
           }
@@ -750,8 +809,9 @@ public:
       }
     }
     nvtxRangePop(); // prep colocated
-    std::cerr << "rank=" << rank_
-              << "DistributedDomain::realize: prepare RemoteSender\n";
+    std::cerr
+        << "rank=" << rank_
+        << "DistributedDomain::realize: prepare RemoteSender/RemoteRecver\n";
     nvtxRangePush("DistributedDomain::realize: prep remote");
     assert(remoteSenders_.size() == remoteRecvers_.size());
     for (size_t di = 0; di < remoteSenders_.size(); ++di) {
@@ -796,16 +856,14 @@ public:
     double start = MPI_Wtime();
 #endif
 
-/*! Try to start sends in order from longest to shortest
- * we expect remote to be longest, followed by peer copy, followed by colo
- * colo is shorter than peer copy due to the node-aware data placement:
- * if we try to place bigger exchanges nearby, they will be faster
- */
+    /*! Try to start sends in order from longest to shortest
+     * we expect remote to be longest, followed by peer copy, followed by colo
+     * colo is shorter than peer copy due to the node-aware data placement:
+     * if we try to place bigger exchanges nearby, they will be faster
+     */
 
-// start remote send d2h
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d send remote d2h\n", rank_);
-#endif
+    // start remote send d2h
+    LOG_DEBUG("[" << rank_ << "] remote send start");
     nvtxRangePush("DD::exchange: remote send d2h");
     for (auto &domSenders : remoteSenders_) {
       for (auto &kv : domSenders) {
@@ -863,9 +921,7 @@ public:
     nvtxRangePop();
 
     // start remote recv h2h
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d recv remote h2h\n", rank_);
-#endif
+    LOG_DEBUG("[" << rank_ << "] remote recv start");
     nvtxRangePush("DD::exchange: remote recv h2h");
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
@@ -876,9 +932,7 @@ public:
     nvtxRangePop();
 
     // poll senders and recvers to move onto next step until all are done
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d start poll\n", rank_);
-#endif
+    LOG_DEBUG("[" << rank_ << "] start poll");
     nvtxRangePush("DD::exchange: poll");
     bool pending = true;
     while (pending) {
@@ -891,11 +945,9 @@ public:
           if (recver->active()) {
             pending = true;
             if (recver->next_ready()) {
-#if STENCIL_LOUD == 1
-              const Dim3 srcIdx = kv.first;
-              std::cerr << "rank=" << rank_ << " src=" << srcIdx
-                        << " recv_h2d\n";
-#endif
+              // const Dim3 srcIdx = kv.first;
+              // std::cerr << "[" << rank_ << "] src=" << srcIdx << "
+              // recv_h2d\n";
               recver->next();
               goto senders; // try to overlap recv_h2d with send_h2h
             }
@@ -910,11 +962,9 @@ public:
           if (sender->active()) {
             pending = true;
             if (sender->next_ready()) {
-#if STENCIL_LOUD == 1
-              const Dim3 dstIdx = kv.first;
-              std::cerr << "rank=" << rank_ << " dst=" << dstIdx
-                        << " send_h2h\n";
-#endif
+              // const Dim3 dstIdx = kv.first;
+              // std::cerr << "[" << rank_ << "] dst=" << dstIdx << "
+              // send_h2h\n";
               sender->next();
               goto recvers; // try to overlap recv_h2d with send_h2h
             }
@@ -925,9 +975,7 @@ public:
     nvtxRangePop(); // DD::exchange: poll
 
     // wait for sends
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d wait for sameRankSender\n", rank_);
-#endif
+    LOG_DEBUG("[" << rank_ << "] wait for peer access senders");
     nvtxRangePush("peerAccessSender.wait()");
     peerAccessSender_.wait();
     nvtxRangePop();
@@ -1078,3 +1126,10 @@ public:
     nvtxRangePop();
   }
 };
+
+#undef LOG_SPEW
+#undef LOG_DEBUG
+#undef LOG_INFO
+#undef LOG_WARN
+#undef LOG_ERROR
+#undef LOG_FATAL
