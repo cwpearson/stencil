@@ -15,10 +15,15 @@ inline int64_t nextPowerOfTwo(int64_t x) {
 }
 
 inline Dim3 make_block_dim(const Dim3 extent, int64_t threads) {
+  assert(extent.x >= 0);
+  assert(extent.y >= 0);
+  assert(extent.z >= 0);
   Dim3 ret;
   ret.x = std::min(threads, nextPowerOfTwo(extent.x));
+  assert(ret.x);
   threads /= ret.x;
   ret.y = std::min(threads, nextPowerOfTwo(extent.y));
+  assert(ret.y);
   threads /= ret.y;
   ret.z = std::min(threads, nextPowerOfTwo(extent.z));
   assert(ret.x <= 1024);
