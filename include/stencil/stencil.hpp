@@ -445,6 +445,11 @@ public:
 
     std::cerr << "comm plan\n";
     // plan messages
+    /*  
+    For each direction, look up where the destination device is and decide which communication
+    method to use.
+    We do not create a message where the message size would be zero
+    */
     nvtxRangePush("DistributedDomain::realize() plan messages");
     peerCopyOutboxes.resize(gpus_.size());
     for (auto &v : peerCopyOutboxes) {

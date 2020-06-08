@@ -145,6 +145,10 @@ public:
         // be different due to an uncentered kernel)
         size_ += domain_->halo_bytes(msg.dir_ * -1, qi);
       }
+
+      if (0 == size_) {
+        LOG_FATAL("zero-size packer was prepared");
+      }
     }
 
     // allocate the buffer for the packing
@@ -152,6 +156,7 @@ public:
   }
 
   virtual void pack(cudaStream_t stream) override {
+    assert(size_);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
     int64_t offset = 0;
@@ -162,7 +167,7 @@ public:
       const Dim3 ext = domain_->halo_extent(msg.dir_ * -1);
 
       if (ext.flatten() == 0) {
-        LOG_WARN("asked to pack for direction " << msg.dir_ << " but computed message size is 0, ext=" << ext);
+        LOG_FATAL("asked to pack for direction " << msg.dir_ << " but computed message size is 0, ext=" << ext);
       }
 
       LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext
@@ -284,6 +289,10 @@ public:
         // be different due to an uncentered kernel)
         size_ += domain_->halo_bytes(msg.dir_ * -1, qi);
       }
+
+      if (0 == size_) {
+        LOG_FATAL("0-size packer was prepared");
+      }
     }
 
     // allocate the buffer that will be unpacked
@@ -291,6 +300,7 @@ public:
   }
 
   virtual void unpack(cudaStream_t stream) override {
+    assert(size_);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
     int64_t offset = 0;
