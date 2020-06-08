@@ -8,6 +8,8 @@ cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 project(stencil LANGUAGES CXX VERSION 0.1.0.0)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 include(CheckLanguage)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
