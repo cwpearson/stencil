@@ -53,7 +53,15 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
   target_compile_options(
     stencil
     INTERFACE
-    $<$<COMPILE_LANGUAGE:CUDA>:-G>
+    $<$<COMPILE_LANGUAGE:CUDA>:
+     -G
+    >
+  )
+  target_compile_options(
+    stencil
+    INTERFACE
+    -fno-omit-frame-pointer
+    -O0
   )
 elseif (CMAKE_BUILD_TYPE MATCHES Release)
   target_compile_options(
