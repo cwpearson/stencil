@@ -199,7 +199,7 @@ static void check_exchange(const Radius &radius) {
   }
 }
 
-TEST_CASE("CUDA MPI exchange") {
+TEST_CASE("exchange2") {
 
   SECTION("r=0") {
     check_exchange(Radius::constant(0));
