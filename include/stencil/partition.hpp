@@ -492,7 +492,7 @@ public:
 
 /*! average
  */
-double avg(const std::vector<double> &x) {
+inline double avg(const std::vector<double> &x) {
   assert(x.size() >= 1);
 
   double acc = 0;
@@ -504,7 +504,7 @@ double avg(const std::vector<double> &x) {
 
 /*! corrected sample standard deviation
  */
-double cssd(const std::vector<double> &x) {
+inline double cssd(const std::vector<double> &x) {
   assert(x.size() >= 1);
 
   const double xBar = avg(x);
@@ -518,7 +518,7 @@ double cssd(const std::vector<double> &x) {
 
 /*! sample correlation coefficient
  */
-double scc(const std::vector<double> &x, const std::vector<double> &y) {
+inline double scc(const std::vector<double> &x, const std::vector<double> &y) {
   assert(x.size() == y.size());
 
   const size_t n = x.size();
