@@ -17,7 +17,8 @@ if (CMAKE_CUDA_COMPILER)
       test_cuda_align.cu
       test_cuda_allocator.cu
       test_cuda_array.cu 
-      test_derivative.cu 
+      test_derivative.cu
+      test_exchange.cu
       test_cuda_gpu_topo.cu 
       test_cuda_local_domain.cu 
       test_cuda_pack.cu 
