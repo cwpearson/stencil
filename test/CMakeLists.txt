@@ -33,7 +33,8 @@ endif()
 
 if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
     add_executable(test_cuda_mpi test_cuda_mpi_main.cu
-      test_distributed_domain.cu
+      test_cuda_mpi_distributed_domain.cu
+      test_cuda_mpi_exchange.cu
       test_cuda_mpi_colocatedtx.cu
       test_cuda_mpi_cudaipc.cu
       test_cuda_aware_mpi.cu
