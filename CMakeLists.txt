@@ -80,12 +80,15 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
     INTERFACE
     $<$<COMPILE_LANGUAGE:CUDA>:
      -G
+     -Xcompiler=-fno-omit-frame-pointer
+    >
+    $<$<COMPILE_LANGUAGE:CXX>:
+     -fno-omit-frame-pointer
     >
   )
   target_compile_options(
     stencil
     INTERFACE
-    -fno-omit-frame-pointer
     -O0
   )
 elseif (CMAKE_BUILD_TYPE MATCHES Release)
