@@ -20,6 +20,14 @@ option(USE_CUDA_AWARE_MPI "assume CUDA-aware MPI support" OFF)
 option(MEASURE_TIMINGS "measure phase elapsed time in library" OFF)
 option(LOUD "print a lot of things" ON)
 
+if(NOT DEFINED STENCIL_OUTPUT_LEVEL)
+message(STATUS "STENCIL_OUTPUT_LEVEL not defined, setting to INFO")
+set(STENCIL_OUTPUT_LEVEL INFO)
+endif()
+
+
+
+
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/GetGitRevisionDescription.cmake")
 
@@ -48,6 +56,22 @@ endif()
 
 add_library(stencil INTERFACE)
 add_library(stencil::stencil ALIAS stencil)
+
+if (STENCIL_OUTPUT_LEVEL MATCHES SPEW)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=0)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES DEBUG)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=1)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES INFO)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=2)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES WARN)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=3)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES ERROR)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=4)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES FATAL)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=5)
+else()
+  message(FATAL_ERROR "unrecognized value of STENCIL_OUTPUT_LEVEL: "  ${STENCIL_OUTPUT_LEVEL}  ", must be one of SPEW DEBUG INFO WARN ERROR FATAL")
+endif()
 
 target_compile_features(stencil INTERFACE cxx_std_11)
 
