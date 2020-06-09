@@ -167,15 +167,21 @@ public:
       const Dim3 ext = domain_->halo_extent(msg.dir_ * -1);
 
       if (ext.flatten() == 0) {
-        LOG_FATAL("asked to pack for direction " << msg.dir_ << " but computed message size is 0, ext=" << ext);
+        LOG_FATAL("asked to pack for direction "
+                  << msg.dir_
+                  << " but computed message size is 0, ext=" << ext);
       }
 
       LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext
-                                            << " pos=" << pos << " @ " << offset);
+                                            << " pos=" << pos << " @ "
+                                            << offset);
       const dim3 dimBlock = make_block_dim(ext, 512);
       const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / Dim3(dimBlock);
       assert(offset < size_);
 
+      LOG_SPEW("DevicePacker::pack(): grid= "
+               << dimGrid.x << "," << dimGrid.y << "," << dimGrid.z << " block="
+               << dimBlock.x << "," << dimBlock.y << "," << dimBlock.z);
       dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream>>>(
           &devBuf_[offset], domain_->dev_curr_datas(),
           domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
@@ -184,7 +190,7 @@ public:
       for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
         offset = next_align_of(offset, domain_->elem_size(qi));
         // send +x means recv into -x halo. +x halo size could be different
-        offset += domain_->halo_bytes(msg.dir_*-1, qi);
+        offset += domain_->halo_bytes(msg.dir_ * -1, qi);
       }
     }
   }
