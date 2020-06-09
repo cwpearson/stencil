@@ -268,7 +268,6 @@ public:
         for (auto &e : nodeCudaIds) {
           ss << " " << e;
         }
-        ss << "\n";
         LOG_INFO(ss.str());
 #endif
       }
@@ -851,9 +850,11 @@ public:
   /* Swap current and next pointers
    */
   void swap() {
+    LOG_DEBUG("rank="<<rank_<<" enter swap()");
     for (auto &d : domains_) {
       d.swap();
     }
+    LOG_DEBUG("rank="<<rank_<<" finish swap()");
   }
 
   /*!
@@ -884,7 +885,7 @@ public:
     nvtxRangePop();
 
     // send same-rank messages
-LOG_DEBUG("rank=" << rank_ << " send peer copy");
+    LOG_DEBUG("rank=" << rank_ << " send peer copy");
     nvtxRangePush("DD::exchange: peer copy send");
     for (auto &src : peerCopySenders_) {
       for (auto &kv : src) {
@@ -895,7 +896,7 @@ LOG_DEBUG("rank=" << rank_ << " send peer copy");
     nvtxRangePop();
 
     // start colocated Senders
-LOG_DEBUG("rank=" << rank_ << " start colo send");
+    LOG_DEBUG("rank=" << rank_ << " start colo send");
     nvtxRangePush("DD::exchange: colo send");
     for (auto &domSenders : coloSenders_) {
       for (auto &kv : domSenders) {
@@ -906,7 +907,7 @@ LOG_DEBUG("rank=" << rank_ << " start colo send");
     nvtxRangePop();
 
     // send self messages
-LOG_DEBUG("rank=" << rank_ << " send peer access");
+    LOG_DEBUG("rank=" << rank_ << " send peer access");
     nvtxRangePush("DD::exchange: peer access send");
     peerAccessSender_.send();
     nvtxRangePop();
@@ -977,7 +978,7 @@ LOG_DEBUG("rank=" << rank_ << " send peer access");
     nvtxRangePop(); // DD::exchange: poll
 
     // wait for sends
-    LOG_DEBUG("[" << rank_ << "] wait for peer access senders");
+    LOG_SPEW("[" << rank_ << "] wait for peer access senders");
     nvtxRangePush("peerAccessSender.wait()");
     peerAccessSender_.wait();
     nvtxRangePop();
@@ -992,21 +993,21 @@ LOG_DEBUG("rank=" << rank_ << " send peer access");
     nvtxRangePop(); // peerCopySender.wait()
 
     // wait for colocated
-    LOG_DEBUG("colocated senders wait");
     nvtxRangePush("colocated.wait()");
-    for (auto &domSenders : coloSenders_) {
-      for (auto &kv : domSenders) {
-        ColocatedHaloSender &sender = kv.second;
-        sender.wait();
+      for (auto &domSenders : coloSenders_) {
+        for (auto &kv : domSenders) {
+          LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait colocated sender");
+          ColocatedHaloSender &sender = kv.second;
+          sender.wait();
+        }
       }
-    }
-    LOG_DEBUG("colocated recvers wait");
-    for (auto &domRecvers : coloRecvers_) {
-      for (auto &kv : domRecvers) {
-        ColocatedHaloRecver &recver = kv.second;
-        recver.wait();
+      for (auto &domRecvers : coloRecvers_) {
+        for (auto &kv : domRecvers) {
+          LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait colocated recver");
+          ColocatedHaloRecver &recver = kv.second;
+          recver.wait();
+        }
       }
-    }
     nvtxRangePop(); // colocated wait
 
     nvtxRangePush("remote wait");
@@ -1014,13 +1015,17 @@ LOG_DEBUG("rank=" << rank_ << " send peer access");
     // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
+        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait remote recver");
         StatefulRecver *recver = kv.second;
+        assert(recver);
         recver->wait();
       }
     }
     for (auto &domSenders : remoteSenders_) {
       for (auto &kv : domSenders) {
+        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait remote sender");
         StatefulSender *sender = kv.second;
+        assert(sender);
         sender->wait();
       }
     }
@@ -1036,7 +1041,9 @@ LOG_DEBUG("rank=" << rank_ << " send peer access");
     }
 #endif
 
+    // TODO remove this?
     // wait for all ranks to be done
+    LOG_SPEW("rank=" << rank_ << " post-exchange barrier");
     nvtxRangePush("barrier");
     MPI_Barrier(MPI_COMM_WORLD);
     nvtxRangePop(); // barrier
