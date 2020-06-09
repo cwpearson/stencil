@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     if (0 == rank) {
       std::string methodStr;
       if (methods && MethodFlags::CudaMpi) {
@@ -181,7 +181,7 @@ int main(int argc, char **argv) {
              dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
              dd.timeExchange_);
     }
-#endif // STENCIL_TIME
+#endif // STENCIL_MEASURE_TIME
 
   } // send domains out of scope before MPI_Finalize
 

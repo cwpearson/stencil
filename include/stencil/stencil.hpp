@@ -154,7 +154,7 @@ private:
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
 public:
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
   /* record total time spent on operations. Valid at MPI rank 0
    */
   double timeMpiTopo_;
@@ -171,7 +171,7 @@ public:
       : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All),
         strategy_(PlacementStrategy::NodeAware) {
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     timeMpiTopo_ = 0;
     timeNodeGpus_ = 0;
     timePeerEn_ = 0;
@@ -185,12 +185,12 @@ public:
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
     mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     double elapsed = MPI_Wtime() - start;
     double maxElapsed = -1;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
@@ -244,14 +244,14 @@ public:
 
 // create a list of cuda device IDs in use by the ranks on this node
 // TODO: assumes all ranks use the same number of GPUs
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
     std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
     MPI_Allgather(gpus_.data(), int(gpus_.size()), MPI_INT, nodeCudaIds.data(),
                   int(gpus_.size()), MPI_INT, mpiTopology_.colocated_comm());
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
@@ -261,15 +261,20 @@ public:
 #endif
     {
       std::set<int> unique(nodeCudaIds.begin(), nodeCudaIds.end());
-      // nodeCudaIds = std::vector<int>(unique.begin(), unique.end());
-      std::cerr << "[" << rank_ << "] colocated with ranks using gpus";
-      for (auto &e : nodeCudaIds) {
-        std::cerr << " " << e;
+      {
+#if STENCIL_OUTPUT_LEVEL <= 2
+        std::stringstream ss;
+        ss << "[" << rank_ << "] colocated with ranks using gpus";
+        for (auto &e : nodeCudaIds) {
+          ss << " " << e;
+        }
+        ss << "\n";
+        LOG_INFO(ss.str());
+#endif
       }
-      std::cerr << "\n";
     }
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -281,7 +286,7 @@ public:
       }
     }
     nvtxRangePop();
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
@@ -351,7 +356,7 @@ public:
     // TODO: make sure everyone has the same Placement Strategy
 
     // compute domain placement
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
@@ -366,7 +371,7 @@ public:
     assert(placement_);
     nvtxRangePop();
     CUDA_RUNTIME(cudaGetLastError());
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     double maxElapsed = -1;
     double elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
@@ -376,7 +381,7 @@ public:
     }
 #endif
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -409,7 +414,7 @@ public:
       d.realize();
     }
     CUDA_RUNTIME(cudaGetLastError());
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
@@ -418,7 +423,7 @@ public:
     }
 #endif
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -445,10 +450,10 @@ public:
 
     std::cerr << "comm plan\n";
     // plan messages
-    /*  
-    For each direction, look up where the destination device is and decide which communication
-    method to use.
-    We do not create a message where the message size would be zero
+    /*
+    For each direction, look up where the destination device is and decide which
+    communication method to use. We do not create a message where the message
+    size would be zero
     */
     nvtxRangePush("DistributedDomain::realize() plan messages");
     peerCopyOutboxes.resize(gpus_.size());
@@ -574,7 +579,7 @@ public:
     }
 
     nvtxRangePop(); // plan
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
@@ -653,7 +658,7 @@ public:
     }
     planFile.close();
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -833,7 +838,7 @@ public:
     }
     nvtxRangePop(); // prep remote
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
                MPI_COMM_WORLD);
@@ -856,7 +861,7 @@ public:
   */
   void exchange() {
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
@@ -879,9 +884,7 @@ public:
     nvtxRangePop();
 
     // send same-rank messages
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d send peer copy\n", rank_);
-#endif
+LOG_DEBUG("rank=" << rank_ << " send peer copy");
     nvtxRangePush("DD::exchange: peer copy send");
     for (auto &src : peerCopySenders_) {
       for (auto &kv : src) {
@@ -892,9 +895,7 @@ public:
     nvtxRangePop();
 
     // start colocated Senders
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d start colo send\n", rank_);
-#endif
+LOG_DEBUG("rank=" << rank_ << " start colo send");
     nvtxRangePush("DD::exchange: colo send");
     for (auto &domSenders : coloSenders_) {
       for (auto &kv : domSenders) {
@@ -905,17 +906,13 @@ public:
     nvtxRangePop();
 
     // send self messages
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d send peer access\n", rank_);
-#endif
+LOG_DEBUG("rank=" << rank_ << " send peer access");
     nvtxRangePush("DD::exchange: peer access send");
     peerAccessSender_.send();
     nvtxRangePop();
 
-// start colocated recvers
-#if STENCIL_LOUD == 1
-    fprintf(stderr, "rank=%d start colo recv\n", rank_);
-#endif
+    // start colocated recvers
+    LOG_DEBUG("rank=" << rank_ << " start colo recv");
     nvtxRangePush("DD::exchange: colo recv");
     for (auto &domRecvers : coloRecvers_) {
       for (auto &kv : domRecvers) {
@@ -995,9 +992,7 @@ public:
     nvtxRangePop(); // peerCopySender.wait()
 
     // wait for colocated
-#if STENCIL_LOUD == 1
-    std::cerr << "colocated senders wait\n";
-#endif
+    LOG_DEBUG("colocated senders wait");
     nvtxRangePush("colocated.wait()");
     for (auto &domSenders : coloSenders_) {
       for (auto &kv : domSenders) {
@@ -1005,9 +1000,7 @@ public:
         sender.wait();
       }
     }
-#if STENCIL_LOUD == 1
-    std::cerr << "colocated recvers wait\n";
-#endif
+    LOG_DEBUG("colocated recvers wait");
     for (auto &domRecvers : coloRecvers_) {
       for (auto &kv : domRecvers) {
         ColocatedHaloRecver &recver = kv.second;
@@ -1033,7 +1026,7 @@ public:
     }
     nvtxRangePop(); // remote wait
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     double maxElapsed = -1;
     double elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
