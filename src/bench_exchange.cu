@@ -1,8 +1,6 @@
 #include <chrono>
 #include <sstream>
 
-#define STENCIL_OUTPUT_LEVEL 2
-
 #include "argparse/argparse.hpp"
 #include "statistics.hpp"
 #include "stencil/mpi.hpp"
@@ -46,8 +44,14 @@ Statistics bench(const size_t nIters, const Dim3 &extent, const Radius &radius,
       stats.insert(elapsed);
     }
   }
-
   return stats;
+}
+
+
+void report(const std::string &cfg, Statistics &stats) {
+  std::cout << cfg << " " << stats.count() << " runs: "
+  << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
+  << stats.max() << ")\n";
 }
 
 int main(int argc, char **argv) {
@@ -67,7 +71,7 @@ int main(int argc, char **argv) {
 
   // CLI parameters
   int nIters = 30;
-  Dim3 ext(64,64,64);
+  Dim3 ext(128,128,128);
 
   // parse CLI arguments
   argparse::Parser p("benchmark stencil library exchange");
@@ -97,20 +101,28 @@ int main(int argc, char **argv) {
   // benchmark results
   Statistics stats;
 
-  // uniform, radius = 2
-  radius = Radius::constant(2);
-  stats = bench(nIters, ext, radius, gpusPerRank);
-  std::cout << ext << " " << stats.count() << " runs: "
-            << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
-            << stats.max() << ")\n";
 
-  // x-leaning, radius = 2
+
+  // positive x-leaning, radius = 2
   radius = Radius::constant(0);
   radius.dir(1,0,0) = 2;
   stats = bench(nIters, ext, radius, gpusPerRank);
-  std::cout << ext << " " << stats.count() << " runs: "
-            << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
-            << stats.max() << ")\n";
+  if (0 == rank) {
+    std::stringstream ss;
+    ss << ext;
+    report(ss.str(), stats);
+  }
+
+  // x-only, radius = 2
+  radius = Radius::constant(0);
+  radius.dir(1,0,0) = 2;
+  radius.dir(-1,0,0) = 2;
+  stats = bench(nIters, ext, radius, gpusPerRank);
+  if (0 == rank) {
+    std::stringstream ss;
+    ss << ext;
+    report(ss.str(), stats);
+  }
 
   // faces only, radius = 2
   radius = Radius::constant(0);
@@ -121,9 +133,37 @@ int main(int argc, char **argv) {
   radius.dir(0,0,1) = 2;
   radius.dir(0,0,-1) = 2;
   stats = bench(nIters, ext, radius, gpusPerRank);
-  std::cout << ext << " " << stats.count() << " runs: "
-            << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
-            << stats.max() << ")\n";
+  if (0 == rank) {
+    std::stringstream ss;
+    ss << ext;
+    report(ss.str(), stats);
+  }
+
+  // faces & edges, radius = 2
+  radius = Radius::constant(2);
+  radius.dir(1,1,1) = 0;
+  radius.dir(1,1,-1) = 0;
+  radius.dir(1,-1,1) = 0;
+  radius.dir(1,-1,-1) = 0;
+  radius.dir(-1,1,1) = 0;
+  radius.dir(-1,1,-1) = 0;
+  radius.dir(-1,-1,1) = 0;
+  radius.dir(-1,-1,-1) = 0;
+  stats = bench(nIters, ext, radius, gpusPerRank);
+  if (0 == rank) {
+    std::stringstream ss;
+    ss << ext;
+    report(ss.str(), stats);
+  }
+
+  // uniform, radius = 2
+  radius = Radius::constant(2);
+  stats = bench(nIters, ext, radius, gpusPerRank);
+  if (0 == rank) {
+    std::stringstream ss;
+    ss << ext;
+    report(ss.str(), stats);
+  }
 
 #if STENCIL_USE_MPI == 1
   MPI_Finalize();
