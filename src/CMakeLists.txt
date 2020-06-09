@@ -77,6 +77,10 @@ add_executable(measure-buf-exchange measure_buf_exchange.cu)
 target_link_libraries(measure-buf-exchange stencil::stencil)
 add_args(measure-buf-exchange)
 
+add_executable(bench-exchange bench_exchange.cu statistics.cpp)
+target_link_libraries(bench-exchange stencil::stencil)
+add_args(bench-exchange)
+
 add_executable(bench-qap bench_qap.cu)
 target_link_libraries(bench-qap stencil::stencil)
 add_args(bench-qap)
