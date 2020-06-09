@@ -75,7 +75,7 @@ int main(int argc, char **argv) {
 
   int nIters = 30;
 
-  Parser p;
+  argparse::Parser p;
   p.add_option(nIters, "--iters");
   if (!p.parse(argc, argv)) {
     std::cout << p.help();

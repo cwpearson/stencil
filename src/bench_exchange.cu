@@ -61,15 +61,20 @@ int main(int argc, char **argv) {
   int size = mpi::world_size();
 
 #if STENCIL_MEASURE_TIME != 0
-  std::cerr << "WARN: compiled with STENCIL_MEASURE_TIME != 0. Extra overhead may be present.\n";
+  std::cerr << "WARN: compiled with STENCIL_MEASURE_TIME != 0. Extra overhead "
+               "may be present.\n";
 #endif
 
   // CLI parameters
   int nIters = 30;
+  Dim3 ext(64,64,64);
 
   // parse CLI arguments
-  Parser p;
+  argparse::Parser p;
   p.add_option(nIters, "--iters");
+  p.add_option(ext.x, "--x");
+  p.add_option(ext.y, "--y");
+  p.add_option(ext.z, "--z");
   if (!p.parse(argc, argv)) {
     if (0 == rank) {
       std::cout << p.help();
@@ -80,21 +85,29 @@ int main(int argc, char **argv) {
 
   // benchmark parameters
   Radius radius;   // stencil radius
-  Dim3 ext;        // compute domain size
   int gpusPerRank; // the number of GPUs per rank
 
   // benchmark results
   Statistics stats;
 
-  ext = Dim3(64, 64, 64);
-  radius = Radius::constant(1);
+  // uniform radius = 2
+  radius = Radius::constant(2);
   stats = bench(nIters, ext, radius, gpusPerRank);
-  std::cout << stats.count() << " runs: " << "min/avg/max=" << stats.min() << "/" << stats.avg() << "/" << stats.max() << "\n";
+  std::cout << ext << " " << stats.count() << " runs: "
+            << "min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
+            << stats.max() << "\n";
+
+  // x-leaning radius = 2
+  radius = Radius::constant(0);
+  radius.dir(1,0,0) = 2;
+  stats = bench(nIters, ext, radius, gpusPerRank);
+  std::cout << ext << " " << stats.count() << " runs: "
+            << "min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
+            << stats.max() << "\n";
 
 #if STENCIL_USE_MPI == 1
   MPI_Finalize();
 #endif // STENCIL_USE_MPI == 1
 
   return 0;
-
 }

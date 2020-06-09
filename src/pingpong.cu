@@ -12,7 +12,6 @@ int main(int argc, char **argv) {
 
   MPI_Init(&argc, &argv);
 
-
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
@@ -22,7 +21,7 @@ int main(int argc, char **argv) {
   int ranksPerNode = 1;
   std::string outpath;
 
-  Parser p;
+  argparse::Parser p;
   p.add_positional(ranksPerNode)->required();
   p.add_option(minN, "--min");
   p.add_option(maxN, "--max");
