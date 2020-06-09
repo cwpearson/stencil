@@ -332,3 +332,10 @@ public:
 
   virtual void *data() override { return devBuf_; }
 };
+
+#undef LOG_SPEW
+#undef LOG_DEBUG
+#undef LOG_INFO
+#undef LOG_WARN
+#undef LOG_ERROR
+#undef LOG_FATAL
