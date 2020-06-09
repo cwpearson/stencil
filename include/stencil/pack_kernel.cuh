@@ -18,6 +18,7 @@ inline Dim3 make_block_dim(const Dim3 extent, int64_t threads) {
   assert(extent.x >= 0);
   assert(extent.y >= 0);
   assert(extent.z >= 0);
+  threads = std::min(threads, int64_t(1024)); // max of 1024 threads in a block
   Dim3 ret;
   ret.x = std::min(threads, nextPowerOfTwo(extent.x));
   assert(ret.x);
@@ -26,9 +27,12 @@ inline Dim3 make_block_dim(const Dim3 extent, int64_t threads) {
   assert(ret.y);
   threads /= ret.y;
   ret.z = std::min(threads, nextPowerOfTwo(extent.z));
-  assert(ret.x <= 1024);
-  assert(ret.y <= 1024);
-  assert(ret.z <= 1024);
+
+  // cap dimensions by CUDA max size
+  ret.z = std::min(ret.z, int64_t(64));
+  ret.y = std::min(ret.y, int64_t(1024));
+  ret.x = std::min(ret.x, int64_t(1024));
+
   assert(ret.x * ret.y * ret.z <= 1024);
   return ret;
 }
