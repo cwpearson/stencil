@@ -70,17 +70,24 @@ int main(int argc, char **argv) {
   Dim3 ext(64,64,64);
 
   // parse CLI arguments
-  argparse::Parser p;
-  p.add_option(nIters, "--iters");
-  p.add_option(ext.x, "--x");
-  p.add_option(ext.y, "--y");
-  p.add_option(ext.z, "--z");
+  argparse::Parser p("benchmark stencil library exchange");
+  p.add_option(nIters, "--iters")->help("number of iterations to measure");
+  p.add_option(ext.x, "--x")->help("x extent of compute domain");
+  p.add_option(ext.y, "--y")->help("y extent of compute domain");
+  p.add_option(ext.z, "--z")->help("z extent of compute domain");
   if (!p.parse(argc, argv)) {
     if (0 == rank) {
       std::cout << p.help();
     }
     exit(EXIT_FAILURE);
   }
+  if (p.need_help()) {
+    if (0 == rank) {
+      std::cout << p.help();
+    }
+    exit(EXIT_SUCCESS);
+  }
+
   srand(time(NULL) + rank);
 
   // benchmark parameters
@@ -90,20 +97,33 @@ int main(int argc, char **argv) {
   // benchmark results
   Statistics stats;
 
-  // uniform radius = 2
+  // uniform, radius = 2
   radius = Radius::constant(2);
   stats = bench(nIters, ext, radius, gpusPerRank);
   std::cout << ext << " " << stats.count() << " runs: "
-            << "min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
-            << stats.max() << "\n";
+            << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
+            << stats.max() << ")\n";
 
-  // x-leaning radius = 2
+  // x-leaning, radius = 2
   radius = Radius::constant(0);
   radius.dir(1,0,0) = 2;
   stats = bench(nIters, ext, radius, gpusPerRank);
   std::cout << ext << " " << stats.count() << " runs: "
-            << "min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
-            << stats.max() << "\n";
+            << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
+            << stats.max() << ")\n";
+
+  // faces only, radius = 2
+  radius = Radius::constant(0);
+  radius.dir(1,0,0) = 2;
+  radius.dir(-1,0,0) = 2;
+  radius.dir(0,1,0) = 2;
+  radius.dir(0,-1,0) = 2;
+  radius.dir(0,0,1) = 2;
+  radius.dir(0,0,-1) = 2;
+  stats = bench(nIters, ext, radius, gpusPerRank);
+  std::cout << ext << " " << stats.count() << " runs: "
+            << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
+            << stats.max() << ")\n";
 
 #if STENCIL_USE_MPI == 1
   MPI_Finalize();

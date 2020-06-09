@@ -1,20 +1,20 @@
 #pragma once
 
 #include <cstdlib>
+#include <vector>
 
-struct Statistics {
-  Statistics();
-  size_t n;
-  double sum_;
-  double min_;
-  double max_;
+class Statistics {
+private:
+  std::vector<double> x;
 
-  void reset();
-
+public:
+  void clear();
   void insert(double d);
-
-  double avg() const noexcept;
-  double min() const noexcept;
-  double max() const noexcept;
-  double count() const noexcept;
+  double avg() const;
+  double min() const;
+  double max() const;
+  size_t count() const noexcept;
+  double trimean();
+  double med();
+  double stddev() const;
 };

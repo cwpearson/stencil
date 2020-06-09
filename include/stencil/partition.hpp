@@ -16,6 +16,53 @@
 #include "mpi_topology.hpp"
 #include "stencil/qap.hpp"
 
+#ifndef STENCIL_OUTPUT_LEVEL
+#define STENCIL_OUTPUT_LEVEL 0
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 0
+#define LOG_SPEW(x)                                                            \
+  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_SPEW(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 1
+#define LOG_DEBUG(x)                                                           \
+  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_DEBUG(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 2
+#define LOG_INFO(x)                                                            \
+  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_INFO(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 3
+#define LOG_WARN(x)                                                            \
+  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_WARN(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 4
+#define LOG_ERROR(x)                                                           \
+  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_ERROR(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 5
+#define LOG_FATAL(x)                                                           \
+  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
+  exit(1);
+#else
+#define LOG_FATAL(x) exit(1);
+#endif
+
 namespace collective {}
 
 class RankPartition {
@@ -636,9 +683,9 @@ public:
       const std::vector<int> &rankCudaIds // which CUDA devices the calling
                                           // rank wants to contribute
   ) {
-    std::cerr << "DEBUG: NodeAware: entered ctor \n";
+    LOG_DEBUG("NodeAware: entered ctor");
     MPI_Barrier(MPI_COMM_WORLD);
-    std::cerr << "DEBUG: NodeAware: after barrier \n";
+    LOG_DEBUG("NodeAware: after barrier");
 
     // TODO: actually check that everyone has the same number of GPUs
     const int gpusPerRank = rankCudaIds.size();
@@ -659,7 +706,7 @@ public:
     int nameLen;
     MPI_Get_processor_name(name, &nameLen);
     if (0 == mpiTopo.rank()) {
-      std::cerr << "DEBUG: NodeAware: got name " << name << "\n";
+      LOG_DEBUG("NodeAware: got name " << name);
     }
 
     // gather the names to root
@@ -670,7 +717,7 @@ public:
     MPI_Gather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, allNames.data(),
                MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
     if (0 == mpiTopo.rank()) {
-      std::cerr << "DEBUG: NodeAware: gathered names to root\n";
+      LOG_DEBUG("NodeAware: gathered names to root");
     }
 
     // get the name for each rank
@@ -875,3 +922,10 @@ public:
     }
   }
 };
+
+#undef LOG_SPEW
+#undef LOG_DEBUG
+#undef LOG_INFO
+#undef LOG_WARN
+#undef LOG_ERROR
+#undef LOG_FATAL
