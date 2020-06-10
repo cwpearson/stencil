@@ -175,7 +175,8 @@ public:
                  LocalDomain &dstDomain)
       : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain),
         dstDomain_(&dstDomain), srcStream_(srcDomain.gpu()),
-        dstStream_(dstDomain.gpu()) {}
+        dstStream_(dstDomain.gpu()), packer_(srcStream_),
+        unpacker_(dstStream_) {}
 
   void prepare(std::vector<Message> &outbox) {
     packer_.prepare(srcDomain_, outbox);
@@ -193,7 +194,7 @@ public:
     assert(packer_.size() == unpacker_.size());
 
     // pack data in source stream
-    packer_.pack(srcStream_);
+    packer_.pack();
 
     // copy from src device to dst device
     const int dstDev = dstDomain_->gpu();
@@ -206,7 +207,7 @@ public:
     CUDA_RUNTIME(cudaSetDevice(dstDomain_->gpu()));
     CUDA_RUNTIME(cudaStreamWaitEvent(dstStream_, event_, 0 /*flags*/));
 
-    unpacker_.unpack(dstStream_);
+    unpacker_.unpack();
     nvtxRangePop(); // PeerCopySender::send
   }
 
@@ -422,10 +423,10 @@ private:
   ColocatedDeviceSender sender_;
 
 public:
-  ColocatedHaloSender() {}
+  // ColocatedHaloSender() {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       LocalDomain &domain)
-      : domain_(&domain), stream_(domain.gpu()),
+      : domain_(&domain), stream_(domain.gpu()), packer_(stream_),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
   void start_prepare(const std::vector<Message> &outbox) {
@@ -439,7 +440,7 @@ public:
   void finish_prepare() { sender_.finish_prepare(); }
 
   void send() noexcept {
-    packer_.pack(stream_);
+    packer_.pack();
     sender_.send(packer_.data(), stream_);
   }
 
@@ -459,12 +460,12 @@ private:
   DeviceUnpacker unpacker_;
 
 public:
-  ColocatedHaloRecver() {}
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
         stream_(domain.gpu()),
-        recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
+        recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
+        unpacker_(stream_) {}
 
   void start_prepare(const std::vector<Message> &inbox) {
     unpacker_.prepare(domain_, inbox);
@@ -479,7 +480,7 @@ public:
   void recv() {
     assert(stream_.device() == domain_->gpu());
     recver_.wait(stream_);
-    unpacker_.unpack(stream_);
+    unpacker_.unpack();
   }
 
   void wait() noexcept {
@@ -499,7 +500,6 @@ private:
 
   LocalDomain *domain_;
 
-  DevicePacker packer_;
   char *hostBuf_;
 
   RcStream stream_;
@@ -508,13 +508,15 @@ private:
   enum class State { None, D2H, Wait };
   State state_;
 
+  DevicePacker packer_;
+
 public:
-  RemoteSender() : hostBuf_(nullptr) {}
+  // RemoteSender() : hostBuf_(nullptr) {}
   RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu()),
-        state_(State::None) {}
+        state_(State::None), packer_(stream_) {}
 
   ~RemoteSender() { CUDA_RUNTIME(cudaFreeHost(hostBuf_)); }
 
@@ -588,7 +590,7 @@ public:
       nvtxRangePush("RemoteSender::send_d2h");
       // pack data into device buffer
       assert(stream_.device() == domain_->gpu());
-      packer_.pack(stream_);
+      packer_.pack();
 
       // copy to host buffer
       assert(hostBuf_);
@@ -643,7 +645,6 @@ private:
 
   LocalDomain *domain_;
 
-  DeviceUnpacker unpacker_;
   char *hostBuf_;
 
   RcStream stream_;
@@ -653,13 +654,15 @@ private:
   enum class State { None, H2H, H2D };
   State state_;
 
+  DeviceUnpacker unpacker_;
+
 public:
-  RemoteRecver() : hostBuf_(nullptr) {}
+  RemoteRecver() = delete;
   RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu()),
-        state_(State::None) {
+        state_(State::None), unpacker_(stream_) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
@@ -720,7 +723,7 @@ public:
       // copy to device buffer
       CUDA_RUNTIME(cudaMemcpyAsync(unpacker_.data(), hostBuf_, unpacker_.size(),
                                    cudaMemcpyDefault, stream_));
-      unpacker_.unpack(stream_);
+      unpacker_.unpack();
       nvtxRangePop(); // RemoteRecver::recv_h2d
     }
   }
@@ -769,8 +772,6 @@ private:
 
   LocalDomain *domain_;
 
-  DevicePacker packer_;
-
   RcStream stream_;
   MPI_Request req_;
 
@@ -783,12 +784,15 @@ private:
 
   std::vector<Message> outbox_;
 
+  DevicePacker packer_;
+
 public:
-  CudaAwareMpiSender() {}
+  // CudaAwareMpiSender() {}
   CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                      LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu()), state_(State::None) {}
+        domain_(&domain), stream_(domain.gpu()), state_(State::None),
+        packer_(stream_) {}
 
   virtual void prepare(std::vector<Message> &outbox) override {
     packer_.prepare(domain_, outbox);
@@ -828,7 +832,7 @@ public:
   void send_pack() {
     nvtxRangePush("CudaAwareMpiSender::send_pack");
     assert(packer_.data());
-    packer_.pack(stream_);
+    packer_.pack();
     nvtxRangePop(); // CudaAwareMpiSender::send_pack
   }
 
@@ -872,7 +876,6 @@ private:
 
   LocalDomain *domain_;
 
-  DeviceUnpacker unpacker_;
   RcStream stream_;
   MPI_Request req_;
 
@@ -881,14 +884,16 @@ private:
     Recv,
     Unpack,
   };
-  State state_; // flattening
+  State state_;
+
+  DeviceUnpacker unpacker_;
 
 public:
-  CudaAwareMpiRecver() {}
+  CudaAwareMpiRecver() = delete;
   CudaAwareMpiRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                      LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu()), state_(State::None) {}
+        domain_(&domain), stream_(domain.gpu()), state_(State::None), unpacker_(stream_) {}
 
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
@@ -931,7 +936,7 @@ public:
   void recv_unpack() {
     assert(unpacker_.size());
     nvtxRangePush("CudaAwareMpiRecver::recv_unpack");
-    unpacker_.unpack(stream_);
+    unpacker_.unpack();
     nvtxRangePop(); // CudaAwareMpiRecver::recv_unpack
   }
 

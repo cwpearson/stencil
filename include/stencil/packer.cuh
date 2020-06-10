@@ -55,6 +55,8 @@
 #define LOG_FATAL(x) exit(1);
 #endif
 
+#define STENCIL_USE_CUDA_GRAPH 1
+
 inline void rand_sleep() {
   int ms = rand() % 10;
   std::this_thread::sleep_for(std::chrono::milliseconds(ms));
@@ -67,7 +69,7 @@ public:
                        const std::vector<Message> &messages) = 0;
 
   // pack
-  virtual void pack(cudaStream_t stream) = 0;
+  virtual void pack() = 0;
 
   // number of bytes
   virtual int64_t size() = 0;
@@ -82,7 +84,7 @@ public:
   virtual void prepare(LocalDomain *domain,
                        const std::vector<Message> &messages) = 0;
 
-  virtual void unpack(cudaStream_t stream) = 0;
+  virtual void unpack() = 0;
 
   virtual int64_t size() = 0;
   virtual void *data() = 0;
@@ -121,11 +123,64 @@ private:
 
   char *devBuf_;
 
+  cudaStream_t stream_; // an unowned stream
+  cudaGraph_t graph_;
+  cudaGraphExec_t instance_;
+
+  void launch_pack_kernels() {
+    // record packing operations
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+
+    int64_t offset = 0;
+    for (const auto &msg : dirs_) {
+      // pack from from +x interior
+      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*interior*/);
+      // send +x means recv into -x halo. +x halo size could be different
+      const Dim3 ext = domain_->halo_extent(msg.dir_ * -1);
+
+      if (ext.flatten() == 0) {
+        LOG_FATAL("asked to pack for direction "
+                  << msg.dir_
+                  << " but computed message size is 0, ext=" << ext);
+      }
+
+      LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext
+                                            << " pos=" << pos << " @ "
+                                            << offset);
+      const dim3 dimBlock = make_block_dim(ext, 512);
+      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / Dim3(dimBlock);
+      assert(offset < size_);
+
+      LOG_SPEW("DevicePacker::pack(): grid= "
+               << dimGrid.x << "," << dimGrid.y << "," << dimGrid.z << " block="
+               << dimBlock.x << "," << dimBlock.y << "," << dimBlock.z);
+      dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream_>>>(
+          &devBuf_[offset], domain_->dev_curr_datas(),
+          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
+          pos, ext);
+#if STENCIL_USE_CUDA_GRAPH == 0
+      // 900: not allowed while stream is capturing
+      CUDA_RUNTIME(cudaGetLastError());
+#endif
+      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
+        offset = next_align_of(offset, domain_->elem_size(qi));
+        // send +x means recv into -x halo. +x halo size could be different
+        offset += domain_->halo_bytes(msg.dir_ * -1, qi);
+      }
+    }
+  }
+
 public:
-  DevicePacker() : domain_(nullptr), size_(-1), devBuf_(0) {}
+  DevicePacker(cudaStream_t stream)
+      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL),
+        instance_(NULL) {}
+  ~DevicePacker() {
+    CUDA_RUNTIME(cudaGraphDestroy(graph_));
+    CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
+  }
 
   virtual void prepare(LocalDomain *domain,
-                       const std::vector<Message> &messages) override {
+                       const std::vector<Message> &messages) {
 
     domain_ = domain;
     dirs_ = messages;
@@ -153,51 +208,34 @@ public:
 
     // allocate the buffer for the packing
     CUDA_RUNTIME(cudaMalloc(&devBuf_, size_));
+
+/* if we are using the graph API, record all the kernel launches here, otherwise
+ * they will be done on-demand
+ */
+#if STENCIL_USE_CUDA_GRAPH == 1
+    assert(stream_ != 0 && "can't capture the NULL stream, unless cudaStreamPerThread");
+    // TODO: safer if thread-local?
+    CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal));
+    launch_pack_kernels();
+    CUDA_RUNTIME(cudaStreamEndCapture(stream_, &graph_));
+    CUDA_RUNTIME(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
+#else
+    // no other prep to do
+#endif
   }
 
-  virtual void pack(cudaStream_t stream) override {
+  virtual void pack() {
     assert(size_);
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-
-    int64_t offset = 0;
-    for (const auto &msg : dirs_) {
-      // pack from from +x interior
-      const Dim3 pos = domain_->halo_pos(msg.dir_, false /*interior*/);
-      // send +x means recv into -x halo. +x halo size could be different
-      const Dim3 ext = domain_->halo_extent(msg.dir_ * -1);
-
-      if (ext.flatten() == 0) {
-        LOG_FATAL("asked to pack for direction "
-                  << msg.dir_
-                  << " but computed message size is 0, ext=" << ext);
-      }
-
-      LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext
-                                            << " pos=" << pos << " @ "
-                                            << offset);
-      const dim3 dimBlock = make_block_dim(ext, 512);
-      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / Dim3(dimBlock);
-      assert(offset < size_);
-
-      LOG_SPEW("DevicePacker::pack(): grid= "
-               << dimGrid.x << "," << dimGrid.y << "," << dimGrid.z << " block="
-               << dimBlock.x << "," << dimBlock.y << "," << dimBlock.z);
-      dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream>>>(
-          &devBuf_[offset], domain_->dev_curr_datas(),
-          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
-          pos, ext);
-      CUDA_RUNTIME(cudaGetLastError());
-      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
-        offset = next_align_of(offset, domain_->elem_size(qi));
-        // send +x means recv into -x halo. +x halo size could be different
-        offset += domain_->halo_bytes(msg.dir_ * -1, qi);
-      }
-    }
+#if STENCIL_USE_CUDA_GRAPH == 1
+    CUDA_RUNTIME(cudaGraphLaunch(instance_, stream_));
+#else
+    launch_pack_kernels();
+#endif
   }
 
-  virtual int64_t size() override { return size_; }
+  virtual int64_t size() { return size_; }
 
-  virtual void *data() override { return devBuf_; }
+  virtual void *data() { return devBuf_; }
 };
 
 inline __device__ void
@@ -271,9 +309,49 @@ private:
 
   char *devBuf_;
 
-public:
-  DeviceUnpacker() : domain_(nullptr), size_(-1), devBuf_(0) {}
 
+  cudaStream_t stream_;
+  cudaGraph_t graph_;
+  cudaGraphExec_t instance_;
+
+  void launch_unpack_kernels() {
+    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+
+    int64_t offset = 0;
+    for (const auto &msg : dirs_) {
+
+      const Dim3 dir = msg.dir_ * -1; // unpack into opposite side as sent
+      const Dim3 ext = domain_->halo_extent(dir);
+      const Dim3 pos = domain_->halo_pos(dir, true /*exterior*/);
+
+      LOG_SPEW("DeviceUnpacker::unpack(): dir=" << msg.dir_ << " ext=" << ext
+                                                << " pos=" << pos << " @"
+                                                << offset);
+
+      const dim3 dimBlock = make_block_dim(ext, 512);
+      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+      dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream_>>>(
+          domain_->dev_curr_datas(), &devBuf_[offset],
+          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
+          pos, ext);
+#if STENCIL_USE_CUDA_GRAPH == 0
+// 900: operation not permitted while stream is capturing
+      CUDA_RUNTIME(cudaGetLastError());
+#endif
+      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
+        offset = next_align_of(offset, domain_->elem_size(qi));
+        offset += domain_->halo_bytes(dir, qi);
+      }
+    }
+  }
+
+public:
+  DeviceUnpacker(cudaStream_t stream) : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
+  ~DeviceUnpacker() {
+    CUDA_RUNTIME(cudaGraphDestroy(graph_));
+    CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
+  }
+  
   virtual void prepare(LocalDomain *domain,
                        const std::vector<Message> &messages) override {
     domain_ = domain;
@@ -303,35 +381,30 @@ public:
 
     // allocate the buffer that will be unpacked
     CUDA_RUNTIME(cudaMalloc(&devBuf_, size_));
+
+/* if we are using the graph API, record all the kernel launches here, otherwise
+ * they will be done on-demand
+ */
+#if STENCIL_USE_CUDA_GRAPH == 1
+    assert(stream_ != 0 && "can't capture the NULL stream, unless cudaStreamPerThread");
+    // TODO: safer if thread-local?
+    CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal));
+    launch_unpack_kernels();
+    CUDA_RUNTIME(cudaStreamEndCapture(stream_, &graph_));
+    CUDA_RUNTIME(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
+#else
+    // no other prep to do
+#endif
+
   }
 
-  virtual void unpack(cudaStream_t stream) override {
+  virtual void unpack() override {
     assert(size_);
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-
-    int64_t offset = 0;
-    for (const auto &msg : dirs_) {
-
-      const Dim3 dir = msg.dir_ * -1; // unpack into opposite side as sent
-      const Dim3 ext = domain_->halo_extent(dir);
-      const Dim3 pos = domain_->halo_pos(dir, true /*exterior*/);
-
-      LOG_SPEW("DeviceUnpacker::unpack(): dir=" << msg.dir_ << " ext=" << ext
-                                                << " pos=" << pos << " @"
-                                                << offset);
-
-      const dim3 dimBlock = make_block_dim(ext, 512);
-      const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream>>>(
-          domain_->dev_curr_datas(), &devBuf_[offset],
-          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
-          pos, ext);
-      CUDA_RUNTIME(cudaGetLastError());
-      for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
-        offset = next_align_of(offset, domain_->elem_size(qi));
-        offset += domain_->halo_bytes(dir, qi);
-      }
-    }
+#if STENCIL_USE_CUDA_GRAPH == 1
+    CUDA_RUNTIME(cudaGraphLaunch(instance_, stream_));
+#else
+    launch_unpack_kernels();
+#endif
   }
 
   virtual int64_t size() override { return size_; }
@@ -345,3 +418,5 @@ public:
 #undef LOG_WARN
 #undef LOG_ERROR
 #undef LOG_FATAL
+
+#undef STENCIL_USE_CUDA_GRAPH

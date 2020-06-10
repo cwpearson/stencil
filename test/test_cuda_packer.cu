@@ -2,6 +2,7 @@
 
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/packer.cuh"
+#include "stencil/rcstream.hpp"
 
 TEST_CASE("packer", "[packer]") {
   Dim3 arrSz(3, 4, 5);
@@ -26,21 +27,24 @@ TEST_CASE("packer", "[packer]") {
   msgs.push_back(Message(Dim3(1, 1, 1), 0, 0));
   msgs.push_back(Message(Dim3(0, 1, 1), 0, 0));
   msgs.push_back(Message(Dim3(0, 0, 1), 0, 0));
-  DevicePacker packer;
+
+  RcStream stream(0);
+
+  DevicePacker packer(stream);
   packer.prepare(&ld, msgs);
 
-  DeviceUnpacker unpacker;
+  DeviceUnpacker unpacker(stream);
   unpacker.prepare(&dst, msgs);
 
   REQUIRE(packer.size() == unpacker.size());
 
-  packer.pack(0);
+  packer.pack();
   CUDA_RUNTIME(cudaStreamSynchronize(0));
 
   CUDA_RUNTIME(cudaMemcpy(unpacker.data(), packer.data(), packer.size(),
                           cudaMemcpyDefault));
 
-  unpacker.unpack(0);
+  unpacker.unpack();
   CUDA_RUNTIME(cudaStreamSynchronize(0));
 }
 
@@ -65,6 +69,8 @@ TEST_CASE("packer multi-radius", "[packer]") {
   dst.add_data<double>();
   dst.realize();
 
+  RcStream stream(0);
+
   INFO("test expected size");
   // +x radius is 2, -x radius is 1
   // send in +x means sending 1x4x5 elements
@@ -75,10 +81,10 @@ TEST_CASE("packer multi-radius", "[packer]") {
   {
     std::vector<Message> msgs;
     msgs.push_back(Message(Dim3(1, 0, 0), 0, 0));
-    DevicePacker packer;
+    DevicePacker packer(stream);
     packer.prepare(&src, msgs);
 
-    DeviceUnpacker unpacker;
+    DeviceUnpacker unpacker(stream);
     unpacker.prepare(&dst, msgs);
 
     REQUIRE(packer.size() == 264);
@@ -90,21 +96,21 @@ TEST_CASE("packer multi-radius", "[packer]") {
     std::vector<Message> msgs;
     msgs.push_back(Message(Dim3(-1, 0,0), 0, 0));
     msgs.push_back(Message(Dim3(1, 0,0), 0, 0));
-    DevicePacker packer;
+    DevicePacker packer(stream);
     packer.prepare(&src, msgs);
 
-    DeviceUnpacker unpacker;
+    DeviceUnpacker unpacker(stream);
     unpacker.prepare(&dst, msgs);
 
     REQUIRE(packer.size() == unpacker.size());
 
-    packer.pack(0);
+    packer.pack();
     CUDA_RUNTIME(cudaStreamSynchronize(0));
 
     CUDA_RUNTIME(cudaMemcpy(unpacker.data(), packer.data(), packer.size(),
                             cudaMemcpyDefault));
 
-    unpacker.unpack(0);
+    unpacker.unpack();
     CUDA_RUNTIME(cudaStreamSynchronize(0));
   }
 }

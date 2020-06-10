@@ -24,15 +24,17 @@ void bench(size_t *rBytes, double *rPackTime, double *rUnpackTime,
   std::vector<Message> msgs;
   msgs.push_back(Message(dir, 0, 0));
 
-  DevicePacker packer;
-  DeviceUnpacker unpacker;
+  RcStream stream(0);
+
+  DevicePacker packer(stream);
+  DeviceUnpacker unpacker(stream);
   packer.prepare(&ld, msgs);
   unpacker.prepare(&ld, msgs);
 
   if (rBytes)
     *rBytes = packer.size();
 
-  RcStream stream(0);
+
   cudaEvent_t startEvent, stopEvent;
   CUDA_RUNTIME(cudaEventCreate(&startEvent));
   CUDA_RUNTIME(cudaEventCreate(&stopEvent));
@@ -41,7 +43,7 @@ void bench(size_t *rBytes, double *rPackTime, double *rUnpackTime,
   nvtxRangePush(ss.str().c_str());
   CUDA_RUNTIME(cudaEventRecord(startEvent, stream));
   for (int n = 0; n < nIters; ++n) {
-    packer.pack(stream);
+    packer.pack();
   }
   CUDA_RUNTIME(cudaEventRecord(stopEvent, stream));
   CUDA_RUNTIME(cudaStreamSynchronize(stream));
@@ -55,7 +57,7 @@ void bench(size_t *rBytes, double *rPackTime, double *rUnpackTime,
   nvtxRangePush(ss.str().c_str());
   CUDA_RUNTIME(cudaEventRecord(startEvent, stream));
   for (int n = 0; n < nIters; ++n) {
-    unpacker.unpack(stream);
+    unpacker.unpack();
   }
   CUDA_RUNTIME(cudaEventRecord(stopEvent, stream));
   CUDA_RUNTIME(cudaStreamSynchronize(stream));
