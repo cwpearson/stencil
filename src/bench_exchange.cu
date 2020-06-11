@@ -47,11 +47,16 @@ Statistics bench(const size_t nIters, const Dim3 &extent, const Radius &radius,
   return stats;
 }
 
+void report_header() {
+  std::cout << "name,count,trimean,stddev,min,avg,max\n";
+}
 
 void report(const std::string &cfg, Statistics &stats) {
-  std::cout << cfg << " " << stats.count() << " runs: "
-  << stats.trimean() << "+-" << stats.stddev() << " (min/avg/max=" << stats.min() << "/" << stats.avg() << "/"
-  << stats.max() << ")\n";
+  std::cout << std::scientific;
+  std::cout << cfg << "," << stats.count() << ","
+  << stats.trimean() << "," << stats.stddev() << "," << stats.min() << "," << stats.avg() << ","
+  << stats.max() << "\n";
+  std::cout << std::defaultfloat;
 }
 
 int main(int argc, char **argv) {
@@ -101,7 +106,9 @@ int main(int argc, char **argv) {
   // benchmark results
   Statistics stats;
 
-
+  if (0 == rank) {
+  report_header();
+  }
 
   // positive x-leaning, radius = 2
   radius = Radius::constant(0);
@@ -110,6 +117,7 @@ int main(int argc, char **argv) {
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
+    ss << "/px/r2";
     report(ss.str(), stats);
   }
 
@@ -121,6 +129,7 @@ int main(int argc, char **argv) {
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
+    ss << "/x/2";
     report(ss.str(), stats);
   }
 
@@ -136,6 +145,7 @@ int main(int argc, char **argv) {
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
+    ss << "/faces/2";
     report(ss.str(), stats);
   }
 
@@ -153,16 +163,22 @@ int main(int argc, char **argv) {
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
+    ss << "/" << "face&edge/2";
     report(ss.str(), stats);
   }
 
   // uniform, radius = 2
+  {
+  std::stringstream ss;
+  ss << ext;
+  ss << "/uniform/2";
+  nvtxRangePush(ss.str().c_str());
   radius = Radius::constant(2);
   stats = bench(nIters, ext, radius, gpusPerRank);
+  nvtxRangePop();
   if (0 == rank) {
-    std::stringstream ss;
-    ss << ext;
     report(ss.str(), stats);
+  }
   }
 
 #if STENCIL_USE_MPI == 1
