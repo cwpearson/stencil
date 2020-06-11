@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
 #endif
   bool useStaged = false;
 
-  Parser p;
+  argparse::Parser p;
   p.no_unrecognized();
   p.add_positional(x)->required();
   p.add_positional(y)->required();
@@ -149,7 +149,7 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-#if STENCIL_TIME == 1
+#if STENCIL_MEASURE_TIME == 1
     if (0 == rank) {
       std::string methodStr;
       if (methods && MethodFlags::CudaMpi) {
@@ -185,7 +185,7 @@ int main(int argc, char **argv) {
              dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
              dd.timeExchange_);
     }
-#endif // STENCIL_TIME
+#endif // STENCIL_MEASURE_TIME
 
   } // send domains out of scope before MPI_Finalize
 

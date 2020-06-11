@@ -6,14 +6,20 @@ TEST_CASE("radius") {
 
   Radius r0, r1;
 
-  r0 = Radius::constant_radius(0);
-  r1 = Radius::constant_radius(0);
 
-  REQUIRE(r0(0, 0, 0) == r1(0, 0, 0));
 
   SECTION("copy") {
-    Radius r3 = Radius::constant_radius(1);
+    Radius r3 = Radius::constant(1);
     Radius r2(r3);
     REQUIRE(r3 == r2);
+  }
+
+  SECTION("constant") {
+  r0 = Radius::constant(0);
+  r1 = Radius::constant(0);
+
+  REQUIRE(r0.dir(0, 0, 0) == r1.dir(0, 0, 0));
+  REQUIRE(r0.x(-1) == 0);
+  REQUIRE(r0.x(1) == 0);
   }
 }

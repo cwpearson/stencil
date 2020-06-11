@@ -73,7 +73,7 @@ init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
 #undef _at
 }
 
-TEST_CASE("exchange") {
+TEST_CASE("exchange1") {
 
   int rank;
   int size;

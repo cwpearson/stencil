@@ -22,9 +22,52 @@
 
 #include "tx_common.hpp"
 
-// #define ANY_LOUD
-// #define REGION_LOUD
-// #define REMOTE_LOUD
+#ifndef STENCIL_OUTPUT_LEVEL
+#define STENCIL_OUTPUT_LEVEL 0
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 0
+#define LOG_SPEW(x)                                                            \
+  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_SPEW(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 1
+#define LOG_DEBUG(x)                                                           \
+  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_DEBUG(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 2
+#define LOG_INFO(x)                                                            \
+  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_INFO(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 3
+#define LOG_WARN(x)                                                            \
+  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_WARN(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 4
+#define LOG_ERROR(x)                                                           \
+  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_ERROR(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 5
+#define LOG_FATAL(x)                                                           \
+  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
+  exit(1);
+#else
+#define LOG_FATAL(x) exit(1);
+#endif
 
 inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::hex << std::setfill('0'); // needs to be set only once
@@ -132,7 +175,8 @@ public:
                  LocalDomain &dstDomain)
       : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain),
         dstDomain_(&dstDomain), srcStream_(srcDomain.gpu()),
-        dstStream_(dstDomain.gpu()) {}
+        dstStream_(dstDomain.gpu()), packer_(srcStream_),
+        unpacker_(dstStream_) {}
 
   void prepare(std::vector<Message> &outbox) {
     packer_.prepare(srcDomain_, outbox);
@@ -150,7 +194,7 @@ public:
     assert(packer_.size() == unpacker_.size());
 
     // pack data in source stream
-    packer_.pack(srcStream_);
+    packer_.pack();
 
     // copy from src device to dst device
     const int dstDev = dstDomain_->gpu();
@@ -163,7 +207,7 @@ public:
     CUDA_RUNTIME(cudaSetDevice(dstDomain_->gpu()));
     CUDA_RUNTIME(cudaStreamWaitEvent(dstStream_, event_, 0 /*flags*/));
 
-    unpacker_.unpack(dstStream_);
+    unpacker_.unpack();
     nvtxRangePop(); // PeerCopySender::send
   }
 
@@ -230,9 +274,6 @@ public:
   void start_prepare(size_t numBytes) {
     const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
-    // fprintf(stderr, "ColoDevSend::start_prepare: srcDev=%d (r%dg%d to
-    // r%dg%d)\n", srcDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
-
     // create an event and associated handle
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
     CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess |
@@ -245,14 +286,11 @@ public:
 
     // Recieve the IPC mem handle
     const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload);
-    // fprintf(stderr, "ColoDevSend::start_prepare: mem handle tag=%d\n",
-    // memHandleTag);
     assert(memHandleTag < tagUb_);
     MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, memHandleTag,
               MPI_COMM_WORLD, &memReq_);
     // Retrieve the destination device id
     const int devTag = make_tag<MsgKind::ColocatedDev>(payload);
-    // fprintf(stderr, "ColoDevSend::start_prepare: dev tag=%d\n", devTag);
     assert(devTag < tagUb_);
     MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_, devTag, MPI_COMM_WORLD, &idReq_);
 
@@ -263,8 +301,6 @@ public:
   void finish_prepare() {
     // block until we have recved the device ID
     MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
-    // fprintf(stderr, "ColoDevSend::finish_prepare: srcDev=%d dstDev=%d (r%dg%d
-    // to r%dg%d)\n", srcDev_, dstDev_, srcRank_, srcGPU_, dstRank_, dstGPU_);
 
     // wait for recv mem handle
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
@@ -387,21 +423,24 @@ private:
   ColocatedDeviceSender sender_;
 
 public:
-  ColocatedHaloSender() {}
+  // ColocatedHaloSender() {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       LocalDomain &domain)
-      : domain_(&domain), stream_(domain.gpu()),
+      : domain_(&domain), stream_(domain.gpu()), packer_(stream_),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
   void start_prepare(const std::vector<Message> &outbox) {
     packer_.prepare(domain_, outbox);
+    if (0 == packer_.size()) {
+      std::cerr << "WARN: 0-size ColocatedHaloSender was created\n";
+    }
     sender_.start_prepare(packer_.size());
   }
 
   void finish_prepare() { sender_.finish_prepare(); }
 
   void send() noexcept {
-    packer_.pack(stream_);
+    packer_.pack();
     sender_.send(packer_.data(), stream_);
   }
 
@@ -421,15 +460,18 @@ private:
   DeviceUnpacker unpacker_;
 
 public:
-  ColocatedHaloRecver() {}
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
         stream_(domain.gpu()),
-        recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
+        recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
+        unpacker_(stream_) {}
 
   void start_prepare(const std::vector<Message> &inbox) {
     unpacker_.prepare(domain_, inbox);
+    if (0 == unpacker_.size()) {
+      std::cerr << "WARN: a 0-size ColocatedHaloRecver was created\n";
+    }
     recver_.start_prepare(unpacker_.data());
   }
 
@@ -438,7 +480,7 @@ public:
   void recv() {
     assert(stream_.device() == domain_->gpu());
     recver_.wait(stream_);
-    unpacker_.unpack(stream_);
+    unpacker_.unpack();
   }
 
   void wait() noexcept {
@@ -458,7 +500,6 @@ private:
 
   LocalDomain *domain_;
 
-  DevicePacker packer_;
   char *hostBuf_;
 
   RcStream stream_;
@@ -467,41 +508,49 @@ private:
   enum class State { None, D2H, Wait };
   State state_;
 
+  DevicePacker packer_;
+
 public:
-  RemoteSender() : hostBuf_(nullptr) {}
+  // RemoteSender() : hostBuf_(nullptr) {}
   RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu()),
-        state_(State::None) {}
+        state_(State::None), packer_(stream_) {}
 
   ~RemoteSender() { CUDA_RUNTIME(cudaFreeHost(hostBuf_)); }
 
   /*! Prepare to send a set of messages whose direction vectors are store in
-   * outbox
+   outbox.
+
+   If the outbox is empty, the packer may be size 0
    */
   virtual void prepare(std::vector<Message> &outbox) override {
-#ifdef REMOTE_LOUD
-    std::cerr << "RemoteSender::prepare(): " << outbox.size() << " messages\n";
-#endif
+
+    LOG_INFO(outbox.size() << "-size outbox provided to RemoteSender "
+                           << "r" << srcRank_ << "d" << srcGPU_ << "->"
+                           << "r" << dstRank_ << "d" << dstGPU_);
+
     packer_.prepare(domain_, outbox);
-    assert(packer_.size());
-    assert(packer_.data());
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-// allocate device & host buffers
-#ifdef REMOTE_LOUD
-    std::cerr << "RemoteSender::prepare: alloc " << packer_.size() << "\n";
-#endif
-    CUDA_RUNTIME(
-        cudaHostAlloc(&hostBuf_, packer_.size(), cudaHostAllocDefault));
-    assert(hostBuf_);
+    LOG_INFO(packer_.size() << "B RemoteSender was prepared: "
+                            << "r" << srcRank_ << "d" << srcGPU_ << "->"
+                            << "r" << dstRank_ << "d" << dstGPU_);
 
-    // fprintf(stderr, "RemoteSender::prepare r%dg%d -> r%dg%d %luB\n",
-    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+    if (0 != packer_.size()) {
+      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+
+      // allocate device & host buffers
+      CUDA_RUNTIME(
+          cudaHostAlloc(&hostBuf_, packer_.size(), cudaHostAllocDefault));
+      assert(hostBuf_);
+    }
   }
 
-  virtual void send() override { send_d2h(); }
+  virtual void send() override {
+    state_ = State::D2H;
+    send_d2h();
+  }
 
   virtual bool active() override {
     assert(State::None != state_);
@@ -513,69 +562,75 @@ public:
     if (state_ == State::D2H) {
       return d2h_done();
     } else {
-      assert(0);
       __builtin_unreachable();
+      LOG_FATAL("unreachable");
     }
   }
 
   virtual void next() override {
     if (State::D2H == state_) {
+      state_ = State::Wait;
       send_h2h();
     } else {
-      assert(0);
       __builtin_unreachable();
+      LOG_FATAL("unreachable");
     }
   }
 
   virtual void wait() override {
     assert(State::Wait == state_);
-    MPI_Wait(&req_, MPI_STATUS_IGNORE);
+    if (packer_.size()) {
+      MPI_Wait(&req_, MPI_STATUS_IGNORE);
+    }
     state_ = State::None;
   }
 
   void send_d2h() {
-    state_ = State::D2H;
-    nvtxRangePush("RemoteSender::send_d2h");
+    if (packer_.size()) {
+      nvtxRangePush("RemoteSender::send_d2h");
+      // pack data into device buffer
+      assert(stream_.device() == domain_->gpu());
+      packer_.pack();
 
-    // pack data into device buffer
-    assert(stream_.device() == domain_->gpu());
-    // std::cerr << "RemoteSender::send_d2h: rank=" << srcRank_ << " pack on gpu
-    // " << domain_->gpu() << "\n";
-    packer_.pack(stream_);
-
-    // copy to host buffer
-    assert(hostBuf_);
-    CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, packer_.data(), packer_.size(),
-                                 cudaMemcpyDefault, stream_));
-    nvtxRangePop(); // RemoteSender::send_d2h
+      // copy to host buffer
+      assert(hostBuf_);
+      CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, packer_.data(), packer_.size(),
+                                   cudaMemcpyDefault, stream_));
+      nvtxRangePop(); // RemoteSender::send_d2h
+    }
   }
 
   bool is_d2h() const noexcept { return State::D2H == state_; }
 
   bool d2h_done() {
     assert(State::D2H == state_);
-    cudaError_t err = cudaStreamQuery(stream_);
-    if (cudaSuccess == err) {
-      return true;
-    } else if (cudaErrorNotReady == err) {
-      return false;
+    if (packer_.size()) {
+      cudaError_t err = cudaStreamQuery(stream_);
+      if (cudaSuccess == err) {
+        return true;
+      } else if (cudaErrorNotReady == err) {
+        return false;
+      } else {
+        CUDA_RUNTIME(err);
+        __builtin_unreachable();
+      }
     } else {
-      CUDA_RUNTIME(err);
-      __builtin_unreachable();
+      return true;
     }
   }
 
   void send_h2h() {
-    state_ = State::Wait;
-    nvtxRangePush("RemoteSender::send_h2h");
-    assert(hostBuf_);
-    assert(packer_.size());
-    assert(srcGPU_ < 8);
-    assert(dstGPU_ < 8);
-    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, tag, MPI_COMM_WORLD,
-              &req_);
-    nvtxRangePop(); // RemoteSender::send_h2h
+    if (packer_.size()) {
+      nvtxRangePush("RemoteSender::send_h2h");
+      assert(hostBuf_);
+      assert(packer_.size());
+      assert(srcGPU_ < 8);
+      assert(dstGPU_ < 8);
+      const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
+      MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, tag,
+                MPI_COMM_WORLD, &req_);
+      nvtxRangePop(); // RemoteSender::send_h2h
+    }
   }
 };
 
@@ -590,7 +645,6 @@ private:
 
   LocalDomain *domain_;
 
-  DeviceUnpacker unpacker_;
   char *hostBuf_;
 
   RcStream stream_;
@@ -600,13 +654,15 @@ private:
   enum class State { None, H2H, H2D };
   State state_;
 
+  DeviceUnpacker unpacker_;
+
 public:
-  RemoteRecver() : hostBuf_(nullptr) {}
+  RemoteRecver() = delete;
   RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
         domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu()),
-        state_(State::None) {
+        state_(State::None), unpacker_(stream_) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
@@ -617,17 +673,22 @@ public:
    */
   virtual void prepare(std::vector<Message> &inbox) override {
     unpacker_.prepare(domain_, inbox);
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    if (0 == unpacker_.size()) {
+      LOG_INFO("0-size RemoteRecver was prepared");
+    } else {
+      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
-    // allocate device & host buffers
-    CUDA_RUNTIME(
-        cudaHostAlloc(&hostBuf_, unpacker_.size(), cudaHostAllocDefault));
-    assert(hostBuf_);
-    // fprintf(stderr, "RemoteRecver::prepare r%dg%d -> r%dg%d %luB\n",
-    // srcRank_, srcGPU_, dstRank_, dstGPU_, bufSize_);
+      // allocate device & host buffers
+      CUDA_RUNTIME(
+          cudaHostAlloc(&hostBuf_, unpacker_.size(), cudaHostAllocDefault));
+      assert(hostBuf_);
+    }
   }
 
-  virtual void recv() override { recv_h2h(); }
+  virtual void recv() override {
+    state_ = State::H2H;
+    recv_h2h();
+  }
 
   virtual bool active() override {
     assert(State::None != state_);
@@ -641,6 +702,7 @@ public:
 
   virtual void next() override {
     if (State::H2H == state_) {
+      state_ = State::H2D;
       recv_h2d();
     } else {
       assert(0);
@@ -650,47 +712,52 @@ public:
 
   virtual void wait() override {
     assert(State::H2D == state_);
-    CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    if (unpacker_.size()) {
+      CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    }
   }
 
   void recv_h2d() {
-    nvtxRangePush("RemoteRecver::recv_h2d");
-    state_ = State::H2D;
-
-    // copy to device buffer
-    CUDA_RUNTIME(cudaMemcpyAsync(unpacker_.data(), hostBuf_, unpacker_.size(),
-                                 cudaMemcpyDefault, stream_));
-
-    unpacker_.unpack(stream_);
-    nvtxRangePop(); // RemoteRecver::recv_h2d
+    if (unpacker_.size()) {
+      nvtxRangePush("RemoteRecver::recv_h2d");
+      // copy to device buffer
+      CUDA_RUNTIME(cudaMemcpyAsync(unpacker_.data(), hostBuf_, unpacker_.size(),
+                                   cudaMemcpyDefault, stream_));
+      unpacker_.unpack();
+      nvtxRangePop(); // RemoteRecver::recv_h2d
+    }
   }
 
   bool is_h2h() const { return State::H2H == state_; }
 
   bool h2h_done() {
     assert(State::H2H == state_);
-    int flag;
-    MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
-    if (flag) {
-      return true;
+    if (unpacker_.size()) {
+      int flag;
+      MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
+      if (flag) {
+        return true;
+      } else {
+        return false;
+      }
     } else {
-      return false;
+      return true;
     }
   }
 
   void recv_h2h() {
-    nvtxRangePush("RemoteRecver::recv_h2h");
-    state_ = State::H2H;
-    assert(hostBuf_);
-    assert(unpacker_.size());
-    assert(srcGPU_ < 8);
-    assert(dstGPU_ < 8);
-    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    int numBytes = unpacker_.size();
-    assert(numBytes <= std::numeric_limits<int>::max());
-    MPI_Irecv(hostBuf_, int(numBytes), MPI_BYTE, srcRank_, tag, MPI_COMM_WORLD,
-              &req_);
-    nvtxRangePop(); // RemoteRecver::recv_h2h
+    if (unpacker_.size()) {
+      nvtxRangePush("RemoteRecver::recv_h2h");
+      assert(hostBuf_);
+      assert(srcGPU_ < 8);
+      assert(dstGPU_ < 8);
+      const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
+      int numBytes = unpacker_.size();
+      assert(numBytes <= std::numeric_limits<int>::max());
+      MPI_Irecv(hostBuf_, int(numBytes), MPI_BYTE, srcRank_, tag,
+                MPI_COMM_WORLD, &req_);
+      nvtxRangePop(); // RemoteRecver::recv_h2h
+    }
   }
 };
 
@@ -705,8 +772,6 @@ private:
 
   LocalDomain *domain_;
 
-  DevicePacker packer_;
-
   RcStream stream_;
   MPI_Request req_;
 
@@ -719,18 +784,27 @@ private:
 
   std::vector<Message> outbox_;
 
+  DevicePacker packer_;
+
 public:
-  CudaAwareMpiSender() {}
+  // CudaAwareMpiSender() {}
   CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                      LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu()), state_(State::None) {}
+        domain_(&domain), stream_(domain.gpu()), state_(State::None),
+        packer_(stream_) {}
 
   virtual void prepare(std::vector<Message> &outbox) override {
     packer_.prepare(domain_, outbox);
+    if (0 == packer_.size()) {
+      LOG_FATAL("a 0-size CudaAwareMpiSender was prepared");
+    }
   }
 
-  virtual void send() override { send_pack(); }
+  virtual void send() override {
+    state_ = State::Pack;
+    send_pack();
+  }
 
   virtual bool active() override { return State::Send != state_; }
 
@@ -741,6 +815,7 @@ public:
 
   virtual void next() override {
     if (State::Pack == state_) {
+      state_ = State::Send;
       send_d2d();
     } else {
       assert(0);
@@ -756,15 +831,15 @@ public:
 
   void send_pack() {
     nvtxRangePush("CudaAwareMpiSender::send_pack");
-    state_ = State::Pack;
     assert(packer_.data());
-    packer_.pack(stream_);
+    packer_.pack();
     nvtxRangePop(); // CudaAwareMpiSender::send_pack
   }
 
   bool is_pack() const noexcept { return state_ == State::Pack; }
 
   bool pack_done() {
+    assert(packer_.size());
     cudaError_t err = cudaStreamQuery(stream_);
     if (cudaSuccess == err) {
       return true;
@@ -772,13 +847,13 @@ public:
       return false;
     } else {
       CUDA_RUNTIME(err);
-      exit(EXIT_FAILURE);
+      LOG_FATAL("cuda error");
     }
   }
 
   void send_d2d() {
+    assert(packer_.size());
     nvtxRangePush("CudaAwareMpiSender::send_d2d");
-    state_ = State::Send;
     assert(packer_.data());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
@@ -801,7 +876,6 @@ private:
 
   LocalDomain *domain_;
 
-  DeviceUnpacker unpacker_;
   RcStream stream_;
   MPI_Request req_;
 
@@ -810,23 +884,31 @@ private:
     Recv,
     Unpack,
   };
-  State state_; // flattening
+  State state_;
+
+  DeviceUnpacker unpacker_;
 
 public:
-  CudaAwareMpiRecver() {}
+  CudaAwareMpiRecver() = delete;
   CudaAwareMpiRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                      LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu()), state_(State::None) {}
+        domain_(&domain), stream_(domain.gpu()), state_(State::None), unpacker_(stream_) {}
 
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
    */
   void prepare(std::vector<Message> &inbox) {
     unpacker_.prepare(domain_, inbox);
+    if (0 == unpacker_.size()) {
+      LOG_FATAL("a 0-size CudaAwareMpiRecver was created");
+    }
   }
 
-  virtual void recv() override { recv_d2d(); }
+  virtual void recv() override {
+    state_ = State::Recv;
+    recv_d2d();
+  }
 
   virtual bool active() override {
     assert(State::None != state_);
@@ -837,28 +919,31 @@ public:
 
   virtual void next() override {
     if (State::Recv == state_) {
+      state_ = State::Unpack;
       recv_unpack();
     } else {
-      assert(0);
+      LOG_FATAL("unreachable");
       __builtin_unreachable();
     }
   }
 
   virtual void wait() override {
+    assert(unpacker_.size());
     assert(State::Unpack == state_);
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
   }
 
   void recv_unpack() {
+    assert(unpacker_.size());
     nvtxRangePush("CudaAwareMpiRecver::recv_unpack");
-    state_ = State::Unpack;
-    unpacker_.unpack(stream_);
+    unpacker_.unpack();
     nvtxRangePop(); // CudaAwareMpiRecver::recv_unpack
   }
 
   bool is_d2d() const { return state_ == State::Recv; }
 
   bool d2d_done() {
+    assert(unpacker_.size());
     int flag;
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
@@ -870,8 +955,8 @@ public:
   }
 
   void recv_d2d() {
+    assert(unpacker_.size());
     nvtxRangePush("CudaAwareMpiRecver::recv_d2d");
-    state_ = State::Recv;
     assert(unpacker_.data());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
@@ -883,5 +968,9 @@ public:
   }
 };
 
-#undef ANY_LOUD
-#undef REGION_LOUD
+#undef LOG_SPEW
+#undef LOG_DEBUG
+#undef LOG_INFO
+#undef LOG_WARN
+#undef LOG_ERROR
+#undef LOG_FATAL

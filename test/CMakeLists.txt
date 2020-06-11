@@ -17,7 +17,8 @@ if (CMAKE_CUDA_COMPILER)
       test_cuda_align.cu
       test_cuda_allocator.cu
       test_cuda_array.cu 
-      test_derivative.cu 
+      test_derivative.cu
+      test_exchange.cu
       test_cuda_gpu_topo.cu 
       test_cuda_local_domain.cu 
       test_cuda_pack.cu 
@@ -32,7 +33,8 @@ endif()
 
 if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
     add_executable(test_cuda_mpi test_cuda_mpi_main.cu
-      test_distributed_domain.cu
+      test_cuda_mpi_distributed_domain.cu
+      test_cuda_mpi_exchange.cu
       test_cuda_mpi_colocatedtx.cu
       test_cuda_mpi_cudaipc.cu
       test_cuda_aware_mpi.cu

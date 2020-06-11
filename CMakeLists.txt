@@ -7,6 +7,8 @@ cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
 
 project(stencil LANGUAGES CXX VERSION 0.1.0.0)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 include(CheckLanguage)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
@@ -16,6 +18,14 @@ option(USE_CUDA "compile with CUDA support" ON)
 option(USE_CUDA_AWARE_MPI "assume CUDA-aware MPI support" OFF)
 option(MEASURE_TIMINGS "measure phase elapsed time in library" OFF)
 option(LOUD "print a lot of things" ON)
+
+if(NOT DEFINED STENCIL_OUTPUT_LEVEL)
+message(STATUS "STENCIL_OUTPUT_LEVEL not defined, setting to INFO")
+set(STENCIL_OUTPUT_LEVEL INFO)
+endif()
+
+
+
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
 include("${CMAKE_CURRENT_LIST_DIR}/cmake/GetGitRevisionDescription.cmake")
@@ -46,13 +56,40 @@ endif()
 add_library(stencil INTERFACE)
 add_library(stencil::stencil ALIAS stencil)
 
+if (STENCIL_OUTPUT_LEVEL MATCHES SPEW)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=0)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES DEBUG)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=1)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES INFO)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=2)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES WARN)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=3)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES ERROR)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=4)
+elseif (STENCIL_OUTPUT_LEVEL MATCHES FATAL)
+  target_compile_definitions(stencil INTERFACE STENCIL_OUTPUT_LEVEL=5)
+else()
+  message(FATAL_ERROR "unrecognized value of STENCIL_OUTPUT_LEVEL: "  ${STENCIL_OUTPUT_LEVEL}  ", must be one of SPEW DEBUG INFO WARN ERROR FATAL")
+endif()
+
 target_compile_features(stencil INTERFACE cxx_std_11)
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   target_compile_options(
     stencil
     INTERFACE
-    $<$<COMPILE_LANGUAGE:CUDA>:-G>
+    $<$<COMPILE_LANGUAGE:CUDA>:
+     -G
+     -Xcompiler=-fno-omit-frame-pointer
+    >
+    $<$<COMPILE_LANGUAGE:CXX>:
+     -fno-omit-frame-pointer
+    >
+  )
+  target_compile_options(
+    stencil
+    INTERFACE
+    -O0
   )
 elseif (CMAKE_BUILD_TYPE MATCHES Release)
   target_compile_options(
@@ -71,11 +108,11 @@ else()
 endif()
 
 if (MEASURE_TIMINGS)
-  message(STATUS "MEASURE_TIMINGS=ON, compiling with -DSTENCIL_TIME=1")
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_TIME=1)
+  message(STATUS "MEASURE_TIMINGS=ON, compiling with -DSTENCIL_MEASURE_TIME=1")
+  target_compile_definitions(stencil INTERFACE -DSTENCIL_MEASURE_TIME=1)
 else()
-  message(STATUS "MEASURE_TIMINGS=OFF, compiling with -DSTENCIL_TIME=0")
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_TIME=0)
+  message(STATUS "MEASURE_TIMINGS=OFF, compiling with -DSTENCIL_MEASURE_TIME=0")
+  target_compile_definitions(stencil INTERFACE -DSTENCIL_MEASURE_TIME=0)
 endif()
 
 if (LOUD)

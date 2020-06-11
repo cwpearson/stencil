@@ -3,11 +3,59 @@
 #include <iostream>
 //#include <mpi.h>
 
+#include "stencil/accessor.hpp"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
 #include "stencil/pack_kernel.cuh"
+#include "stencil/radius.hpp"
 #include "stencil/rect3.hpp"
-#include "stencil/accessor.hpp"
+
+#ifndef STENCIL_OUTPUT_LEVEL
+#define STENCIL_OUTPUT_LEVEL 0
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 0
+#define LOG_SPEW(x)                                                            \
+  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_SPEW(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 1
+#define LOG_DEBUG(x)                                                           \
+  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_DEBUG(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 2
+#define LOG_INFO(x)                                                            \
+  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_INFO(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 3
+#define LOG_WARN(x)                                                            \
+  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_WARN(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 4
+#define LOG_ERROR(x)                                                           \
+  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#else
+#define LOG_ERROR(x)
+#endif
+
+#if STENCIL_OUTPUT_LEVEL <= 5
+#define LOG_FATAL(x)                                                           \
+  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
+  exit(1);
+#else
+#define LOG_FATAL(x) exit(1);
+#endif
 
 class DistributedDomain;
 
@@ -38,7 +86,7 @@ private:
   Dim3 origin_;
 
   //!< radius of stencils that will be applied
-  size_t radius_;
+  Radius radius_;
 
   //!< backing info for the actual data I have
   // host versions
@@ -92,9 +140,9 @@ public:
     return int64_t(currDataPtrs_.size());
   }
 
-  const Dim3 &origin() const noexcept {
-    return origin_;
-  }
+
+  
+  const Dim3 &origin() const noexcept { return origin_; }
 
   /*! Add an untyped data field with an element size of n.
 
@@ -112,13 +160,15 @@ public:
     return DataHandle<T>(add_data(sizeof(T)), name);
   }
 
-
-
   /*! \brief set the radius. Should only be called by DistributedDomain
+  TODO friend class
    */
-  void set_radius(size_t r) { radius_ = r; }
+  void set_radius(size_t r) { radius_ = Radius::constant(r); }
+  void set_radius(const Radius &r) { 
+    LOG_SPEW("in " << __FUNCTION__);
+    radius_ = r; }
 
-  size_t radius() const noexcept { return radius_; }
+  const Radius &radius() const noexcept { return radius_; }
 
   /*! \brief retrieve a pointer to current domain values (to read in stencil)
    */
@@ -159,79 +209,127 @@ public:
     return nextDataPtrs_[idx];
   }
 
-  template<typename T> Accessor<T> get_curr_accessor(const DataHandle<T> &dh) const noexcept {
+  template <typename T>
+  Accessor<T> get_curr_accessor(const DataHandle<T> &dh) const noexcept {
     T *raw = get_curr(dh);
 
     // the origin stored in the localdomain does not include the halo,
     // but the accessor needs to know how to skip the halo region
     Dim3 org = origin();
-    org.x -= radius_;
-    org.y -= radius_;
-    org.z -= radius_;
+    org.x -= radius_.x(-1);
+    org.y -= radius_.y(-1);
+    org.z -= radius_.z(-1);
 
     // the total allocation size, for indexing in the accessor
     Dim3 pitch = sz_;
-    pitch.x += 2 * radius_;
-    pitch.y += 2 * radius_;
-    pitch.z += 2 * radius_;
+    pitch.x += radius_.x(-1) + radius_.x(1);
+    pitch.y += radius_.y(-1) + radius_.y(1);
+    pitch.z += radius_.z(-1) + radius_.z(1);
 
     return Accessor<T>(raw, org, pitch);
   }
- 
- /* return the coordinates of the compute region (not including the halo)
- */
+
+  /* return the coordinates of the compute region (not including the halo)
+   */
   Rect3 get_compute_region() const noexcept {
     Dim3 lo = origin();
     Dim3 hi = origin() + size();
     return Rect3(lo, hi);
   }
 
- /* return the coordinates of the whole domain, including the halo
- */
+  /* return the coordinates of the whole domain, including the halo
+   */
   Rect3 get_full_region() const noexcept {
     Dim3 lo = origin();
     Dim3 hi = origin() + size();
-    lo.x -= radius_;
-    lo.y -= radius_;
-    lo.z -= radius_;
-    hi.x += radius_;
-    hi.y += radius_;
-    hi.z += radius_;
+    lo.x -= radius_.dir(-1, 0, 0);
+    lo.y -= radius_.dir(0, -1, 0);
+    lo.z -= radius_.dir(0, 0, -1);
+    hi.x += radius_.dir(1, 0, 0);
+    hi.y += radius_.dir(0, 1, 0);
+    hi.z += radius_.dir(0, 0, 1);
     return Rect3(lo, hi);
   }
 
+#if 0
   // return the position of the halo relative to get_data() in direction `dir`
   Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
     Dim3 ret;
     assert(dir.all_gt(-2));
     assert(dir.all_lt(2));
 
+    // +xhalo is the left edge + -x radius + the interior
+    // +x interior is just the left edge + interior size
     if (1 == dir.x) {
-      ret.x = sz_.x + (halo ? radius_ : 0);
+      ret.x = sz_.x + (halo ? radius_.x(-1) : 0);
     } else if (-1 == dir.x) {
-      ret.x = halo ? 0 : radius_;
+      ret.x = halo ? 0 : radius_.x(-1);
     } else if (0 == dir.x) {
-      ret.x = radius_;
+      ret.x = radius_.x(-1);
     } else {
       __builtin_unreachable();
     }
 
     if (1 == dir.y) {
-      ret.y = sz_.y + (halo ? radius_ : 0);
+      ret.y = sz_.y + (halo ? radius_.y(-1) : 0);
     } else if (-1 == dir.y) {
-      ret.y = halo ? 0 : radius_;
+      ret.y = halo ? 0 : radius_.y(-1);
     } else if (0 == dir.y) {
-      ret.y = radius_;
+      ret.y = radius_.y(-1);
     } else {
       __builtin_unreachable();
     }
 
     if (1 == dir.z) {
-      ret.z = sz_.z + (halo ? radius_ : 0);
+      ret.z = sz_.z + (halo ? radius_.z(-1) : 0);
     } else if (-1 == dir.z) {
-      ret.z = halo ? 0 : radius_;
+      ret.z = halo ? 0 : radius_.z(-1);
     } else if (0 == dir.z) {
-      ret.z = radius_;
+      ret.z = radius_.z(-1);
+    } else {
+      __builtin_unreachable();
+    }
+
+    return ret;
+  }
+  #endif
+
+  // return the position of the halo relative to get_data() on the `dir` side of the
+  // LocalDomain (e.g., dir [1,0,0] returns the position of the region on the +x side)
+  Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
+    assert(dir.all_gt(-2));
+    assert(dir.all_lt(2));
+
+    Dim3 ret;
+
+    // +xhalo is the left edge + -x radius + the interior
+    // +x interior is just the left edge + interior size
+    if (1 == dir.x) {
+      ret.x = sz_.x + (halo ? radius_.x(-1) : 0);
+    } else if (-1 == dir.x) {
+      ret.x = halo ? 0 : radius_.x(-1);
+    } else if (0 == dir.x) {
+      ret.x = radius_.x(-1);
+    } else {
+      __builtin_unreachable();
+    }
+
+    if (1 == dir.y) {
+      ret.y = sz_.y + (halo ? radius_.y(-1) : 0);
+    } else if (-1 == dir.y) {
+      ret.y = halo ? 0 : radius_.y(-1);
+    } else if (0 == dir.y) {
+      ret.y = radius_.y(-1);
+    } else {
+      __builtin_unreachable();
+    }
+
+    if (1 == dir.z) {
+      ret.z = sz_.z + (halo ? radius_.z(-1) : 0);
+    } else if (-1 == dir.z) {
+      ret.z = halo ? 0 : radius_.z(-1);
+    } else if (0 == dir.z) {
+      ret.z = radius_.z(-1);
     } else {
       __builtin_unreachable();
     }
@@ -239,18 +337,20 @@ public:
     return ret;
   }
 
-  // used by some placement code to compute a hypothetical communication cost
+  /* get the point-size of the halo region on side `dir`, with a compute region of size `sz` and a kernel radius `radius`.
+  dir=[0,0,0] returns sz
+  */
   static Dim3 halo_extent(const Dim3 &dir, const Dim3 &sz,
-                          const size_t radius) {
+                          const Radius &radius) {
     assert(dir.x >= -1 && dir.x <= 1);
     assert(dir.y >= -1 && dir.y <= 1);
     assert(dir.z >= -1 && dir.z <= 1);
     Dim3 ret;
-
-    ret.x = (dir.x != 0) ? radius : sz.x;
-    ret.y = (dir.y != 0) ? radius : sz.y;
-    ret.z = (dir.z != 0) ? radius : sz.z;
-
+    
+    ret.x = (0 == dir.x) ? sz.x : radius.x(dir.x);
+    ret.y = (0 == dir.y) ? sz.y : radius.y(dir.y);
+    ret.z = (0 == dir.z) ? sz.z : radius.z(dir.z);
+    LOG_SPEW("ret=" << ret << " sz=" << sz);
     return ret;
   }
 
@@ -269,14 +369,16 @@ public:
 
   // return the 3d size of the actual allocation, in terms of elements
   Dim3 raw_size() const noexcept {
-    return Dim3(sz_.x + 2 * radius_, sz_.y + 2 * radius_, sz_.z + 2 * radius_);
+    return Dim3(sz_.x + radius_.x(-1) + radius_.x(1),
+                sz_.y + radius_.y(-1) + radius_.y(1),
+                sz_.z + radius_.z(-1) + radius_.z(1));
   }
 
   // the GPU this domain is on
   int gpu() const { return dev_; }
 
   /* Swap current and next pointers
-  */
+   */
   void swap() noexcept {
     assert(currDataPtrs_.size() == nextDataPtrs_.size());
     for (size_t i = 0; i < currDataPtrs_.size(); ++i) {
@@ -305,7 +407,7 @@ public:
     CUDA_RUNTIME(
         cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
 
-    float *ptr = reinterpret_cast<float*>(hostBuf.data());
+    float *ptr = reinterpret_cast<float *>(hostBuf.data());
 
     // free device buffer
     CUDA_RUNTIME(cudaFree(devBuf));
@@ -314,7 +416,7 @@ public:
   }
 
   /*! Copy the compute region to the host
-  */
+   */
   std::vector<unsigned char> interior_to_host(const size_t qi // quantity index
                                               ) const {
 
@@ -324,17 +426,18 @@ public:
   }
 
   /*! Copy an entire quantity, including halo region, to host
-  */
+   */
   std::vector<unsigned char> quantity_to_host(const size_t qi // quantity index
                                               ) const {
     Dim3 allocSz = sz_;
-    allocSz.x += 2 * radius_;
-    allocSz.y += 2 * radius_;
-    allocSz.z += 2 * radius_;
+    allocSz.x += radius_.x(-1) + radius_.x(1);
+    allocSz.y += radius_.y(-1) + radius_.y(1);
+    allocSz.z += radius_.z(-1) + radius_.z(1);
     return region_to_host(Dim3(0, 0, 0), allocSz, qi);
   }
 
   void realize() {
+    LOG_SPEW("in realize()");
     CUDA_RUNTIME(cudaGetLastError());
     assert(currDataPtrs_.size() == nextDataPtrs_.size());
     assert(dataElemSize_.size() == nextDataPtrs_.size());
@@ -345,11 +448,21 @@ public:
     // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     // std::cerr << "r" << rank << " dev=" << dev_ << "\n";
     for (int64_t i = 0; i < num_data(); ++i) {
+      assert(i < dataElemSize_.size());
       int64_t elemSz = dataElemSize_[i];
+      LOG_SPEW("elemSz=" << elemSz);
+      LOG_SPEW("radius +x=" << radius_.x(1));
+      LOG_SPEW("radius -x=" << radius_.x(-1));
+      LOG_SPEW("radius +y=" << radius_.y(1));
+      LOG_SPEW("radius -y=" << radius_.y(-1));
+      LOG_SPEW("radius +z=" << radius_.z(1));
+      LOG_SPEW("radius -z=" << radius_.z(-1));
 
-      int64_t elemBytes = ((sz_.x + 2 * radius_) * (sz_.y + 2 * radius_) *
-                          (sz_.z + 2 * radius_)) *
-                         elemSz;
+      int64_t elemBytes = ((sz_.x + radius_.x(-1) + radius_.x(1)) *
+                           (sz_.y + radius_.y(-1) + radius_.y(1)) *
+                           (sz_.z + radius_.z(-1) + radius_.z(1))) *
+                          elemSz;
+      LOG_SPEW("allocate " << elemBytes << " bytes");
       char *c = nullptr;
       char *n = nullptr;
       CUDA_RUNTIME(cudaMalloc(&c, elemBytes));
@@ -373,3 +486,10 @@ public:
     CUDA_RUNTIME(cudaGetLastError());
   }
 };
+
+#undef LOG_SPEW
+#undef LOG_DEBUG
+#undef LOG_INFO
+#undef LOG_WARN
+#undef LOG_ERROR
+#undef LOG_FATAL
