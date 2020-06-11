@@ -55,6 +55,9 @@
 #define LOG_FATAL(x) exit(1);
 #endif
 
+/* Use the CUDA Graph API to accelerate repeated
+   pack/unpack kernel launches
+*/
 #define STENCIL_USE_CUDA_GRAPH 1
 
 inline void rand_sleep() {
@@ -175,8 +178,10 @@ public:
       : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL),
         instance_(NULL) {}
   ~DevicePacker() {
+#if STENCIL_USE_CUDA_GRAPH == 1
     CUDA_RUNTIME(cudaGraphDestroy(graph_));
     CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
+#endif
   }
 
   virtual void prepare(LocalDomain *domain,
@@ -348,8 +353,10 @@ private:
 public:
   DeviceUnpacker(cudaStream_t stream) : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
   ~DeviceUnpacker() {
+#if STENCIL_USE_CUDA_GRAPH == 1
     CUDA_RUNTIME(cudaGraphDestroy(graph_));
     CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
+#endif
   }
   
   virtual void prepare(LocalDomain *domain,
