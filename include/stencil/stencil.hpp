@@ -153,6 +153,9 @@ private:
       coloSenders_; // vec[domain][dstIdx] = sender
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
+  // total number of bytes moved during the halo exchange, set in realize()
+  uint64_t sendBytes_;
+
 public:
 #if STENCIL_MEASURE_TIME == 1
   /* record total time spent on operations. Valid at MPI rank 0
@@ -349,6 +352,13 @@ public:
    */
   const Dim3 &get_origin(int64_t i) const { return domains_[i].origin(); }
 
+  /* return the total number of bytes moved during the halo exchange
+  ( after realize() )
+  */
+  size_t halo_exchange_bytes() const {
+    return sendBytes_;
+  }
+
   void realize() {
     CUDA_RUNTIME(cudaGetLastError());
 
@@ -447,7 +457,7 @@ public:
     std::vector<std::map<Dim3, std::vector<Message>>>
         remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
 
-    std::cerr << "comm plan\n";
+    LOG_DEBUG("[" << rank_ << "]" << "comm plan");
     // plan messages
     /*
     For each direction, look up where the destination device is and decide which
@@ -587,75 +597,116 @@ public:
     }
 #endif
 
-    // summarize communication plan
-    std::string planFileName = "plan_" + std::to_string(rank_) + ".txt";
-    std::ofstream planFile(planFileName, std::ofstream::out);
+    /* -------------------------
+    summarize communication plan
+    ----------------------------
 
-    planFile << "rank=" << rank_ << "\n\n";
+    Dump one file per rank describing who and how we communicate
+    Also total up the number of bytes we are sending for an aggregate bandwidth
+    estimation.
 
-    planFile << "domains\n";
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      planFile << di << ":cuda" << domains_[di].gpu() << ":"
-               << placement_->get_idx(rank_, di)
-               << " sz=" << domains_[di].size() << "\n";
-    }
-    planFile << "\n";
+    ----------------------------*/
+    {
+      sendBytes_ = 0;
+      std::string planFileName = "plan_" + std::to_string(rank_) + ".txt";
+      std::ofstream planFile(planFileName, std::ofstream::out);
 
-    planFile << "== peerAccess ==\n";
-    for (auto &m : peerAccessOutbox) {
-      size_t numBytes = 0;
-      for (int qi = 0; qi < domains_[m.srcGPU_].num_data(); ++qi) {
-        numBytes += domains_[m.srcGPU_].halo_bytes(m.dir_, qi);
+      planFile << "rank=" << rank_ << "\n\n";
+
+      planFile << "== quantities == \n";
+
+      planFile << "domains\n";
+      for (size_t di = 0; di < domains_.size(); ++di) {
+        planFile << di << ":cuda" << domains_[di].gpu() << ":"
+                 << placement_->get_idx(rank_, di)
+                 << " sz=" << domains_[di].size() << "\n";
       }
-      planFile << m.srcGPU_ << "->" << m.dstGPU_ << " " << m.dir_ << " "
-               << numBytes << "B\n";
-    }
-    planFile << "\n";
+      planFile << "\n";
 
-    planFile << "== peerCopy ==\n";
-    for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
-      for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size();
-           ++dstGPU) {
-        size_t numBytes = 0;
-        for (const auto &msg : peerCopyOutboxes[srcGPU][dstGPU]) {
-          for (int64_t i = 0; i < domains_[srcGPU].num_data(); ++i) {
-            int64_t haloBytes = domains_[srcGPU].halo_bytes(msg.dir_, i);
-            numBytes += haloBytes;
+      planFile << "== peerAccess ==\n";
+      for (auto &msg : peerAccessOutbox) {
+        size_t peerBytes = 0;
+        for (int qi = 0; qi < domains_[msg.srcGPU_].num_data(); ++qi) {
+          // send size matches size of halo that we're recving into
+          const size_t bytes =
+              domains_[msg.srcGPU_].halo_bytes(msg.dir_ * -1, qi);
+          peerBytes += bytes;
+          sendBytes_ += bytes;
+        }
+        planFile << msg.srcGPU_ << "->" << msg.dstGPU_ << " " << msg.dir_ << " "
+                 << peerBytes << "B\n";
+      }
+      planFile << "\n";
+
+      planFile << "== peerCopy ==\n";
+      for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
+        for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size();
+             ++dstGPU) {
+          size_t peerBytes = 0;
+          for (const auto &msg : peerCopyOutboxes[srcGPU][dstGPU]) {
+            for (int64_t i = 0; i < domains_[srcGPU].num_data(); ++i) {
+              // send size matches size of halo that we're recving into
+              const int64_t bytes =
+                  domains_[srcGPU].halo_bytes(msg.dir_ * -1, i);
+              peerBytes += bytes;
+              sendBytes_ += bytes;
+            }
+            planFile << srcGPU << "->" << dstGPU << " " << msg.dir_ << " "
+                     << peerBytes << "B\n";
           }
-          planFile << srcGPU << "->" << dstGPU << " " << msg.dir_ << " "
-                   << numBytes << "B\n";
         }
       }
-    }
-    planFile << "\n";
+      planFile << "\n";
 
-    planFile << "== colo ==\n";
-    for (auto &obxs : coloOutboxes) {
-      for (auto &kv : obxs) {
-        const Dim3 dstIdx = kv.first;
-        auto &box = kv.second;
-        planFile << "colo to dstIdx=" << dstIdx << "\n";
-        for (auto &m : box) {
-          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_
-                   << ")\n";
+      // std::vector<std::map<Dim3, std::vector<Message>>> coloOutboxes;
+      planFile << "== colo ==\n";
+      for (size_t di = 0; di < coloOutboxes.size(); ++di) {
+        std::map<Dim3, std::vector<Message>> &obxs = coloOutboxes[di];
+        for (auto &kv : obxs) {
+          const Dim3 dstIdx = kv.first;
+          auto &box = kv.second;
+          planFile << "colo to dstIdx=" << dstIdx << "\n";
+          for (auto &msg : box) {
+            planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->"
+                     << msg.dstGPU_ << ")\n";
+            for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
+              // send size matches size of halo that we're recving into
+              sendBytes_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
+            }
+          }
         }
       }
-    }
-    planFile << "\n";
+      planFile << "\n";
 
-    planFile << "== remote ==\n";
-    for (auto &obxs : remoteOutboxes) {
-      for (auto &kv : obxs) {
-        const Dim3 dstIdx = kv.first;
-        auto &box = kv.second;
-        planFile << "remote to dstIdx=" << dstIdx << "\n";
-        for (auto &m : box) {
-          planFile << "dir=" << m.dir_ << " (" << m.srcGPU_ << "->" << m.dstGPU_
-                   << ")\n";
+      planFile << "== remote ==\n";
+      for (size_t di = 0; di < remoteOutboxes.size(); ++di) {
+        std::map<Dim3, std::vector<Message>> &obxs = remoteOutboxes[di];
+        for (auto &kv : obxs) {
+          const Dim3 dstIdx = kv.first;
+          auto &box = kv.second;
+          planFile << "remote to dstIdx=" << dstIdx << "\n";
+          for (auto &msg : box) {
+            planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->"
+                     << msg.dstGPU_ << ")\n";
+            for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
+              // send size matches size of halo that we're recving into
+              sendBytes_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
+            }
+          }
         }
       }
+      planFile.close();
+
+      // give every rank the total send volume
+      nvtxRangePush("distribute send bytes to all ranks");
+      MPI_Allreduce(MPI_IN_PLACE, &sendBytes_, 1, MPI_UINT64_T, MPI_SUM,
+                    MPI_COMM_WORLD);
+
+      if (rank_ == 0) {
+        LOG_INFO(sendBytes_ << "B in halo exchange");
+      }
+      nvtxRangePop();
     }
-    planFile.close();
 
 #if STENCIL_MEASURE_TIME == 1
     MPI_Barrier(MPI_COMM_WORLD);
@@ -850,11 +901,11 @@ public:
   /* Swap current and next pointers
    */
   void swap() {
-    LOG_DEBUG("rank="<<rank_<<" enter swap()");
+    LOG_DEBUG("rank=" << rank_ << " enter swap()");
     for (auto &d : domains_) {
       d.swap();
     }
-    LOG_DEBUG("rank="<<rank_<<" finish swap()");
+    LOG_DEBUG("rank=" << rank_ << " finish swap()");
   }
 
   /*!
@@ -994,20 +1045,22 @@ public:
 
     // wait for colocated
     nvtxRangePush("colocated.wait()");
-      for (auto &domSenders : coloSenders_) {
-        for (auto &kv : domSenders) {
-          LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait colocated sender");
-          ColocatedHaloSender &sender = kv.second;
-          sender.wait();
-        }
+    for (auto &domSenders : coloSenders_) {
+      for (auto &kv : domSenders) {
+        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
+                         << " wait colocated sender");
+        ColocatedHaloSender &sender = kv.second;
+        sender.wait();
       }
-      for (auto &domRecvers : coloRecvers_) {
-        for (auto &kv : domRecvers) {
-          LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait colocated recver");
-          ColocatedHaloRecver &recver = kv.second;
-          recver.wait();
-        }
+    }
+    for (auto &domRecvers : coloRecvers_) {
+      for (auto &kv : domRecvers) {
+        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
+                         << " wait colocated recver");
+        ColocatedHaloRecver &recver = kv.second;
+        recver.wait();
       }
+    }
     nvtxRangePop(); // colocated wait
 
     nvtxRangePush("remote wait");
@@ -1015,7 +1068,8 @@ public:
     // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
-        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait remote recver");
+        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
+                         << " wait remote recver");
         StatefulRecver *recver = kv.second;
         assert(recver);
         recver->wait();
@@ -1023,7 +1077,8 @@ public:
     }
     for (auto &domSenders : remoteSenders_) {
       for (auto &kv : domSenders) {
-        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait remote sender");
+        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
+                         << " wait remote sender");
         StatefulSender *sender = kv.second;
         assert(sender);
         sender->wait();

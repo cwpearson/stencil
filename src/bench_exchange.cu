@@ -6,10 +6,12 @@
 #include "stencil/mpi.hpp"
 #include "stencil/stencil.hpp"
 
-/* return a summary of nIters exchanges to rank 0
+/* return a summary of nIters exchanges to rank 0, and the number of bytes
+ * exchanged
  */
-Statistics bench(const size_t nIters, const Dim3 &extent, const Radius &radius,
-                 const size_t gpusPerRank) {
+std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
+                                      const Radius &radius,
+                                      const size_t gpusPerRank) {
 
   int rank = mpi::world_rank();
 
@@ -44,18 +46,18 @@ Statistics bench(const size_t nIters, const Dim3 &extent, const Radius &radius,
       stats.insert(elapsed);
     }
   }
-  return stats;
+  return std::make_pair(stats, dd.halo_exchange_bytes());
 }
 
 void report_header() {
-  std::cout << "name,count,trimean,stddev,min,avg,max\n";
+  std::cout << "name,count,trimean S,trimean B/sstddev,min,avg,max\n";
 }
 
-void report(const std::string &cfg, Statistics &stats) {
+void report(const std::string &cfg, uint64_t bytes, Statistics &stats) {
   std::cout << std::scientific;
-  std::cout << cfg << "," << stats.count() << ","
-  << stats.trimean() << "," << stats.stddev() << "," << stats.min() << "," << stats.avg() << ","
-  << stats.max() << "\n";
+  std::cout << cfg << "," << stats.count() << "," << stats.trimean() << ","
+            << bytes / stats.trimean() << "," << stats.stddev() << ","
+            << stats.min() << "," << stats.avg() << "," << stats.max() << "\n";
   std::cout << std::defaultfloat;
 }
 
@@ -76,7 +78,7 @@ int main(int argc, char **argv) {
 
   // CLI parameters
   int nIters = 30;
-  Dim3 ext(128,128,128);
+  Dim3 ext(128, 128, 128);
 
   // parse CLI arguments
   argparse::Parser p("benchmark stencil library exchange");
@@ -105,80 +107,82 @@ int main(int argc, char **argv) {
 
   // benchmark results
   Statistics stats;
+  uint64_t bytes;
 
   if (0 == rank) {
-  report_header();
+    report_header();
   }
 
   // positive x-leaning, radius = 2
   radius = Radius::constant(0);
-  radius.dir(1,0,0) = 2;
-  stats = bench(nIters, ext, radius, gpusPerRank);
+  radius.dir(1, 0, 0) = 2;
+  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
     ss << "/px/r2";
-    report(ss.str(), stats);
+    report(ss.str(), bytes, stats);
   }
 
   // x-only, radius = 2
   radius = Radius::constant(0);
-  radius.dir(1,0,0) = 2;
-  radius.dir(-1,0,0) = 2;
-  stats = bench(nIters, ext, radius, gpusPerRank);
+  radius.dir(1, 0, 0) = 2;
+  radius.dir(-1, 0, 0) = 2;
+  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
     ss << "/x/2";
-    report(ss.str(), stats);
+    report(ss.str(), bytes, stats);
   }
 
   // faces only, radius = 2
   radius = Radius::constant(0);
-  radius.dir(1,0,0) = 2;
-  radius.dir(-1,0,0) = 2;
-  radius.dir(0,1,0) = 2;
-  radius.dir(0,-1,0) = 2;
-  radius.dir(0,0,1) = 2;
-  radius.dir(0,0,-1) = 2;
-  stats = bench(nIters, ext, radius, gpusPerRank);
+  radius.dir(1, 0, 0) = 2;
+  radius.dir(-1, 0, 0) = 2;
+  radius.dir(0, 1, 0) = 2;
+  radius.dir(0, -1, 0) = 2;
+  radius.dir(0, 0, 1) = 2;
+  radius.dir(0, 0, -1) = 2;
+  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
     ss << "/faces/2";
-    report(ss.str(), stats);
+    report(ss.str(), bytes, stats);
   }
 
   // faces & edges, radius = 2
   radius = Radius::constant(2);
-  radius.dir(1,1,1) = 0;
-  radius.dir(1,1,-1) = 0;
-  radius.dir(1,-1,1) = 0;
-  radius.dir(1,-1,-1) = 0;
-  radius.dir(-1,1,1) = 0;
-  radius.dir(-1,1,-1) = 0;
-  radius.dir(-1,-1,1) = 0;
-  radius.dir(-1,-1,-1) = 0;
-  stats = bench(nIters, ext, radius, gpusPerRank);
+  radius.dir(1, 1, 1) = 0;
+  radius.dir(1, 1, -1) = 0;
+  radius.dir(1, -1, 1) = 0;
+  radius.dir(1, -1, -1) = 0;
+  radius.dir(-1, 1, 1) = 0;
+  radius.dir(-1, 1, -1) = 0;
+  radius.dir(-1, -1, 1) = 0;
+  radius.dir(-1, -1, -1) = 0;
+  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext;
-    ss << "/" << "face&edge/2";
-    report(ss.str(), stats);
+    ss << "/"
+       << "face&edge/2";
+    report(ss.str(), bytes, stats);
   }
 
   // uniform, radius = 2
   {
-  std::stringstream ss;
-  ss << ext;
-  ss << "/uniform/2";
-  nvtxRangePush(ss.str().c_str());
-  radius = Radius::constant(2);
-  stats = bench(nIters, ext, radius, gpusPerRank);
-  nvtxRangePop();
-  if (0 == rank) {
-    report(ss.str(), stats);
-  }
+    std::stringstream ss;
+    ss << ext;
+    ss << "/uniform/2";
+    nvtxRangePush(ss.str().c_str());
+    radius = Radius::constant(2);
+    std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
+    nvtxRangePop();
+    if (0 == rank) {
+      report(ss.str(), bytes, stats);
+    }
   }
 
 #if STENCIL_USE_MPI == 1
