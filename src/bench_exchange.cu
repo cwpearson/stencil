@@ -22,7 +22,7 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
   DistributedDomain dd(extent.x, extent.y, extent.z);
   dd.set_radius(radius);
   dd.add_data<Q1>("d0");
-  dd.set_methods(MethodFlags::CudaMpi);
+  dd.set_methods(MethodFlags::CudaMpi | MethodFlags::CudaMpiColocated);
 
   // create distributed stencil
   dd.realize();
