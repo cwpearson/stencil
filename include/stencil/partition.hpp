@@ -15,6 +15,7 @@
 #include "mat2d.hpp"
 #include "mpi_topology.hpp"
 #include "stencil/qap.hpp"
+#include "stencil/radius.hpp"
 
 #ifndef STENCIL_OUTPUT_LEVEL
 #define STENCIL_OUTPUT_LEVEL 0
@@ -190,6 +191,9 @@ public:
   }
 };
 
+
+/* A 2-level partition of a 3D space amongst nodes in the system, and then GPUs in the node
+*/
 class NodePartition {
 
 private:
@@ -199,14 +203,13 @@ private:
   Dim3 size_; // approximate subdomain size
   Dim3 rem_;  // input size % sysDim_ * nodeDim_
 
-  /*! return the prime factors of n
+  /*! return the prime factors of n, sorted smallest to largest
    */
   static std::vector<int64_t> prime_factors(int64_t n) {
     std::vector<int64_t> result;
     if (0 == n) {
       return result;
     }
-
     while (n % 2 == 0) {
       result.push_back(2);
       n = n / 2;
@@ -226,7 +229,7 @@ private:
 
   static int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
 
-  /* get a unique 1D integer for an index */
+  /* linearize an index `idx` in a space `dim` */
   static int64_t linearize(const Dim3 idx, const Dim3 dim) {
     assert(idx.x >= 0);
     assert(idx.y >= 0);
@@ -254,7 +257,7 @@ private:
   }
 
 public:
-  NodePartition(const Dim3 &size, const int64_t nodes, const int64_t gpus)
+  NodePartition(const Dim3 &size, const Radius radius, const int64_t nodes, const int64_t gpus)
       : size_(size), sysDim_(1, 1, 1), nodeDim_(1, 1, 1) {
 
     // split among nodes
@@ -264,10 +267,18 @@ public:
         continue;
       }
 
-      if (size_.x >= size_.y && size_.x >= size_.z) { // split in x
+      /* Recursively split a 3D region along whatever plane results in the smallest interface.
+         The interface size is scaled by the kernel radius in that dimension, positive + negative
+      */
+
+      const int64_t xIface = size_.y * size_.z * (radius.dir(1,0,0) + radius.dir(-1,0,0));
+      const int64_t yIface = size_.x * size_.z * (radius.dir(0,1,0) + radius.dir(0,-1,0));
+      const int64_t zIface = size_.x * size_.y * (radius.dir(0,0,1) + radius.dir(0,0,-1));
+
+      if (xIface <= yIface && xIface <= zIface) { // split in x
         size_.x = div_ceil(size_.x, amt);
         sysDim_.x *= amt;
-      } else if (size_.y >= size_.z) { // split in y
+      } else if (yIface <= zIface) { // split in y
         size_.y = div_ceil(size_.y, amt);
         sysDim_.y *= amt;
       } else { // split in z
@@ -283,10 +294,14 @@ public:
         continue;
       }
 
-      if (size_.x >= size_.y && size_.x >= size_.z) { // split in x
+      const int64_t xIface = size_.y * size_.z * (radius.dir(1,0,0) + radius.dir(-1,0,0));
+      const int64_t yIface = size_.x * size_.z * (radius.dir(0,1,0) + radius.dir(0,-1,0));
+      const int64_t zIface = size_.x * size_.y * (radius.dir(0,0,1) + radius.dir(0,0,-1));
+
+      if (xIface <= yIface && xIface <= zIface) { // split in x
         size_.x = div_ceil(size_.x, amt);
         nodeDim_.x *= amt;
-      } else if (size_.y >= size_.z) { // split in y
+      } else if (yIface <= zIface) { // split in y
         size_.y = div_ceil(size_.y, amt);
         nodeDim_.y *= amt;
       } else { // split in z
@@ -298,7 +313,7 @@ public:
     rem_ = size % (sysDim_ * nodeDim_);
   }
 
-  NodePartition() : NodePartition(Dim3(0, 0, 0), 0, 0) {}
+  NodePartition() : NodePartition(Dim3(0, 0, 0), Radius::constant(0), 0, 0) {}
 
   Dim3 sys_dim() const noexcept { return sysDim_; }
 
@@ -694,7 +709,7 @@ public:
     const int numNodes = mpiTopo.size() / mpiTopo.colocated_size();
     const int numSubdomains = numNodes * gpusPerNode;
 
-    partition_ = NodePartition(size, numNodes, gpusPerNode);
+    partition_ = NodePartition(size, radius, numNodes, gpusPerNode);
 
     if (0 == mpiTopo.rank()) {
       std::cerr << "NodeAware: " << partition_.sys_dim() << "x"
