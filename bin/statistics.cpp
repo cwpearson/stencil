@@ -1,6 +1,6 @@
 #include <algorithm>
-#include <numeric>
 #include <cmath>
+#include <numeric>
 
 #include "statistics.hpp"
 
@@ -11,12 +11,8 @@ void Statistics::insert(double d) { x.push_back(d); }
 double Statistics::avg() const {
   return std::accumulate(x.begin(), x.end(), 0.0) / x.size();
 }
-double Statistics::min() const {
-  return *std::min_element(x.begin(), x.end());
-}
-double Statistics::max() const {
-  return *std::max_element(x.begin(), x.end());
-}
+double Statistics::min() const { return *std::min_element(x.begin(), x.end()); }
+double Statistics::max() const { return *std::max_element(x.begin(), x.end()); }
 size_t Statistics::count() const noexcept { return x.size(); }
 double Statistics::trimean() {
   std::sort(x.begin(), x.end());

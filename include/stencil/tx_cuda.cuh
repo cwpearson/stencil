@@ -109,7 +109,7 @@ public:
     // create a stream per device
     for (auto &msg : outbox_) {
       int srcDev = domains_[msg.srcGPU_]->gpu();
-      streams_.emplace(srcDev, RcStream(srcDev));
+      streams_.emplace(srcDev, RcStream(srcDev, RcStream::Priority::HIGH));
     }
   }
 

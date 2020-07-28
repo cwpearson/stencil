@@ -23,6 +23,7 @@
 #include "stencil/partition.hpp"
 #include "stencil/radius.hpp"
 #include "stencil/tx.hpp"
+#include "stencil/tx_cuda.cuh"
 
 #ifndef STENCIL_OUTPUT_LEVEL
 #define STENCIL_OUTPUT_LEVEL 0
@@ -355,9 +356,7 @@ public:
   /* return the total number of bytes moved during the halo exchange
   ( after realize() )
   */
-  size_t halo_exchange_bytes() const {
-    return sendBytes_;
-  }
+  size_t halo_exchange_bytes() const { return sendBytes_; }
 
   void realize() {
     CUDA_RUNTIME(cudaGetLastError());
@@ -457,7 +456,8 @@ public:
     std::vector<std::map<Dim3, std::vector<Message>>>
         remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
 
-    LOG_DEBUG("[" << rank_ << "]" << "comm plan");
+    LOG_DEBUG("[" << rank_ << "]"
+                  << "comm plan");
     // plan messages
     /*
     For each direction, look up where the destination device is and decide which
@@ -908,6 +908,19 @@ public:
     LOG_DEBUG("rank=" << rank_ << " finish swap()");
   }
 
+  /* Return the coordinates of the stencil region that can be safely operated on
+   * during exchange
+   * One vector per LocalDomain
+   */
+  std::vector<std::vector<Rect3>> interior();
+
+  /* Return the coordinates of the stencil regions that CANNOT be safely operated on during
+   * exchange.
+   * The GPU kernel can modify this data when the exchange is no occuring
+   * One vector per LocalDomain
+   */
+  std::vector<std::vector<Rect3>> exterior();
+
   /*!
   do a halo exchange and return
   */
@@ -1186,6 +1199,7 @@ public:
     nvtxRangePop();
   }
 };
+
 
 #undef LOG_SPEW
 #undef LOG_DEBUG

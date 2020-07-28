@@ -8,18 +8,17 @@
 
 #include "stencil/stencil.hpp"
 
-/*! set dst[x,y,z] = sin(x + origin.x)
-and halo to -1
+/*! set dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
+and halo to -10
 */
 template <typename T>
-__global__ void
-init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
-            const Dim3 origin, //<! [in]
-            const Dim3 rawSz,   //<! [in] 3D size of the dst and src allocations
-            const double period //<! sin wave period
+__global__ void init_kernel(T *dst,             //<! [out] pointer to beginning of allocation
+                            const Dim3 origin,  //<! [in] origin of compute region
+                            const Dim3 rawSz,   //<! [in] 3D size of the allocation
+                            const double period //<! sin wave period
 ) {
 
-  constexpr size_t radius = 1;
+  constexpr size_t radius = 3;
   const Dim3 domSz = rawSz - Dim3(2 * radius, 2 * radius, 2 * radius);
 
   const size_t gdz = gridDim.z;
@@ -42,15 +41,15 @@ init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
 #else
 #error "_at already defined"
 #endif
-
   for (size_t z = biz * bdz + tiz; z < rawSz.z; z += gdz * bdz) {
     for (size_t y = biy * bdy + tiy; y < rawSz.y; y += gdy * bdy) {
       for (size_t x = bix * bdx + tix; x < rawSz.x; x += gdx * bdx) {
 
-        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius &&
-            y < rawSz.y - radius && x < rawSz.x - radius) {
-          _at(dst, x, y, z) =
-              sin((origin.x + x - radius) * 2 * 3.14159/ period);
+        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius && y < rawSz.y - radius &&
+            x < rawSz.x - radius) {
+          _at(dst, x, y, z) = sin(2 * 3.14159 / period * (origin.x + x) + 2 * 3.14159 / period * (origin.y + y) +
+                                  2 * 3.14159 / period * (origin.z + z));
+
         } else {
           _at(dst, x, y, z) = -10;
         }
@@ -61,8 +60,30 @@ init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
 #undef _at
 }
 
+/* Apply the stencil to the coordinates in `reg`
+ */
+__global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src, const Rect3 reg) {
 
-
+  #pragma unroll(1)
+  for (int64_t z = reg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < reg.hi.z; z += gridDim.z * blockDim.z) {
+    #pragma unroll(1)
+    for (int64_t y = reg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < reg.hi.y; y += gridDim.y * blockDim.y) {
+      #pragma unroll(1)
+      for (int64_t x = reg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < reg.hi.x; x += gridDim.x * blockDim.x) {
+        Dim3 o(x,y,z);
+        float val = 0;
+        val += src[o + Dim3(-1,0,0)];
+        val += src[o + Dim3(0,-1,0)];
+        val += src[o + Dim3(0,0,-1)];
+        val += src[o + Dim3(1,0,0)];
+        val += src[o + Dim3(0,1,0)];
+        val += src[o + Dim3(0,0,1)];
+        val /= 6;
+        dst[o] = val;
+      }
+    }
+  }
+}
 
 int main(int argc, char **argv) {
 
@@ -111,7 +132,7 @@ int main(int argc, char **argv) {
 
   double kernelMillis = 50;
   size_t x = result["x"].as<int>();
-  size_t y = result["y"].as<int>(); 
+  size_t y = result["y"].as<int>();
   size_t z = result["z"].as<int>();
 
   cudaDeviceProp prop;
@@ -122,8 +143,7 @@ int main(int argc, char **argv) {
     kernelMillis = 34.1;
   } else {
     if (0 == rank) {
-      std::cerr << "WARN: unknown GPU " << prop.name << ", using "
-                << kernelMillis << "ms for kernel\n";
+      std::cerr << "WARN: unknown GPU " << prop.name << ", using " << kernelMillis << "ms for kernel\n";
     }
   }
 
@@ -163,6 +183,9 @@ int main(int argc, char **argv) {
     std::cout << "domain: " << x << "," << y << "," << z << "\n";
   }
 
+  // create a compute stream
+  RcStream computeStream;
+
   {
     size_t radius = 3;
 
@@ -187,28 +210,69 @@ int main(int argc, char **argv) {
     for (size_t di = 0; di < dd.domains().size(); ++di) {
       auto &d = dd.domains()[di];
       CUDA_RUNTIME(cudaSetDevice(d.gpu()));
-      init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh0), d.origin(),
-                                         d.raw_size(), 10);
+      init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh0), d.origin(), d.raw_size(), 10);
       CUDA_RUNTIME(cudaDeviceSynchronize());
     }
 
-    dd.write_paraview("init");
+    if (0)
+      dd.write_paraview("init");
 
     for (size_t iter = 0; iter < 5; ++iter) {
-      std::cerr << "exchange\n";
-      nvtxRangePush("exchange");
-      dd.exchange();
-      dd.swap();
-      nvtxRangePop();
 
-      std::cerr << "kernels\n";
-      nvtxRangePush("kernels");
-      auto dur = std::chrono::duration<double, std::milli>(kernelMillis);
-      std::this_thread::sleep_for(dur);
-      nvtxRangePop();
+      // launch operations on interior
+      std::vector<std::vector<Rect3>> interiors = dd.interior();
+      for (size_t di = 0; di < dd.domains().size(); ++di) {
+        auto &d = dd.domains()[di];
+        for (size_t si = 0; si < interiors[di].size(); ++si) {
+          nvtxRangePush("launch");
+          const Rect3 cr = interiors[di][si];
+          const Accessor<float> src0 = d.get_curr_accessor<float>(dh0);
+          const Accessor<float> dst0 = d.get_next_accessor<float>(dh0);
+          std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
+          // std::cerr << src0.origin() << "=src0 origin\n";
+          d.set_device();
+          stencil_kernel<<<128, 128,0, computeStream>>>(dst0, src0, cr);
+          CUDA_RUNTIME(cudaGetLastError());
+          nvtxRangePop(); // launch
+          // CUDA_RUNTIME(cudaDeviceSynchronize());
+        }
+      }
+
+      // exchange halo
+      std::cerr << rank << ": exchange\n";
+      dd.exchange();
+
+      // operate on exterior
+      std::vector<std::vector<Rect3>> exteriors = dd.exterior();
+      for (size_t di = 0; di < dd.domains().size(); ++di) {
+        auto &d = dd.domains()[di];
+        for (size_t si = 0; si < exteriors[di].size(); ++si) {
+          nvtxRangePush("launch");
+          const Rect3 cr = exteriors[di][si];
+          const Accessor<float> src0 = d.get_curr_accessor<float>(dh0);
+          const Accessor<float> dst0 = d.get_next_accessor<float>(dh0);
+          std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
+          // std::cerr << src0.origin() << "=src0 origin\n";
+          d.set_device();
+          stencil_kernel<<<128, 128,0,computeStream>>>(dst0, src0, cr);
+          CUDA_RUNTIME(cudaGetLastError());
+          nvtxRangePop(); // launch
+          // CUDA_RUNTIME(cudaDeviceSynchronize());
+        }
+      }
+
+      // wait for stencil to complete
+      for (auto &d : dd.domains()) {
+        d.set_device();
+        CUDA_RUNTIME(cudaStreamSynchronize(computeStream));
+      }
+
+      // swap
+      dd.swap();
     }
 
-    dd.write_paraview("final");
+    if (0)
+      dd.write_paraview("final");
 
   } // send domains out of scope before MPI_Finalize
 
