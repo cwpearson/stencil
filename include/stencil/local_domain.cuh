@@ -429,7 +429,7 @@ public:
     CUDA_RUNTIME(cudaSetDevice(gpu()));
     void *devBuf = nullptr;
     CUDA_RUNTIME(cudaMalloc(&devBuf, bytes));
-    const dim3 dimBlock = make_block_dim(ext, 512);
+    const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
     const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
     pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos,
                                        ext, elem_size(qi));

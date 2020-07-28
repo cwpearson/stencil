@@ -150,7 +150,7 @@ private:
       LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext
                                             << " pos=" << pos << " @ "
                                             << offset);
-      const dim3 dimBlock = make_block_dim(ext, 512);
+      const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
       const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / Dim3(dimBlock);
       assert(offset < size_);
 
@@ -338,7 +338,7 @@ private:
                                                 << " pos=" << pos << " @"
                                                 << offset);
 
-      const dim3 dimBlock = make_block_dim(ext, 512);
+      const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
       const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream_>>>(
           domain_->dev_curr_datas(), &devBuf_[offset],

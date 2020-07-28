@@ -127,7 +127,7 @@ public:
       const Dim3 dstPos = dstDomain->halo_pos(msg.dir_ * -1, true /*exterior*/);
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
       RcStream &stream = streams_[srcDomain->gpu()];
-      const dim3 dimBlock = make_block_dim(extent, 512 /*threads per block*/);
+      const dim3 dimBlock = Dim3::make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream.device() == srcDomain->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream.device()));

@@ -202,11 +202,11 @@ int main(int argc, char **argv) {
     MPI_Barrier(MPI_COMM_WORLD);
 
     std::cerr << "init\n";
-    dim3 dimGrid(10, 10, 10);
-    dim3 dimBlock(8, 8, 8);
     for (size_t di = 0; di < dd.domains().size(); ++di) {
       auto &d = dd.domains()[di];
-      CUDA_RUNTIME(cudaSetDevice(d.gpu()));
+      d.set_device();
+      dim3 dimBlock = Dim3::make_block_dim(d.raw_size(), 512);
+      dim3 dimGrid = ((d.raw_size()) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh0), d.origin(), d.raw_size(), 10);
       CUDA_RUNTIME(cudaDeviceSynchronize());
     }
@@ -228,7 +228,9 @@ int main(int argc, char **argv) {
           std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          stencil_kernel<<<128, 128,0, computeStream>>>(dst0, src0, cr);
+          dim3 dimBlock = Dim3::make_block_dim(cr.hi-cr.lo, 512);
+          dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+          stencil_kernel<<<dimGrid, dimBlock, 0, computeStream>>>(dst0, src0, cr);
           CUDA_RUNTIME(cudaGetLastError());
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());
@@ -251,7 +253,9 @@ int main(int argc, char **argv) {
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          stencil_kernel<<<128, 128,0,computeStream>>>(dst0, src0, cr);
+          dim3 dimBlock = Dim3::make_block_dim(cr.hi-cr.lo, 512);
+          dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+          stencil_kernel<<<dimGrid, dimBlock,0,computeStream>>>(dst0, src0, cr);
           CUDA_RUNTIME(cudaGetLastError());
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());
