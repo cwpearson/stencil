@@ -28,7 +28,6 @@ Depending on availability, the following compiler defines exist:
 |-|-|-|
 | MPI | `STENCIL_USE_MPI=1` | `STENCIL_USE_MPI=0` |
 | CUDA | `STENCIL_USE_CUDA=1` | `STENCIL_USE_CUDA=0` |
-| libnuma | `STENCIL_USE_NUMA=1` | `STENCIL_USE_NUMA=0` |
 
 ## Requirements
 Tested on
