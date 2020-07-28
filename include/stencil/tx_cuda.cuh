@@ -174,8 +174,8 @@ public:
   PeerCopySender(size_t srcGPU, size_t dstGPU, LocalDomain &srcDomain,
                  LocalDomain &dstDomain)
       : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain),
-        dstDomain_(&dstDomain), srcStream_(srcDomain.gpu()),
-        dstStream_(dstDomain.gpu()), packer_(srcStream_),
+        dstDomain_(&dstDomain), srcStream_(srcDomain.gpu(), RcStream::Priority::HIGH),
+        dstStream_(dstDomain.gpu(), RcStream::Priority::HIGH), packer_(srcStream_),
         unpacker_(dstStream_) {}
 
   void prepare(std::vector<Message> &outbox) {
@@ -426,7 +426,7 @@ public:
   // ColocatedHaloSender() {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       LocalDomain &domain)
-      : domain_(&domain), stream_(domain.gpu()), packer_(stream_),
+      : domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), packer_(stream_),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
   void start_prepare(const std::vector<Message> &outbox) {
@@ -463,7 +463,7 @@ public:
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                       LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
-        stream_(domain.gpu()),
+        stream_(domain.gpu(), RcStream::Priority::HIGH),
         recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
         unpacker_(stream_) {}
 
@@ -515,7 +515,7 @@ public:
   RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu()),
+        domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu(), RcStream::Priority::HIGH),
         state_(State::None), packer_(stream_) {}
 
   ~RemoteSender() { CUDA_RUNTIME(cudaFreeHost(hostBuf_)); }
@@ -661,7 +661,7 @@ public:
   RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu()),
+        domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu(), RcStream::Priority::HIGH),
         state_(State::None), unpacker_(stream_) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
@@ -791,7 +791,7 @@ public:
   CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
                      LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu()), state_(State::None),
+        domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None),
         packer_(stream_) {}
 
   virtual void prepare(std::vector<Message> &outbox) override {
@@ -893,7 +893,7 @@ public:
   CudaAwareMpiRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
                      LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu()), state_(State::None), unpacker_(stream_) {}
+        domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), unpacker_(stream_) {}
 
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
