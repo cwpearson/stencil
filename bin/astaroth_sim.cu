@@ -180,8 +180,6 @@ int main(int argc, char **argv) {
     std::cout << "domain: " << x << "," << y << "," << z << "\n";
   }
 
-  // create a compute stream
-  RcStream computeStream;
 
   {
     size_t radius = 3;
@@ -201,13 +199,19 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+    // create a compute stream for each local domain
+    std::vector<RcStream> computeStreams(dd.domains().size());
+    for (size_t di = 0; di < dd.domains().size(); ++di) {
+	    computeStreams[di] = RcStream(dd.domains()[di].gpu());
+    }
+
     std::cerr << "init\n";
     dim3 dimGrid(10, 10, 10);
     dim3 dimBlock(8, 8, 8);
     for (size_t di = 0; di < dd.domains().size(); ++di) {
       auto &d = dd.domains()[di];
       CUDA_RUNTIME(cudaSetDevice(d.gpu()));
-      init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh0), d.origin(), d.raw_size(), 10);
+      init_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(d.get_curr(dh0), d.origin(), d.raw_size(), 10);
       CUDA_RUNTIME(cudaDeviceSynchronize());
     }
 
@@ -228,7 +232,8 @@ int main(int argc, char **argv) {
           std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          stencil_kernel<<<128, 128,0, computeStream>>>(dst0, src0, cr);
+          CUDA_RUNTIME(cudaGetLastError());
+          stencil_kernel<<<128, 128,0, computeStreams[di]>>>(dst0, src0, cr);
           CUDA_RUNTIME(cudaGetLastError());
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());
@@ -251,7 +256,7 @@ int main(int argc, char **argv) {
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          stencil_kernel<<<128, 128,0,computeStream>>>(dst0, src0, cr);
+          stencil_kernel<<<128, 128,0,computeStreams[di]>>>(dst0, src0, cr);
           CUDA_RUNTIME(cudaGetLastError());
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());
@@ -259,9 +264,8 @@ int main(int argc, char **argv) {
       }
 
       // wait for stencil to complete
-      for (auto &d : dd.domains()) {
-        d.set_device();
-        CUDA_RUNTIME(cudaStreamSynchronize(computeStream));
+      for (auto &s : computeStreams) {
+        CUDA_RUNTIME(cudaStreamSynchronize(s));
       }
 
       // swap
