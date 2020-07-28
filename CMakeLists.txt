@@ -71,9 +71,43 @@ target_compile_features(stencil PUBLIC cxx_std_11)
 set_target_properties(stencil PROPERTIES CUDA_STANDARD 11)
 
 target_compile_options(stencil PRIVATE
+$<$<COMPILE_LANGUAGE:CXX>:
  -Wall
  -Wextra
- -Wshadow
+ -Wcast-align;
+ -Wdisabled-optimization;
+ -Wformat=2;
+ -Winit-self;
+ -Wlogical-op;
+ -Wmissing-include-dirs;
+ -Woverloaded-virtual;
+ -Wpointer-arith;
+ -Wshadow;
+ -Wstrict-aliasing;
+ -Wswitch-enum;
+ -Wvla;
+ >
+)
+
+target_compile_options(stencil PRIVATE
+$<$<COMPILE_LANGUAGE:CUDA>:
+--Wno-deprecated-gpu-targets;
+--expt-extended-lambda;
+-Xcompiler=-Wall;
+-Xcompiler=-Wextra;
+-Xcompiler=-Wcast-align;
+-Xcompiler=-Wdisabled-optimization;
+-Xcompiler=-Wformat=2;
+-Xcompiler=-Winit-self;
+-Xcompiler=-Wlogical-op;
+-Xcompiler=-Wmissing-include-dirs;
+-Xcompiler=-Woverloaded-virtual;
+-Xcompiler=-Wpointer-arith;
+-Xcompiler=-Wshadow;
+-Xcompiler=-Wstrict-aliasing;
+-Xcompiler=-Wswitch-enum;
+-Xcompiler=-Wvla;
+>
 )
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
