@@ -64,11 +64,8 @@ __global__ void init_kernel(T *dst,             //<! [out] pointer to beginning 
  */
 __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src, const Rect3 reg) {
 
-  #pragma unroll(1)
   for (int64_t z = reg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < reg.hi.z; z += gridDim.z * blockDim.z) {
-    #pragma unroll(1)
     for (int64_t y = reg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < reg.hi.y; y += gridDim.y * blockDim.y) {
-      #pragma unroll(1)
       for (int64_t x = reg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < reg.hi.x; x += gridDim.x * blockDim.x) {
         Dim3 o(x,y,z);
         float val = 0;
