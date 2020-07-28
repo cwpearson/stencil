@@ -12,3 +12,8 @@ inline void checkCuda(cudaError_t result, const char *file, const int line) {
 }
 
 #define CUDA_RUNTIME(stmt) checkCuda(stmt, __FILE__, __LINE__);
+
+enum class CudaErrorsFatal {
+  NO,
+  YES
+};

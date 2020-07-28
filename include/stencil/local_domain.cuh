@@ -1,7 +1,8 @@
 #pragma once
 
 #include <iostream>
-//#include <mpi.h>
+#include <vector>
+#include <thread>
 
 #include "stencil/accessor.hpp"
 #include "stencil/cuda_runtime.hpp"
@@ -82,7 +83,9 @@ private:
   // my local data size (not including halo)
   Dim3 sz_;
 
-  // my local data's origin (not including halo)
+  /* coordinate of the origin of the compute region
+  not necessarily the coordinate of the first allocation element
+  since the halo is usually non-zero*/ 
   Dim3 origin_;
 
   //!< radius of stencils that will be applied
@@ -131,6 +134,10 @@ public:
       CUDA_RUNTIME(cudaFree(devDataElemSize_));
     CUDA_RUNTIME(cudaGetLastError());
   }
+
+  /* set the CUDA device for this LocalDomain
+  */
+  void set_device(CudaErrorsFatal fatal = CudaErrorsFatal::YES);
 
   /*
    */
@@ -182,7 +189,7 @@ public:
 
   /*! \brief retrieve a pointer to next domain values (to set in stencil)
    */
-  template <typename T> T *get_next(const DataHandle<T> handle) {
+  template <typename T> T *get_next(const DataHandle<T> handle) const {
     assert(dataElemSize_.size() > handle.id_);
     assert(nextDataPtrs_.size() > handle.id_);
     void *ptr = nextDataPtrs_[handle.id_];
@@ -212,6 +219,26 @@ public:
   template <typename T>
   Accessor<T> get_curr_accessor(const DataHandle<T> &dh) const noexcept {
     T *raw = get_curr(dh);
+
+    // the origin stored in the localdomain does not include the halo,
+    // but the accessor needs to know how to skip the halo region
+    Dim3 org = origin();
+    org.x -= radius_.x(-1);
+    org.y -= radius_.y(-1);
+    org.z -= radius_.z(-1);
+
+    // the total allocation size, for indexing in the accessor
+    Dim3 pitch = sz_;
+    pitch.x += radius_.x(-1) + radius_.x(1);
+    pitch.y += radius_.y(-1) + radius_.y(1);
+    pitch.z += radius_.z(-1) + radius_.z(1);
+
+    return Accessor<T>(raw, org, pitch);
+  }
+
+  template <typename T>
+  Accessor<T> get_next_accessor(const DataHandle<T> &dh) const noexcept {
+    T *raw = get_next(dh);
 
     // the origin stored in the localdomain does not include the halo,
     // but the accessor needs to know how to skip the halo region
@@ -337,6 +364,11 @@ public:
     return ret;
   }
 
+  /* return the coordinates of the halo region on side `dir`.
+     `halo` determines whether exterior (false) or halo (true) coordinates
+  */
+  Rect3 halo_coords(const Dim3 &dir, const bool halo);
+
   /* get the point-size of the halo region on side `dir`, with a compute region of size `sz` and a kernel radius `radius`.
   dir=[0,0,0] returns sz
   */
@@ -353,6 +385,7 @@ public:
     LOG_SPEW("ret=" << ret << " sz=" << sz);
     return ret;
   }
+
 
   // return the extent of the halo in direction `dir`
   Dim3 halo_extent(const Dim3 &dir) const noexcept {
@@ -442,6 +475,8 @@ public:
     assert(currDataPtrs_.size() == nextDataPtrs_.size());
     assert(dataElemSize_.size() == nextDataPtrs_.size());
 
+    LOG_INFO("origin is " << origin_);
+
     // allocate each data region
     CUDA_RUNTIME(cudaSetDevice(dev_));
     // int rank;
@@ -485,6 +520,7 @@ public:
                             cudaMemcpyHostToDevice));
     CUDA_RUNTIME(cudaGetLastError());
   }
+
 };
 
 #undef LOG_SPEW

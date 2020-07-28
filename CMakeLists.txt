@@ -12,7 +12,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(CheckLanguage)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
-option(USE_NUMA "compile with NUMA support" ON)
 option(USE_MPI "compile with MPI support" ON)
 option(USE_CUDA "compile with CUDA support" ON)
 option(USE_CUDA_AWARE_MPI "assume CUDA-aware MPI support" OFF)
@@ -21,10 +20,8 @@ option(LOUD "print a lot of things" ON)
 
 if(NOT DEFINED STENCIL_OUTPUT_LEVEL)
 message(STATUS "STENCIL_OUTPUT_LEVEL not defined, setting to INFO")
-set(STENCIL_OUTPUT_LEVEL INFO)
+set(STENCIL_OUTPUT_LEVEL INFO CACHE STRING "")
 endif()
-
-
 
 
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
@@ -49,11 +46,9 @@ if(USE_MPI)
   find_package(MPI)
 endif()
 
-if (USE_NUMA)
-  find_package(NUMA)
-endif()
+add_subdirectory(src)
 
-add_library(stencil INTERFACE)
+add_library(stencil SHARED ${STENCIL_SOURCES})
 add_library(stencil::stencil ALIAS stencil)
 
 if (STENCIL_OUTPUT_LEVEL MATCHES SPEW)
@@ -72,24 +67,61 @@ else()
   message(FATAL_ERROR "unrecognized value of STENCIL_OUTPUT_LEVEL: "  ${STENCIL_OUTPUT_LEVEL}  ", must be one of SPEW DEBUG INFO WARN ERROR FATAL")
 endif()
 
-target_compile_features(stencil INTERFACE cxx_std_11)
+target_compile_features(stencil PUBLIC cxx_std_11)
+set_target_properties(stencil PROPERTIES CUDA_STANDARD 11)
+
+target_compile_options(stencil PRIVATE
+$<$<COMPILE_LANGUAGE:CXX>:
+ -Wall
+ -Wextra
+ -Wcast-align;
+ -Wdisabled-optimization;
+ -Wformat=2;
+ -Winit-self;
+ -Wlogical-op;
+ -Wmissing-include-dirs;
+ -Woverloaded-virtual;
+ -Wpointer-arith;
+ -Wshadow;
+ -Wstrict-aliasing;
+ -Wswitch-enum;
+ -Wvla;
+ >
+)
+
+target_compile_options(stencil PRIVATE
+$<$<COMPILE_LANGUAGE:CUDA>:
+--Wno-deprecated-gpu-targets;
+--expt-extended-lambda;
+-Xcompiler=-Wall;
+-Xcompiler=-Wextra;
+-Xcompiler=-Wcast-align;
+-Xcompiler=-Wdisabled-optimization;
+-Xcompiler=-Wformat=2;
+-Xcompiler=-Winit-self;
+-Xcompiler=-Wlogical-op;
+-Xcompiler=-Wmissing-include-dirs;
+-Xcompiler=-Woverloaded-virtual;
+-Xcompiler=-Wpointer-arith;
+-Xcompiler=-Wshadow;
+-Xcompiler=-Wstrict-aliasing;
+-Xcompiler=-Wswitch-enum;
+-Xcompiler=-Wvla;
+>
+)
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   target_compile_options(
     stencil
-    INTERFACE
+    PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:
      -G
      -Xcompiler=-fno-omit-frame-pointer
     >
     $<$<COMPILE_LANGUAGE:CXX>:
      -fno-omit-frame-pointer
+     -g
     >
-  )
-  target_compile_options(
-    stencil
-    INTERFACE
-    -O0
   )
 elseif (CMAKE_BUILD_TYPE MATCHES Release)
   target_compile_options(
@@ -123,15 +155,6 @@ else()
   target_compile_definitions(stencil INTERFACE -DSTENCIL_LOUD=0)
 endif()
 
-if (NUMA_FOUND)
-  target_link_libraries(stencil INTERFACE NUMA::NUMA)
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=1)
-  message(STATUS "NUMA found, compiling with STENCIL_USE_NUMA=1")
-else()
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_NUMA=0)
-  message(STATUS "NUMA not found, compiling with STENCIL_USE_NUMA=0")
-endif()
-
 if(CMAKE_CUDA_COMPILER)
   target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=1)
   message(STATUS "CUDA found, compiling with STENCIL_USE_CUDA=1")
@@ -157,31 +180,32 @@ endif()
 ## https://gitlab.kitware.com/cmake/cmake/issues/18897
 ## Add MPI flags
 if(MPI_FOUND)
-  target_include_directories(stencil SYSTEM INTERFACE ${MPI_CXX_INCLUDE_DIRS})
+  target_include_directories(stencil SYSTEM PUBLIC ${MPI_CXX_INCLUDE_DIRS})
 
-  target_link_libraries(stencil INTERFACE ${MPI_CXX_LIBRARIES})
+  target_link_libraries(stencil PUBLIC ${MPI_CXX_LIBRARIES})
   # target_link_libraries(stencil INTERFACE MPI::MPI_CXX)
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_MPI=1)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_USE_MPI=1)
   message(STATUS "MPI found, compiling with STENCIL_USE_MPI=1")
   message(STATUS "MPI_CXX_LIBRARIES=" ${MPI_CXX_LIBRARIES})
   message(STATUS "MPIEXEC_EXECUTABLE=" ${MPIEXEC_EXECUTABLE})
 else()
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_MPI=0)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_USE_MPI=0)
   message(STATUS "MPI not found,  compiling with STENCIL_USE_MPI=0")
 endif()
 
 ## Add include directories
-target_include_directories(stencil SYSTEM INTERFACE ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
-target_include_directories(stencil INTERFACE
+target_include_directories(stencil SYSTEM PUBLIC ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+target_include_directories(stencil PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
 
-target_link_libraries(stencil INTERFACE nvidia-ml)
-target_link_libraries(stencil INTERFACE ${NVTOOLSEXT_LIB})
+target_link_libraries(stencil PUBLIC nvidia-ml)
+target_link_libraries(stencil PUBLIC ${NVTOOLSEXT_LIB})
 
 # "this command should be in the source directory root for CTest to find the test file"
 enable_testing() 
+
 add_subdirectory(test)
-add_subdirectory(src)
+add_subdirectory(bin)
 

@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
 
   const int64_t K = 1024;
   const int64_t M = K * K;
-  const int64_t G = K * K * K;
+  // const int64_t G = K * K * K;
 
   const int nGpus = 4;
   const int nMeasures = 10;
