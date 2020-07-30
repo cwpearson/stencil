@@ -44,38 +44,38 @@ public:
   }
 
   void set_face(const size_t r) {
-    rads_.at(0, 0, 1) = r;
-    rads_.at(0, 0, 2) = r;
-    rads_.at(0, 1, 0) = r;
-    rads_.at(0, 2, 0) = r;
-    rads_.at(1, 0, 0) = r;
-    rads_.at(2, 0, 0) = r;
+    dir(0, 0, -1) = r;
+    dir(0, 0, 1) = r;
+    dir(0, -1, 0) = r;
+    dir(0, 1, 0) = r;
+    dir(-1, 0, 0) = r;
+    dir(1, 0, 0) = r;
   }
 
   void set_edge(const size_t r) {
-    rads_.at(0, 1, 1) = r;
-    rads_.at(0, 1, 2) = r;
-    rads_.at(0, 2, 1) = r;
-    rads_.at(0, 2, 2) = r;
-    rads_.at(1, 0, 1) = r;
-    rads_.at(1, 0, 2) = r;
-    rads_.at(2, 0, 1) = r;
-    rads_.at(2, 0, 2) = r;
-    rads_.at(1, 1, 0) = r;
-    rads_.at(1, 2, 0) = r;
-    rads_.at(2, 1, 0) = r;
-    rads_.at(2, 2, 0) = r;
+    dir(0, 1, 1) = r;
+    dir(0, 1, -1) = r;
+    dir(0, -1, 1) = r;
+    dir(0, -1, -1) = r;
+    dir(1, 0, 1) = r;
+    dir(1, 0, -1) = r;
+    dir(-1, 0, 1) = r;
+    dir(-1, 0, -1) = r;
+    dir(1, 1, 0) = r;
+    dir(1, -1, 0) = r;
+    dir(-1, 1, 0) = r;
+    dir(-1, -1, 0) = r;
   }
 
   void set_corner(const size_t r) {
-    rads_.at(1, 1, 1) = r;
-    rads_.at(1, 1, 2) = r;
-    rads_.at(1, 2, 1) = r;
-    rads_.at(1, 2, 2) = r;
-    rads_.at(2, 1, 1) = r;
-    rads_.at(2, 1, 2) = r;
-    rads_.at(2, 2, 1) = r;
-    rads_.at(2, 2, 2) = r;
+    dir(1, 1, 1) = r;
+    dir(1, 1, -1) = r;
+    dir(1, -1, 1) = r;
+    dir(1, -1, -1) = r;
+    dir(-1, 1, 1) = r;
+    dir(-1, 1, -1) = r;
+    dir(-1, -1, 1) = r;
+    dir(-1, -1, -1) = r;
   }
 
   static Radius constant(const size_t r) {
