@@ -165,14 +165,16 @@ To control the compute mode, use `bsub -alloc_flags gpudefault` (see https://www
 
 To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.ornl.gov/systems/summit_user_guide.html, "CUDA-Aware MPI")
 
-## ParaView
+## ParaView (5.8.0)
 
-* `File` > `Open`. Do not open as a group, open individually.
+* `File` > `Open`. Open individually, not as a group
   * Select the delimiters, then hit apply on the properties pane
 * Group the files into a single dataset.
-  * Select the two files, then `Filters` > `Group Datasets`.
-* `Filters` > `Alphabetical` > `Table to Points`
+  * Select the two files, then `Filters` > `Common` > `Group Datasets`.
+  * `Apply`. This will create a new combined GroupDatasets1 in the pipeline browser.
+* Select the dataset and `Filters` > `Alphabetical` > `Table to Points`
   * Select the x,y,z columns in the `Properties` pane.
+  * Click on the vizualization window
   * `Apply`
 
 
