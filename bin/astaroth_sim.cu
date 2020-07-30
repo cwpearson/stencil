@@ -67,14 +67,14 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src, c
   for (int64_t z = reg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < reg.hi.z; z += gridDim.z * blockDim.z) {
     for (int64_t y = reg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < reg.hi.y; y += gridDim.y * blockDim.y) {
       for (int64_t x = reg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < reg.hi.x; x += gridDim.x * blockDim.x) {
-        Dim3 o(x,y,z);
+        Dim3 o(x, y, z);
         float val = 0;
-        val += src[o + Dim3(-1,0,0)];
-        val += src[o + Dim3(0,-1,0)];
-        val += src[o + Dim3(0,0,-1)];
-        val += src[o + Dim3(1,0,0)];
-        val += src[o + Dim3(0,1,0)];
-        val += src[o + Dim3(0,0,1)];
+        val += src[o + Dim3(-1, 0, 0)];
+        val += src[o + Dim3(0, -1, 0)];
+        val += src[o + Dim3(0, 0, -1)];
+        val += src[o + Dim3(1, 0, 0)];
+        val += src[o + Dim3(0, 1, 0)];
+        val += src[o + Dim3(0, 0, 1)];
         val /= 6;
         dst[o] = val;
       }
@@ -180,7 +180,6 @@ int main(int argc, char **argv) {
     std::cout << "domain: " << x << "," << y << "," << z << "\n";
   }
 
-
   {
     size_t radius = 3;
 
@@ -202,7 +201,7 @@ int main(int argc, char **argv) {
     // create a compute stream for each local domain
     std::vector<RcStream> computeStreams(dd.domains().size());
     for (size_t di = 0; di < dd.domains().size(); ++di) {
-	    computeStreams[di] = RcStream(dd.domains()[di].gpu());
+      computeStreams[di] = RcStream(dd.domains()[di].gpu());
     }
 
     std::cerr << "init\n";
@@ -217,29 +216,28 @@ int main(int argc, char **argv) {
 
     if (0)
       dd.write_paraview("init");
-    
-    std::vector<std::vector<Rect3>> interiors = dd.interior();
-    std::vector<std::vector<Rect3>> exteriors = dd.exterior();
+
+    const std::vector<Rect3> interiors = dd.get_interior();
+    const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
 
     for (size_t iter = 0; iter < 5; ++iter) {
+
       // launch operations on interior
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
         const Accessor<float> src0 = d.get_curr_accessor<float>(dh0);
         const Accessor<float> dst0 = d.get_next_accessor<float>(dh0);
-        for (size_t si = 0; si < interiors[di].size(); ++si) {
-          nvtxRangePush("launch");
-          const Rect3 cr = interiors[di][si];
-          std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
-          // std::cerr << src0.origin() << "=src0 origin\n";
-          d.set_device();
-          dim3 dimBlock = Dim3::make_block_dim(cr.hi-cr.lo, 512);
-          dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-          stencil_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(dst0, src0, cr);
-          CUDA_RUNTIME(cudaGetLastError());
-          nvtxRangePop(); // launch
-          // CUDA_RUNTIME(cudaDeviceSynchronize());
-        }
+        nvtxRangePush("launch");
+        const Rect3 cr = interiors[di];
+        std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
+        // std::cerr << src0.origin() << "=src0 origin\n";
+        d.set_device();
+        dim3 dimBlock = Dim3::make_block_dim(cr.hi - cr.lo, 512);
+        dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+        stencil_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(dst0, src0, cr);
+        CUDA_RUNTIME(cudaGetLastError());
+        nvtxRangePop(); // launch
+                        // CUDA_RUNTIME(cudaDeviceSynchronize());
       }
 
       // exchange halo
@@ -257,9 +255,9 @@ int main(int argc, char **argv) {
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          dim3 dimBlock = Dim3::make_block_dim(cr.hi-cr.lo, 512);
+          dim3 dimBlock = Dim3::make_block_dim(cr.hi - cr.lo, 512);
           dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-          stencil_kernel<<<dimGrid, dimBlock,0,computeStreams[di]>>>(dst0, src0, cr);
+          stencil_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(dst0, src0, cr);
           CUDA_RUNTIME(cudaGetLastError());
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());

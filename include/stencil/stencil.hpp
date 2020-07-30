@@ -353,6 +353,10 @@ public:
    */
   const Dim3 &get_origin(int64_t i) const { return domains_[i].origin(); }
 
+  /* return the compute region of the entire distributed domain
+  */
+  const Rect3 get_compute_region() const noexcept;
+
   /* return the total number of bytes moved during the halo exchange
   ( after realize() )
   */
@@ -488,12 +492,14 @@ public:
               continue; // no message
             }
 
-            // Only send to do sends when the stencil radius in the opposite
+            // Only do sends when the stencil radius in the opposite
             // direction is non-zero for example, if +x radius is 2, our -x
             // neighbor needs a halo region from us, so we need to plan to send
             // in that direction
             if (0 == radius_.dir(dir * -1)) {
               continue; // no sends or recvs for this dir
+            } else {
+              LOG_DEBUG(dir << " radius = " << radius_.dir(dir * -1));
             }
 
             // TODO: this assumes we have periodic boundaries
@@ -522,6 +528,7 @@ public:
                 assert(di < coloOutboxes.size());
                 coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
                 coloOutboxes[di][dstIdx].push_back(sMsg);
+                LOG_DEBUG("mpi-colocated for Mesage dir=" << sMsg.dir_);
                 goto send_planned;
               }
             }
@@ -912,14 +919,14 @@ public:
    * during exchange
    * One vector per LocalDomain
    */
-  std::vector<std::vector<Rect3>> interior() const;
+  std::vector<Rect3> get_interior() const;
 
   /* Return the coordinates of the stencil regions that CANNOT be safely operated on during
    * exchange.
    * The GPU kernel can modify this data when the exchange is no occuring
    * One vector per LocalDomain
    */
-  std::vector<std::vector<Rect3>> exterior() const;
+  std::vector<std::vector<Rect3>> get_exterior() const;
 
   /*!
   do a halo exchange and return
