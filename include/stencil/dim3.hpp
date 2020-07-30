@@ -261,6 +261,8 @@ public:
     return ret;
   }
 
+#if 0
+// TODO: smarter shaping of blocks to extents
   static Dim3 make_block_dim2(const Dim3 extent, int64_t threads) {
     threads = std::min(threads, int64_t(1024)); // max of 1024 threads in a block
     assert(extent.x >= 0);
@@ -302,6 +304,8 @@ public:
 
 
   }
+  #endif
+
 };
 
 inline std::ostream &operator<<(std::ostream &os, const Dim3 &d) {
