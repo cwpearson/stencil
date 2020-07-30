@@ -9,7 +9,7 @@ void LocalDomain::set_device(CudaErrorsFatal fatal) {
   }
 }
 
-Rect3 LocalDomain::halo_coords(const Dim3 &dir, const bool halo) {
+Rect3 LocalDomain::halo_coords(const Dim3 &dir, const bool halo) const {
   /* convert halo position as offset from allocation to coordinates
   */
 

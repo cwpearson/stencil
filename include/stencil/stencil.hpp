@@ -912,14 +912,14 @@ public:
    * during exchange
    * One vector per LocalDomain
    */
-  std::vector<std::vector<Rect3>> interior();
+  std::vector<std::vector<Rect3>> interior() const;
 
   /* Return the coordinates of the stencil regions that CANNOT be safely operated on during
    * exchange.
    * The GPU kernel can modify this data when the exchange is no occuring
    * One vector per LocalDomain
    */
-  std::vector<std::vector<Rect3>> exterior();
+  std::vector<std::vector<Rect3>> exterior() const;
 
   /*!
   do a halo exchange and return

@@ -2,14 +2,14 @@
 
 #include <vector>
 
-std::vector<std::vector<Rect3>> DistributedDomain::interior() {
+std::vector<std::vector<Rect3>> DistributedDomain::interior() const {
 
   // one sparse domain for each LocalDomain
   std::vector<std::vector<Rect3>> ret(domains_.size());
 
   // direction of our halo
   for (size_t di = 0; di < domains_.size(); ++di) {
-    LocalDomain &dom = domains_[di];
+    const LocalDomain &dom = domains_[di];
     for (int dz = -1; dz <= 1; ++dz) {
       for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
@@ -38,14 +38,14 @@ std::vector<std::vector<Rect3>> DistributedDomain::interior() {
   return ret;
 }
 
-std::vector<std::vector<Rect3>> DistributedDomain::exterior() {
+std::vector<std::vector<Rect3>> DistributedDomain::exterior() const {
 
   // one sparse domain for each LocalDomain
   std::vector<std::vector<Rect3>> ret(domains_.size());
 
   // direction of our halo
   for (size_t di = 0; di < domains_.size(); ++di) {
-    LocalDomain &dom = domains_[di];
+    const LocalDomain &dom = domains_[di];
     for (int dz = -1; dz <= 1; ++dz) {
       for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {

@@ -367,7 +367,7 @@ public:
   /* return the coordinates of the halo region on side `dir`.
      `halo` determines whether exterior (false) or halo (true) coordinates
   */
-  Rect3 halo_coords(const Dim3 &dir, const bool halo);
+  Rect3 halo_coords(const Dim3 &dir, const bool halo) const;
 
   /* get the point-size of the halo region on side `dir`, with a compute region of size `sz` and a kernel radius `radius`.
   dir=[0,0,0] returns sz
