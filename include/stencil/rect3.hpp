@@ -12,10 +12,13 @@
 
 class Rect3 {
 public:
+  Rect3() {}
   Rect3(const Dim3 &_lo, const Dim3 &_hi) : lo(_lo), hi(_hi) {}
 
   Dim3 lo;
   Dim3 hi;
+
+  Dim3 extent() const noexcept { return hi - lo; }
 };
 
 inline std::ostream &operator<<(std::ostream &os, const Rect3 &e) {
