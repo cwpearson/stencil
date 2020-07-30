@@ -29,3 +29,9 @@ Rect3 LocalDomain::halo_coords(const Dim3 &dir, const bool halo) const {
 
   return Rect3(pos, pos+ext);
 }
+
+Rect3 LocalDomain::get_compute_region() const noexcept {
+  Dim3 lo = origin();
+  Dim3 hi = origin() + size();
+  return Rect3(lo, hi);
+}

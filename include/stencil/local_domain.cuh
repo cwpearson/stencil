@@ -258,11 +258,7 @@ public:
 
   /* return the coordinates of the compute region (not including the halo)
    */
-  Rect3 get_compute_region() const noexcept {
-    Dim3 lo = origin();
-    Dim3 hi = origin() + size();
-    return Rect3(lo, hi);
-  }
+  Rect3 get_compute_region()const noexcept;
 
   /* return the coordinates of the whole domain, including the halo
    */
@@ -323,6 +319,7 @@ public:
 
   // return the position of the halo relative to get_data() on the `dir` side of the
   // LocalDomain (e.g., dir [1,0,0] returns the position of the region on the +x side)
+  // dir = [0,0,0] returns the entire region (without the halo)
   Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
     assert(dir.all_gt(-2));
     assert(dir.all_lt(2));
