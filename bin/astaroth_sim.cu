@@ -217,18 +217,19 @@ int main(int argc, char **argv) {
 
     if (0)
       dd.write_paraview("init");
+    
+    std::vector<std::vector<Rect3>> interiors = dd.interior();
+    std::vector<std::vector<Rect3>> exteriors = dd.exterior();
 
     for (size_t iter = 0; iter < 5; ++iter) {
-
       // launch operations on interior
-      std::vector<std::vector<Rect3>> interiors = dd.interior();
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
+        const Accessor<float> src0 = d.get_curr_accessor<float>(dh0);
+        const Accessor<float> dst0 = d.get_next_accessor<float>(dh0);
         for (size_t si = 0; si < interiors[di].size(); ++si) {
           nvtxRangePush("launch");
           const Rect3 cr = interiors[di][si];
-          const Accessor<float> src0 = d.get_curr_accessor<float>(dh0);
-          const Accessor<float> dst0 = d.get_next_accessor<float>(dh0);
           std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
@@ -246,14 +247,13 @@ int main(int argc, char **argv) {
       dd.exchange();
 
       // operate on exterior
-      std::vector<std::vector<Rect3>> exteriors = dd.exterior();
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
+        const Accessor<float> src0 = d.get_curr_accessor<float>(dh0);
+        const Accessor<float> dst0 = d.get_next_accessor<float>(dh0);
         for (size_t si = 0; si < exteriors[di].size(); ++si) {
           nvtxRangePush("launch");
           const Rect3 cr = exteriors[di][si];
-          const Accessor<float> src0 = d.get_curr_accessor<float>(dh0);
-          const Accessor<float> dst0 = d.get_next_accessor<float>(dh0);
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
