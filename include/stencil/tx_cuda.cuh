@@ -27,43 +27,38 @@
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 0
-#define LOG_SPEW(x)                                                            \
-  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_SPEW(x) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_SPEW(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 1
-#define LOG_DEBUG(x)                                                           \
-  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_DEBUG(x) std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_DEBUG(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 2
-#define LOG_INFO(x)                                                            \
-  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_INFO(x) std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_INFO(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 3
-#define LOG_WARN(x)                                                            \
-  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_WARN(x) std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_WARN(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 4
-#define LOG_ERROR(x)                                                           \
-  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_ERROR(x) std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_ERROR(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 5
-#define LOG_FATAL(x)                                                           \
-  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
+#define LOG_FATAL(x)                                                                                                   \
+  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";                                           \
   exit(1);
 #else
 #define LOG_FATAL(x) exit(1);
@@ -97,8 +92,7 @@ public:
 
   ~PeerAccessSender() {}
 
-  void prepare(std::vector<Message> &outbox,
-               const std::vector<LocalDomain> &domains) {
+  void prepare(std::vector<Message> &outbox, const std::vector<LocalDomain> &domains) {
     outbox_ = outbox;
     std::sort(outbox_.begin(), outbox_.end());
 
@@ -133,10 +127,9 @@ public:
       CUDA_RUNTIME(cudaSetDevice(stream.device()));
       assert(srcDomain->num_data() == dstDomain->num_data());
 
-      multi_translate<<<dimGrid, dimBlock, 0, stream>>>(
-          dstDomain->dev_curr_datas(), dstPos, dstSz,
-          srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
-          srcDomain->dev_elem_sizes(), srcDomain->num_data());
+      multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos, dstSz,
+                                                        srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
+                                                        srcDomain->dev_elem_sizes(), srcDomain->num_data());
       CUDA_RUNTIME(cudaGetLastError());
     }
 
@@ -144,7 +137,9 @@ public:
   }
 
   void wait() {
+    
     for (auto &kv : streams_) {
+      CUDA_RUNTIME(cudaSetDevice(kv.second.device()));
       CUDA_RUNTIME(cudaStreamSynchronize(kv.second));
     }
   }
@@ -171,12 +166,10 @@ private:
   DeviceUnpacker unpacker_;
 
 public:
-  PeerCopySender(size_t srcGPU, size_t dstGPU, LocalDomain &srcDomain,
-                 LocalDomain &dstDomain)
-      : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain),
-        dstDomain_(&dstDomain), srcStream_(srcDomain.gpu(), RcStream::Priority::HIGH),
-        dstStream_(dstDomain.gpu(), RcStream::Priority::HIGH), packer_(srcStream_),
-        unpacker_(dstStream_) {}
+  PeerCopySender(size_t srcGPU, size_t dstGPU, LocalDomain &srcDomain, LocalDomain &dstDomain)
+      : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain), dstDomain_(&dstDomain),
+        srcStream_(srcDomain.gpu(), RcStream::Priority::HIGH), dstStream_(dstDomain.gpu(), RcStream::Priority::HIGH),
+        packer_(srcStream_), unpacker_(dstStream_) {}
 
   void prepare(std::vector<Message> &outbox) {
     packer_.prepare(srcDomain_, outbox);
@@ -199,8 +192,7 @@ public:
     // copy from src device to dst device
     const int dstDev = dstDomain_->gpu();
     const int srcDev = srcDomain_->gpu();
-    CUDA_RUNTIME(cudaMemcpyPeerAsync(unpacker_.data(), dstDev, packer_.data(),
-                                     srcDev, packer_.size(), srcStream_));
+    CUDA_RUNTIME(cudaMemcpyPeerAsync(unpacker_.data(), dstDev, packer_.data(), srcDev, packer_.size(), srcStream_));
 
     // sync src and dst streams
     CUDA_RUNTIME(cudaEventRecord(event_, srcStream_));
@@ -212,8 +204,10 @@ public:
   }
 
   void wait() {
-    cudaStreamSynchronize(srcStream_);
-    cudaStreamSynchronize(dstStream_);
+    CUDA_RUNTIME(cudaSetDevice(srcStream_.device()));
+    CUDA_RUNTIME(cudaStreamSynchronize(srcStream_));
+    CUDA_RUNTIME(cudaSetDevice(dstStream_.device()));
+    CUDA_RUNTIME(cudaStreamSynchronize(dstStream_));
   }
 };
 
@@ -247,8 +241,8 @@ public:
   ColocatedDeviceSender(int srcRank, int srcGPU, // domain ID
                         int dstRank, int dstGPU, // domain ID
                         int srcDev)              // cuda ID
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        srcDev_(srcDev), dstBuf_(nullptr), bufSize_(0), event_(0) {
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), srcDev_(srcDev), dstBuf_(nullptr),
+        bufSize_(0), event_(0) {
 
     int tag_ub = -1;
     int flag;
@@ -276,19 +270,17 @@ public:
 
     // create an event and associated handle
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
-    CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess |
-                                              cudaEventDisableTiming));
+    CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess | cudaEventDisableTiming));
     CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
 
-    MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_,
-              make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
-              &evtReq_);
+    // send the event handle
+    MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedEvt>(payload),
+              MPI_COMM_WORLD, &evtReq_);
 
     // Recieve the IPC mem handle
     const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload);
     assert(memHandleTag < tagUb_);
-    MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, memHandleTag,
-              MPI_COMM_WORLD, &memReq_);
+    MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, memHandleTag, MPI_COMM_WORLD, &memReq_);
     // Retrieve the destination device id
     const int devTag = make_tag<MsgKind::ColocatedDev>(payload);
     assert(devTag < tagUb_);
@@ -307,8 +299,7 @@ public:
 
     // convert to a pointer
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
-    CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_,
-                                      cudaIpcMemLazyEnablePeerAccess));
+    CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_, cudaIpcMemLazyEnablePeerAccess));
 
     // block until we have sent event handle
     MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
@@ -321,13 +312,15 @@ public:
     assert(dstDev_ >= 0);
     assert(srcDev_ >= 0);
     assert(bufSize_ > 0);
-    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_,
-                                     bufSize_, stream));
+    CUDA_RUNTIME(cudaSetDevice(srcDev_));
+    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_, bufSize_, stream));
     // record the event
     CUDA_RUNTIME(cudaEventRecord(event_, stream));
   }
 
-  void wait() { CUDA_RUNTIME(cudaEventSynchronize(event_)); }
+  void wait() { 
+    CUDA_RUNTIME(cudaSetDevice(srcDev_));
+    CUDA_RUNTIME(cudaEventSynchronize(event_)); }
 };
 
 class ColocatedDeviceRecver {
@@ -352,8 +345,7 @@ public:
                         int dstGPU, // domain ID
                         int dstDev  // cuda ID
                         )
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        dstDev_(dstDev), event_(0) {}
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), dstDev_(dstDev), event_(0) {}
   ~ColocatedDeviceRecver() {
     if (event_) {
       CUDA_RUNTIME(cudaEventDestroy(event_));
@@ -370,22 +362,18 @@ public:
     int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
     // recv the event handle
-    MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_,
-              make_tag<MsgKind::ColocatedEvt>(payload), MPI_COMM_WORLD,
-              &evtReq_);
+    MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_, make_tag<MsgKind::ColocatedEvt>(payload),
+              MPI_COMM_WORLD, &evtReq_);
 
     // get an a memory handle
     CUDA_RUNTIME(cudaSetDevice(dstDev_));
     CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
 
     // Send the mem handle to the ColocatedSender
-    MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_,
-              make_tag<MsgKind::ColocatedMem>(payload), MPI_COMM_WORLD,
-              &memReq_);
+    MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_, make_tag<MsgKind::ColocatedMem>(payload),
+              MPI_COMM_WORLD, &memReq_);
     // Send the CUDA device id to the ColocatedSender
-    MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_,
-              make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD,
-              &idReq_);
+    MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_, make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD, &idReq_);
   }
 
   void finish_prepare() {
@@ -403,6 +391,8 @@ public:
   }
 
   /*! have stream wait for data to arrive
+
+     FIXME: if this gets called before the other rank sends, then it won't work
    */
   void wait(RcStream &stream) {
     assert(event_);
@@ -424,8 +414,7 @@ private:
 
 public:
   // ColocatedHaloSender() {}
-  ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                      LocalDomain &domain)
+  ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), packer_(stream_),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
@@ -460,11 +449,9 @@ private:
   DeviceUnpacker unpacker_;
 
 public:
-  ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                      LocalDomain &domain)
+  ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
-        stream_(domain.gpu(), RcStream::Priority::HIGH),
-        recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
+        stream_(domain.gpu(), RcStream::Priority::HIGH), recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
         unpacker_(stream_) {}
 
   void start_prepare(const std::vector<Message> &inbox) {
@@ -484,7 +471,9 @@ public:
   }
 
   void wait() noexcept {
+    // wait on unpacker
     assert(stream_.device() == domain_->gpu());
+    CUDA_RUNTIME(cudaSetDevice(stream_.device()));
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
   }
 };
@@ -512,11 +501,9 @@ private:
 
 public:
   // RemoteSender() : hostBuf_(nullptr) {}
-  RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
-               LocalDomain &domain)
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu(), RcStream::Priority::HIGH),
-        state_(State::None), packer_(stream_) {}
+  RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain), hostBuf_(nullptr),
+        stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), packer_(stream_) {}
 
   ~RemoteSender() { CUDA_RUNTIME(cudaFreeHost(hostBuf_)); }
 
@@ -541,8 +528,7 @@ public:
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
       // allocate device & host buffers
-      CUDA_RUNTIME(
-          cudaHostAlloc(&hostBuf_, packer_.size(), cudaHostAllocDefault));
+      CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, packer_.size(), cudaHostAllocDefault));
       assert(hostBuf_);
     }
   }
@@ -594,8 +580,8 @@ public:
 
       // copy to host buffer
       assert(hostBuf_);
-      CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, packer_.data(), packer_.size(),
-                                   cudaMemcpyDefault, stream_));
+      CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, packer_.data(), packer_.size(), cudaMemcpyDefault, stream_));
+
       nvtxRangePop(); // RemoteSender::send_d2h
     }
   }
@@ -627,8 +613,7 @@ public:
       assert(srcGPU_ < 8);
       assert(dstGPU_ < 8);
       const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-      MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, tag,
-                MPI_COMM_WORLD, &req_);
+      MPI_Isend(hostBuf_, packer_.size(), MPI_BYTE, dstRank_, tag, MPI_COMM_WORLD, &req_);
       nvtxRangePop(); // RemoteSender::send_h2h
     }
   }
@@ -658,11 +643,9 @@ private:
 
 public:
   RemoteRecver() = delete;
-  RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
-               LocalDomain &domain)
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), hostBuf_(nullptr), stream_(domain.gpu(), RcStream::Priority::HIGH),
-        state_(State::None), unpacker_(stream_) {
+  RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain), hostBuf_(nullptr),
+        stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), unpacker_(stream_) {
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   }
 
@@ -679,8 +662,7 @@ public:
       CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
       // allocate device & host buffers
-      CUDA_RUNTIME(
-          cudaHostAlloc(&hostBuf_, unpacker_.size(), cudaHostAllocDefault));
+      CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, unpacker_.size(), cudaHostAllocDefault));
       assert(hostBuf_);
     }
   }
@@ -721,8 +703,7 @@ public:
     if (unpacker_.size()) {
       nvtxRangePush("RemoteRecver::recv_h2d");
       // copy to device buffer
-      CUDA_RUNTIME(cudaMemcpyAsync(unpacker_.data(), hostBuf_, unpacker_.size(),
-                                   cudaMemcpyDefault, stream_));
+      CUDA_RUNTIME(cudaMemcpyAsync(unpacker_.data(), hostBuf_, unpacker_.size(), cudaMemcpyDefault, stream_));
       unpacker_.unpack();
       nvtxRangePop(); // RemoteRecver::recv_h2d
     }
@@ -754,8 +735,7 @@ public:
       const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
       int numBytes = unpacker_.size();
       assert(numBytes <= std::numeric_limits<int>::max());
-      MPI_Irecv(hostBuf_, int(numBytes), MPI_BYTE, srcRank_, tag,
-                MPI_COMM_WORLD, &req_);
+      MPI_Irecv(hostBuf_, int(numBytes), MPI_BYTE, srcRank_, tag, MPI_COMM_WORLD, &req_);
       nvtxRangePop(); // RemoteRecver::recv_h2h
     }
   }
@@ -788,11 +768,9 @@ private:
 
 public:
   // CudaAwareMpiSender() {}
-  CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                     LocalDomain &domain)
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None),
-        packer_(stream_) {}
+  CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain),
+        stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), packer_(stream_) {}
 
   virtual void prepare(std::vector<Message> &outbox) override {
     packer_.prepare(domain_, outbox);
@@ -861,8 +839,7 @@ public:
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     size_t numBytes = packer_.size();
     assert(numBytes <= std::numeric_limits<int>::max());
-    MPI_Isend(packer_.data(), int(numBytes), MPI_BYTE, dstRank_, tag,
-              MPI_COMM_WORLD, &req_);
+    MPI_Isend(packer_.data(), int(numBytes), MPI_BYTE, dstRank_, tag, MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiSender::send_d2d
   }
 };
@@ -890,10 +867,9 @@ private:
 
 public:
   CudaAwareMpiRecver() = delete;
-  CudaAwareMpiRecver(int srcRank, int srcGPU, int dstRank, int dstGPU,
-                     LocalDomain &domain)
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU),
-        domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), unpacker_(stream_) {}
+  CudaAwareMpiRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain),
+        stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), unpacker_(stream_) {}
 
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
@@ -962,8 +938,7 @@ public:
     assert(dstGPU_ < 8);
     CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    MPI_Irecv(unpacker_.data(), int(unpacker_.size()), MPI_BYTE, srcRank_, tag,
-              MPI_COMM_WORLD, &req_);
+    MPI_Irecv(unpacker_.data(), int(unpacker_.size()), MPI_BYTE, srcRank_, tag, MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
   }
 };

@@ -2,10 +2,8 @@
 
 #include "stencil/dim3.hpp"
 
-inline __device__ void grid_pack(void *__restrict__ dst,
-                                 const void *__restrict__ src,
-                                 const Dim3 srcSize, const Dim3 srcPos,
-                                 const Dim3 srcExtent, const size_t elemSize) {
+inline __device__ void grid_pack(void *__restrict__ dst, const void *__restrict__ src, const Dim3 srcSize,
+                                 const Dim3 srcPos, const Dim3 srcExtent, const size_t elemSize) {
 
   const unsigned int tz = blockDim.z * blockIdx.z + threadIdx.z;
   const unsigned int ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -21,12 +19,12 @@ inline __device__ void grid_pack(void *__restrict__ dst,
       unsigned int yi = yo + srcPos.y;
       for (unsigned int xo = tx; xo < srcExtent.x; xo += blockDim.x * gridDim.x) {
         unsigned int xi = xo + srcPos.x;
-	unsigned int oi = zo * srcExtent.y * srcExtent.x + yo * srcExtent.x + xo;
+        unsigned int oi = zo * srcExtent.y * srcExtent.x + yo * srcExtent.x + xo;
         unsigned int ii = zi * srcSize.y * srcSize.x + yi * srcSize.x + xi;
         if (4 == elemSize) {
-          uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
-          const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
-	  uint32_t v = pSrc[ii];
+          float *pDst = reinterpret_cast<float *>(dst);
+          const float *pSrc = reinterpret_cast<const float *>(src);
+          float v = pSrc[ii];
           pDst[oi] = v;
         } else if (8 == elemSize) {
           uint64_t *pDst = reinterpret_cast<uint64_t *>(dst);
@@ -42,10 +40,7 @@ inline __device__ void grid_pack(void *__restrict__ dst,
   }
 }
 
-static __global__ void pack_kernel(void *__restrict__ dst,
-                                   const void *__restrict__ src,
-                                   const Dim3 srcSize, const Dim3 srcPos,
-                                   const Dim3 srcExtent,
-                                   const size_t elemSize) {
+static __global__ void pack_kernel(void *__restrict__ dst, const void *__restrict__ src, const Dim3 srcSize,
+                                   const Dim3 srcPos, const Dim3 srcExtent, const size_t elemSize) {
   grid_pack(dst, src, srcSize, srcPos, srcExtent, elemSize);
 }

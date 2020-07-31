@@ -1,8 +1,8 @@
 #pragma once
 
 #include <iostream>
-#include <vector>
 #include <thread>
+#include <vector>
 
 #include "stencil/accessor.hpp"
 #include "stencil/cuda_runtime.hpp"
@@ -16,43 +16,38 @@
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 0
-#define LOG_SPEW(x)                                                            \
-  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_SPEW(x) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_SPEW(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 1
-#define LOG_DEBUG(x)                                                           \
-  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_DEBUG(x) std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_DEBUG(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 2
-#define LOG_INFO(x)                                                            \
-  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_INFO(x) std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_INFO(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 3
-#define LOG_WARN(x)                                                            \
-  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_WARN(x) std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_WARN(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 4
-#define LOG_ERROR(x)                                                           \
-  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+#define LOG_ERROR(x) std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_ERROR(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 5
-#define LOG_FATAL(x)                                                           \
-  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
+#define LOG_FATAL(x)                                                                                                   \
+  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";                                           \
   exit(1);
 #else
 #define LOG_FATAL(x) exit(1);
@@ -85,7 +80,7 @@ private:
 
   /* coordinate of the origin of the compute region
   not necessarily the coordinate of the first allocation element
-  since the halo is usually non-zero*/ 
+  since the halo is usually non-zero*/
   Dim3 origin_;
 
   //!< radius of stencils that will be applied
@@ -97,7 +92,9 @@ private:
   std::vector<void *> nextDataPtrs_;
   std::vector<int64_t> dataElemSize_;
   std::vector<std::string> dataName_;
-  // device versions
+  /* device versions of the pointers (the pointers already point to device data)
+   used in the packers
+   */
   void **devCurrDataPtrs_;
   size_t *devDataElemSize_;
 
@@ -105,8 +102,7 @@ private:
 
 public:
   LocalDomain(Dim3 sz, Dim3 origin, int dev)
-      : sz_(sz), origin_(origin), dev_(dev), devCurrDataPtrs_(nullptr),
-        devDataElemSize_(nullptr) {}
+      : sz_(sz), origin_(origin), dev_(dev), devCurrDataPtrs_(nullptr), devDataElemSize_(nullptr) {}
 
   ~LocalDomain() {
     CUDA_RUNTIME(cudaGetLastError());
@@ -136,7 +132,7 @@ public:
   }
 
   /* set the CUDA device for this LocalDomain
-  */
+   */
   void set_device(CudaErrorsFatal fatal = CudaErrorsFatal::YES);
 
   /*
@@ -147,8 +143,6 @@ public:
     return int64_t(currDataPtrs_.size());
   }
 
-
-  
   const Dim3 &origin() const noexcept { return origin_; }
 
   /*! Add an untyped data field with an element size of n.
@@ -171,9 +165,10 @@ public:
   TODO friend class
    */
   void set_radius(size_t r) { radius_ = Radius::constant(r); }
-  void set_radius(const Radius &r) { 
+  void set_radius(const Radius &r) {
     LOG_SPEW("in " << __FUNCTION__);
-    radius_ = r; }
+    radius_ = r;
+  }
 
   const Radius &radius() const noexcept { return radius_; }
 
@@ -216,8 +211,7 @@ public:
     return nextDataPtrs_[idx];
   }
 
-  template <typename T>
-  Accessor<T> get_curr_accessor(const DataHandle<T> &dh) const noexcept {
+  template <typename T> Accessor<T> get_curr_accessor(const DataHandle<T> &dh) const noexcept {
     T *raw = get_curr(dh);
 
     // the origin stored in the localdomain does not include the halo,
@@ -236,8 +230,7 @@ public:
     return Accessor<T>(raw, org, pitch);
   }
 
-  template <typename T>
-  Accessor<T> get_next_accessor(const DataHandle<T> &dh) const noexcept {
+  template <typename T> Accessor<T> get_next_accessor(const DataHandle<T> &dh) const noexcept {
     T *raw = get_next(dh);
 
     // the origin stored in the localdomain does not include the halo,
@@ -258,7 +251,7 @@ public:
 
   /* return the coordinates of the compute region (not including the halo)
    */
-  Rect3 get_compute_region()const noexcept;
+  Rect3 get_compute_region() const noexcept;
 
   /* return the coordinates of the whole domain, including the halo
    */
@@ -315,7 +308,7 @@ public:
 
     return ret;
   }
-  #endif
+#endif
 
   // return the position of the halo relative to get_data() on the `dir` side of the
   // LocalDomain (e.g., dir [1,0,0] returns the position of the region on the +x side)
@@ -366,28 +359,23 @@ public:
   */
   Rect3 halo_coords(const Dim3 &dir, const bool halo) const;
 
-  /* get the point-size of the halo region on side `dir`, with a compute region of size `sz` and a kernel radius `radius`.
-  dir=[0,0,0] returns sz
+  /* get the point-size of the halo region on side `dir`, with a compute region of size `sz` and a kernel radius
+  `radius`. dir=[0,0,0] returns sz
   */
-  static Dim3 halo_extent(const Dim3 &dir, const Dim3 &sz,
-                          const Radius &radius) {
+  static Dim3 halo_extent(const Dim3 &dir, const Dim3 &sz, const Radius &radius) {
     assert(dir.x >= -1 && dir.x <= 1);
     assert(dir.y >= -1 && dir.y <= 1);
     assert(dir.z >= -1 && dir.z <= 1);
     Dim3 ret;
-    
+
     ret.x = (0 == dir.x) ? sz.x : radius.x(dir.x);
     ret.y = (0 == dir.y) ? sz.y : radius.y(dir.y);
     ret.z = (0 == dir.z) ? sz.z : radius.z(dir.z);
-    LOG_SPEW("ret=" << ret << " sz=" << sz);
     return ret;
   }
 
-
   // return the extent of the halo in direction `dir`
-  Dim3 halo_extent(const Dim3 &dir) const noexcept {
-    return halo_extent(dir, sz_, radius_);
-  }
+  Dim3 halo_extent(const Dim3 &dir) const noexcept { return halo_extent(dir, sz_, radius_); }
 
   // return the number of bytes of the halo in direction `dir`
   int64_t halo_bytes(const Dim3 &dir, const int64_t idx) const noexcept {
@@ -399,8 +387,7 @@ public:
 
   // return the 3d size of the actual allocation, in terms of elements
   Dim3 raw_size() const noexcept {
-    return Dim3(sz_.x + radius_.x(-1) + radius_.x(1),
-                sz_.y + radius_.y(-1) + radius_.y(1),
+    return Dim3(sz_.x + radius_.x(-1) + radius_.x(1), sz_.y + radius_.y(-1) + radius_.y(1),
                 sz_.z + radius_.z(-1) + radius_.z(1));
   }
 
@@ -409,12 +396,7 @@ public:
 
   /* Swap current and next pointers
    */
-  void swap() noexcept {
-    assert(currDataPtrs_.size() == nextDataPtrs_.size());
-    for (size_t i = 0; i < currDataPtrs_.size(); ++i) {
-      std::swap(currDataPtrs_[i], nextDataPtrs_[i]);
-    }
-  }
+  void swap() noexcept;
 
   std::vector<unsigned char> region_to_host(const Dim3 &pos, const Dim3 &ext,
                                             const size_t qi // quantity index
@@ -428,14 +410,12 @@ public:
     CUDA_RUNTIME(cudaMalloc(&devBuf, bytes));
     const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
     const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-    pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos,
-                                       ext, elem_size(qi));
+    pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos, ext, elem_size(qi));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
     // copy quantity to host
     std::vector<unsigned char> hostBuf(bytes);
-    CUDA_RUNTIME(
-        cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
+    CUDA_RUNTIME(cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
 
     float *ptr = reinterpret_cast<float *>(hostBuf.data());
 
@@ -490,8 +470,7 @@ public:
       LOG_SPEW("radius +z=" << radius_.z(1));
       LOG_SPEW("radius -z=" << radius_.z(-1));
 
-      int64_t elemBytes = ((sz_.x + radius_.x(-1) + radius_.x(1)) *
-                           (sz_.y + radius_.y(-1) + radius_.y(1)) *
+      int64_t elemBytes = ((sz_.x + radius_.x(-1) + radius_.x(1)) * (sz_.y + radius_.y(-1) + radius_.y(1)) *
                            (sz_.z + radius_.z(-1) + radius_.z(1))) *
                           elemSz;
       LOG_SPEW("allocate " << elemBytes << " bytes");
@@ -505,19 +484,14 @@ public:
       nextDataPtrs_[i] = n;
     }
 
-    CUDA_RUNTIME(cudaMalloc(&devCurrDataPtrs_,
-                            currDataPtrs_.size() * sizeof(currDataPtrs_[0])));
-    CUDA_RUNTIME(cudaMalloc(&devDataElemSize_,
-                            dataElemSize_.size() * sizeof(dataElemSize_[0])));
-    CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(),
-                            currDataPtrs_.size() * sizeof(currDataPtrs_[0]),
+    CUDA_RUNTIME(cudaMalloc(&devCurrDataPtrs_, currDataPtrs_.size() * sizeof(currDataPtrs_[0])));
+    CUDA_RUNTIME(cudaMalloc(&devDataElemSize_, dataElemSize_.size() * sizeof(dataElemSize_[0])));
+    CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(), currDataPtrs_.size() * sizeof(currDataPtrs_[0]),
                             cudaMemcpyHostToDevice));
-    CUDA_RUNTIME(cudaMemcpy(devDataElemSize_, dataElemSize_.data(),
-                            dataElemSize_.size() * sizeof(dataElemSize_[0]),
+    CUDA_RUNTIME(cudaMemcpy(devDataElemSize_, dataElemSize_.data(), dataElemSize_.size() * sizeof(dataElemSize_[0]),
                             cudaMemcpyHostToDevice));
     CUDA_RUNTIME(cudaGetLastError());
   }
-
 };
 
 #undef LOG_SPEW

@@ -1,5 +1,7 @@
 #include "stencil/local_domain.cuh"
 
+#include <nvToolsExt.h>
+
 void LocalDomain::set_device(CudaErrorsFatal fatal) {
   cudaError_t err = cudaSetDevice(dev_);
   if (CudaErrorsFatal::YES == fatal) {
@@ -34,4 +36,19 @@ Rect3 LocalDomain::get_compute_region() const noexcept {
   Dim3 lo = origin();
   Dim3 hi = origin() + size();
   return Rect3(lo, hi);
+}
+
+void LocalDomain::swap() noexcept {
+  nvtxRangePush("swap");
+
+  // swap the host copy of the pointers
+  assert(currDataPtrs_.size() == nextDataPtrs_.size());
+  for (size_t i = 0; i < currDataPtrs_.size(); ++i) {
+    std::swap(currDataPtrs_[i], nextDataPtrs_[i]);
+  }
+
+  // update the device version of the pointers
+  CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(), currDataPtrs_.size() * sizeof(currDataPtrs_[0]),
+                          cudaMemcpyHostToDevice));
+  nvtxRangePop();
 }

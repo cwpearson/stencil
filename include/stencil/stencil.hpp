@@ -31,21 +31,21 @@
 
 #if STENCIL_OUTPUT_LEVEL <= 0
 #define LOG_SPEW(x)                                                            \
-  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+  if (0 == rank_) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_SPEW(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 1
 #define LOG_DEBUG(x)                                                           \
-  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+  if (0 == rank_) std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_DEBUG(x)
 #endif
 
 #if STENCIL_OUTPUT_LEVEL <= 2
 #define LOG_INFO(x)                                                            \
-  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
+  if (0 == rank_) std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
 #else
 #define LOG_INFO(x)
 #endif
@@ -487,6 +487,7 @@ public:
       for (int z = -1; z <= 1; ++z) {
         for (int y = -1; y <= 1; ++y) {
           for (int x = -1; x <= 1; ++x) {
+            // send direction
             const Dim3 dir(x, y, z);
             if (Dim3(0, 0, 0) == dir) {
               continue; // no message
@@ -535,7 +536,7 @@ public:
             if (any_methods(MethodFlags::CudaMpi | MethodFlags::CudaAwareMpi)) {
               assert(di < remoteOutboxes.size());
               remoteOutboxes[di][dstIdx].push_back(sMsg);
-              LOG_SPEW("Plan send <remote> "
+              LOG_DEBUG("Plan send <remote> "
                        << myIdx << " (r" << rank_ << "d" << di << "g" << myDev
                        << ")"
                        << " -> " << dstIdx << " (r" << dstRank << "d" << dstGPU
@@ -929,282 +930,16 @@ public:
   std::vector<std::vector<Rect3>> get_exterior() const;
 
   /*!
-  do a halo exchange and return
+  Do a halo exchange of the "current" quantities and return
   */
-  void exchange() {
-
-#if STENCIL_MEASURE_TIME == 1
-    MPI_Barrier(MPI_COMM_WORLD);
-    double start = MPI_Wtime();
-#endif
-
-    /*! Try to start sends in order from longest to shortest
-     * we expect remote to be longest, followed by peer copy, followed by colo
-     * colo is shorter than peer copy due to the node-aware data placement:
-     * if we try to place bigger exchanges nearby, they will be faster
-     */
-
-    // start remote send d2h
-    LOG_DEBUG("[" << rank_ << "] remote send start");
-    nvtxRangePush("DD::exchange: remote send d2h");
-    for (auto &domSenders : remoteSenders_) {
-      for (auto &kv : domSenders) {
-        StatefulSender *sender = kv.second;
-        sender->send();
-      }
-    }
-    nvtxRangePop();
-
-    // send same-rank messages
-    LOG_DEBUG("rank=" << rank_ << " send peer copy");
-    nvtxRangePush("DD::exchange: peer copy send");
-    for (auto &src : peerCopySenders_) {
-      for (auto &kv : src) {
-        PeerCopySender &sender = kv.second;
-        sender.send();
-      }
-    }
-    nvtxRangePop();
-
-    // start colocated Senders
-    LOG_DEBUG("rank=" << rank_ << " start colo send");
-    nvtxRangePush("DD::exchange: colo send");
-    for (auto &domSenders : coloSenders_) {
-      for (auto &kv : domSenders) {
-        ColocatedHaloSender &sender = kv.second;
-        sender.send();
-      }
-    }
-    nvtxRangePop();
-
-    // send self messages
-    LOG_DEBUG("rank=" << rank_ << " send peer access");
-    nvtxRangePush("DD::exchange: peer access send");
-    peerAccessSender_.send();
-    nvtxRangePop();
-
-    // start colocated recvers
-    LOG_DEBUG("rank=" << rank_ << " start colo recv");
-    nvtxRangePush("DD::exchange: colo recv");
-    for (auto &domRecvers : coloRecvers_) {
-      for (auto &kv : domRecvers) {
-        ColocatedHaloRecver &recver = kv.second;
-        recver.recv();
-      }
-    }
-    nvtxRangePop();
-
-    // start remote recv h2h
-    LOG_DEBUG("[" << rank_ << "] remote recv start");
-    nvtxRangePush("DD::exchange: remote recv h2h");
-    for (auto &domRecvers : remoteRecvers_) {
-      for (auto &kv : domRecvers) {
-        StatefulRecver *recver = kv.second;
-        recver->recv();
-      }
-    }
-    nvtxRangePop();
-
-    // poll senders and recvers to move onto next step until all are done
-    LOG_DEBUG("[" << rank_ << "] start poll");
-    nvtxRangePush("DD::exchange: poll");
-    bool pending = true;
-    while (pending) {
-      pending = false;
-    recvers:
-      // move recvers from h2h to h2d
-      for (auto &domRecvers : remoteRecvers_) {
-        for (auto &kv : domRecvers) {
-          StatefulRecver *recver = kv.second;
-          if (recver->active()) {
-            pending = true;
-            if (recver->next_ready()) {
-              // const Dim3 srcIdx = kv.first;
-              // std::cerr << "[" << rank_ << "] src=" << srcIdx << "
-              // recv_h2d\n";
-              recver->next();
-              goto senders; // try to overlap recv_h2d with send_h2h
-            }
-          }
-        }
-      }
-    senders:
-      // move senders from d2h to h2h
-      for (auto &domSenders : remoteSenders_) {
-        for (auto &kv : domSenders) {
-          StatefulSender *sender = kv.second;
-          if (sender->active()) {
-            pending = true;
-            if (sender->next_ready()) {
-              // const Dim3 dstIdx = kv.first;
-              // std::cerr << "[" << rank_ << "] dst=" << dstIdx << "
-              // send_h2h\n";
-              sender->next();
-              goto recvers; // try to overlap recv_h2d with send_h2h
-            }
-          }
-        }
-      }
-    }
-    nvtxRangePop(); // DD::exchange: poll
-
-    // wait for sends
-    LOG_SPEW("[" << rank_ << "] wait for peer access senders");
-    nvtxRangePush("peerAccessSender.wait()");
-    peerAccessSender_.wait();
-    nvtxRangePop();
-
-    nvtxRangePush("peerCopySender.wait()");
-    for (auto &src : peerCopySenders_) {
-      for (auto &kv : src) {
-        PeerCopySender &sender = kv.second;
-        sender.wait();
-      }
-    }
-    nvtxRangePop(); // peerCopySender.wait()
-
-    // wait for colocated
-    nvtxRangePush("colocated.wait()");
-    for (auto &domSenders : coloSenders_) {
-      for (auto &kv : domSenders) {
-        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
-                         << " wait colocated sender");
-        ColocatedHaloSender &sender = kv.second;
-        sender.wait();
-      }
-    }
-    for (auto &domRecvers : coloRecvers_) {
-      for (auto &kv : domRecvers) {
-        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
-                         << " wait colocated recver");
-        ColocatedHaloRecver &recver = kv.second;
-        recver.wait();
-      }
-    }
-    nvtxRangePop(); // colocated wait
-
-    nvtxRangePush("remote wait");
-    // wait for remote senders and recvers
-    // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
-    for (auto &domRecvers : remoteRecvers_) {
-      for (auto &kv : domRecvers) {
-        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
-                         << " wait remote recver");
-        StatefulRecver *recver = kv.second;
-        assert(recver);
-        recver->wait();
-      }
-    }
-    for (auto &domSenders : remoteSenders_) {
-      for (auto &kv : domSenders) {
-        LOG_SPEW("rank=" << rank_ << " domain=" << kv.first
-                         << " wait remote sender");
-        StatefulSender *sender = kv.second;
-        assert(sender);
-        sender->wait();
-      }
-    }
-    nvtxRangePop(); // remote wait
-
-#if STENCIL_MEASURE_TIME == 1
-    double maxElapsed = -1;
-    double elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
-    if (0 == rank_) {
-      timeExchange_ += maxElapsed;
-    }
-#endif
-
-    // TODO remove this?
-    // wait for all ranks to be done
-    LOG_SPEW("rank=" << rank_ << " post-exchange barrier");
-    nvtxRangePush("barrier");
-    MPI_Barrier(MPI_COMM_WORLD);
-    nvtxRangePop(); // barrier
-  }
+  void exchange();
 
   /* Dump distributed domain to a series of paraview files
 
      The files are named prefixN.txt, where N is a unique number for each
      subdomain `zero_nans` causes nans to be replaced with 0.0
   */
-  void write_paraview(const std::string &prefix, bool zeroNaNs = false) {
-
-    const char delim[] = ",";
-
-    nvtxRangePush("write_paraview");
-
-    int rank, size;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    int64_t num = rank * domains_.size();
-
-    for (size_t di = 0; di < domains_.size(); ++di) {
-      int64_t id = rank * domains_.size() + di;
-      const std::string path = prefix + std::to_string(id) + ".txt";
-
-      LocalDomain &domain = domains_[di];
-
-      std::cerr << "write_paraview(): copy interiors to host\n";
-      std::vector<std::vector<unsigned char>> quantities;
-      for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
-        quantities.push_back(domain.interior_to_host(qi));
-      }
-
-      std::cerr << "write_paraview(): open " << path << "\n";
-      FILE *outf = fopen(path.c_str(), "w");
-
-      // column headers
-      fprintf(outf, "z%sy%sx", delim, delim);
-      for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
-        std::string colName = domain.dataName_[qi];
-        if (colName.empty()) {
-          colName = "data" + std::to_string(qi);
-        }
-        fprintf(outf, "%s%s", delim, colName.c_str());
-      }
-      fprintf(outf, "\n");
-
-      const Dim3 origin = domains_[di].origin();
-
-      // print rows
-      for (int64_t lz = 0; lz < domain.sz_.z; ++lz) {
-        for (int64_t ly = 0; ly < domain.sz_.y; ++ly) {
-          for (int64_t lx = 0; lx < domain.sz_.x; ++lx) {
-            Dim3 pos = origin + Dim3(lx, ly, lz);
-
-            fprintf(outf, "%ld%s%ld%s%ld", pos.z, delim, pos.y, delim, pos.x);
-
-            for (int64_t qi = 0; qi < domain.num_data(); ++qi) {
-              if (8 == domain.elem_size(qi)) {
-                double val = reinterpret_cast<double *>(
-                    quantities[qi].data())[lz * (domain.sz_.y * domain.sz_.x) +
-                                           ly * domain.sz_.x + lx];
-                if (zeroNaNs && std::isnan(val)) {
-                  val = 0.0;
-                }
-                fprintf(outf, "%s%f", delim, val);
-              } else if (4 == domain.elem_size(qi)) {
-                float val = reinterpret_cast<float *>(
-                    quantities[qi].data())[lz * (domain.sz_.y * domain.sz_.x) +
-                                           ly * domain.sz_.x + lx];
-                if (zeroNaNs && std::isnan(val)) {
-                  val = 0.0f;
-                }
-                fprintf(outf, "%s%f", delim, val);
-              }
-            }
-
-            fprintf(outf, "\n");
-          }
-        }
-      }
-    }
-
-    nvtxRangePop();
-  }
+  void write_paraview(const std::string &prefix, bool zeroNaNs = false);
 };
 
 
