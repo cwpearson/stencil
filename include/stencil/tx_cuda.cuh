@@ -137,7 +137,7 @@ public:
   }
 
   void wait() {
-    
+
     for (auto &kv : streams_) {
       CUDA_RUNTIME(cudaSetDevice(kv.second.device()));
       CUDA_RUNTIME(cudaStreamSynchronize(kv.second));
@@ -212,6 +212,7 @@ public:
 };
 
 /*! Send data between CUDA devices in colocated ranks
+    Issue copy, then record event, then send a message notifying recver that event was recorded
  */
 class ColocatedDeviceSender {
 private:
@@ -233,8 +234,10 @@ private:
   MPI_Request evtReq_;
   MPI_Request memReq_;
   MPI_Request idReq_;
+  MPI_Request notifyReq_; // notify the ColocatedHaloRecver that we have recorded the event
 
   int tagUb_; // largest tag value, if positive
+  char junk_; // one byte of junk to notify the recver
 
 public:
   ColocatedDeviceSender() : dstBuf_(nullptr), event_(0) {}
@@ -265,8 +268,11 @@ public:
     }
   }
 
+  int payload() const noexcept {
+    return ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+  }
+
   void start_prepare(size_t numBytes) {
-    const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
     // create an event and associated handle
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
@@ -274,15 +280,15 @@ public:
     CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
 
     // send the event handle
-    MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedEvt>(payload),
+    MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedEvt>(payload()),
               MPI_COMM_WORLD, &evtReq_);
 
     // Recieve the IPC mem handle
-    const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload);
+    const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload());
     assert(memHandleTag < tagUb_);
     MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, memHandleTag, MPI_COMM_WORLD, &memReq_);
     // Retrieve the destination device id
-    const int devTag = make_tag<MsgKind::ColocatedDev>(payload);
+    const int devTag = make_tag<MsgKind::ColocatedDev>(payload());
     assert(devTag < tagUb_);
     MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_, devTag, MPI_COMM_WORLD, &idReq_);
 
@@ -316,11 +322,13 @@ public:
     CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_, bufSize_, stream));
     // record the event
     CUDA_RUNTIME(cudaEventRecord(event_, stream));
+    MPI_Isend(&junk_, 1, MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedNotify>(payload()), MPI_COMM_WORLD, &notifyReq_);
   }
 
-  void wait() { 
+  void wait() {
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
-    CUDA_RUNTIME(cudaEventSynchronize(event_)); }
+    CUDA_RUNTIME(cudaEventSynchronize(event_));
+  }
 };
 
 class ColocatedDeviceRecver {
@@ -403,6 +411,18 @@ public:
   }
 };
 
+/* For colocated, either the sender or reciever has to be stateful.
+   This sender implementation is async, with the sender packing the data in the stream,
+   sending the data in the stream, recording an event in the stream, and then
+   MPI_Isending a message to the ColocatedHaloRecver, letting it know that it can
+   wait on the event.
+   We defer most of the implementation to the ColocatedDeviceSender
+
+   The other alternative would be for the sender to send a message once the copy was done.
+   In that case, the recver becomes async and just blocks until it gets that message.
+   Pros: the recver does not need an event to wait on.
+   Cons: this send has to complete before we can start issuing recvs
+*/
 class ColocatedHaloSender {
 private:
   LocalDomain *domain_;
@@ -413,7 +433,6 @@ private:
   ColocatedDeviceSender sender_;
 
 public:
-  // ColocatedHaloSender() {}
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), packer_(stream_),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
@@ -436,6 +455,11 @@ public:
   void wait() noexcept { sender_.wait(); }
 };
 
+/* The receiver is stateful because it can't start to wait on the
+   event until it knows the sender has recorded the event.
+   So, we wait on a message saying the event has been recorded,
+   then we can transition to waiting on the event itself
+*/
 class ColocatedHaloRecver {
 private:
   int srcRank_;
@@ -445,14 +469,27 @@ private:
   LocalDomain *domain_;
 
   RcStream stream_;
+
+  MPI_Request notifyReq_;
+
   ColocatedDeviceRecver recver_;
   DeviceUnpacker unpacker_;
+
+  /* NONE: ready to recv
+     WAIT_NOTIFY: waiting on Irecv from ColocatedHaloSender
+     WAIT_COPY: waiting on copy
+
+  */
+  enum class State { NONE, WAIT_NOTIFY, WAIT_COPY };
+  State state_;
+
+  char junk_; // to recv data into
 
 public:
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
         stream_(domain.gpu(), RcStream::Priority::HIGH), recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
-        unpacker_(stream_) {}
+        unpacker_(stream_), state_(State::NONE) {}
 
   void start_prepare(const std::vector<Message> &inbox) {
     unpacker_.prepare(domain_, inbox);
@@ -465,9 +502,39 @@ public:
   void finish_prepare() { recver_.finish_prepare(); }
 
   void recv() {
+    assert(State::NONE == state_);
+    state_ = State::WAIT_NOTIFY;
+
+    const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
+    MPI_Irecv(&junk_, 1, MPI_BYTE, srcRank_, make_tag<MsgKind::ColocatedNotify>(payload), MPI_COMM_WORLD, &notifyReq_);
+
     assert(stream_.device() == domain_->gpu());
-    recver_.wait(stream_);
-    unpacker_.unpack();
+  }
+
+  // once we are in the wait_copy state, there's nothing else we need to do
+  bool active() { return state_ == State::WAIT_NOTIFY; }
+
+  bool next_ready() {
+    if (State::WAIT_NOTIFY == state_) {
+      int flag;
+      MPI_Test(&notifyReq_, &flag, MPI_STATUS_IGNORE);
+      if (flag) {
+        return true;
+      } else {
+        return false;
+      }
+    } else { // should only be asked this in active() states
+      LOG_FATAL("unexpected state");
+    }
+  }
+
+  void next() {
+    if (State::WAIT_NOTIFY == state_) {
+      // have recver wait on copy event, then insert unpack into stream
+      state_ = State::WAIT_COPY;
+      recver_.wait(stream_);
+      unpacker_.unpack();
+    }
   }
 
   void wait() noexcept {
@@ -475,6 +542,7 @@ public:
     assert(stream_.device() == domain_->gpu());
     CUDA_RUNTIME(cudaSetDevice(stream_.device()));
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
+    state_ = State::NONE;
   }
 };
 

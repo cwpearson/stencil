@@ -8,7 +8,7 @@
 
 #include "stencil/stencil.hpp"
 
-#define OVERLAP
+// #define OVERLAP
 
 const float COLD_TEMP = 0;
 const float HOT_TEMP = 1;
@@ -85,6 +85,7 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
           val /= 6;
           dst[o] = val;
 
+#if 0
           if (val < 0.49) {
             printf("KERNEL: too small %f @ %p %ld %ld %ld\n", val, &dst[o], o.x, o.y, o.z);
           }
@@ -101,6 +102,7 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
             printf("KERNEL(99, 0, 53): +y=%f cur=%f, -y=%f\n", py, src[o], my);
             printf("KERNEL(99, 0, 53): +z=%f cur=%f, -z=%f\n", pz, src[o], mz);
           }
+#endif
         }
       }
     }
@@ -249,7 +251,7 @@ int main(int argc, char **argv) {
     const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
 #endif // OVERLAP
 
-    for (size_t iter = 0; iter < 1; ++iter) {
+    for (size_t iter = 0; iter < 5000; ++iter) {
 
 #ifdef OVERLAP
       // launch operations on interior, safe to compute on before exchange

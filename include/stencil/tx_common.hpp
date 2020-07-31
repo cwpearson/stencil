@@ -24,7 +24,8 @@ enum class MsgKind {
   ColocatedEvt = 0,
   ColocatedMem = 1,
   ColocatedDev = 2,
-  Other = 3
+  ColocatedNotify = 3,
+  Other = 4,
 };
 
 /*!

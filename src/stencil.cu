@@ -117,43 +117,37 @@ std::vector<std::vector<Rect3>> DistributedDomain::get_exterior() const {
 
     // +x
     if (intReg.hi.x != comReg.hi.x) {
-      Rect3 extReg(Dim3(intReg.hi.x, comReg.lo.y, comReg.lo.z),
-                   Dim3(comReg.hi.x, comReg.hi.y, comReg.hi.z));
+      Rect3 extReg(Dim3(intReg.hi.x, comReg.lo.y, comReg.lo.z), Dim3(comReg.hi.x, comReg.hi.y, comReg.hi.z));
       comReg.hi.x = intReg.hi.x; // slide face in
       ret[di].push_back(extReg);
     }
     // +y
     if (intReg.hi.y != comReg.hi.y) {
-      Rect3 extReg(Dim3(comReg.lo.x, intReg.hi.y, comReg.lo.z),
-                   Dim3(comReg.hi.x, comReg.hi.y, comReg.hi.z));
+      Rect3 extReg(Dim3(comReg.lo.x, intReg.hi.y, comReg.lo.z), Dim3(comReg.hi.x, comReg.hi.y, comReg.hi.z));
       comReg.hi.y = intReg.hi.y; // slide face in
       ret[di].push_back(extReg);
     }
     // +z
     if (intReg.hi.z != comReg.hi.z) {
-      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, intReg.hi.z), 
-                   Dim3(comReg.hi.x, comReg.hi.y, comReg.hi.z));
+      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, intReg.hi.z), Dim3(comReg.hi.x, comReg.hi.y, comReg.hi.z));
       comReg.hi.z = intReg.hi.z; // slide face in
       ret[di].push_back(extReg);
     }
     // -x
     if (intReg.lo.x != comReg.lo.x) {
-      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, comReg.lo.z),
-                   Dim3(intReg.lo.x, comReg.hi.y, comReg.hi.z));
+      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, comReg.lo.z), Dim3(intReg.lo.x, comReg.hi.y, comReg.hi.z));
       comReg.lo.x = intReg.lo.x; // slide face in
       ret[di].push_back(extReg);
     }
     // -y
     if (intReg.lo.y != comReg.lo.y) {
-      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, comReg.lo.z), 
-                   Dim3(comReg.hi.x, intReg.lo.y, comReg.hi.z));
+      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, comReg.lo.z), Dim3(comReg.hi.x, intReg.lo.y, comReg.hi.z));
       comReg.lo.y = intReg.lo.y; // slide face in
       ret[di].push_back(extReg);
     }
     // -z
     if (intReg.lo.z != comReg.lo.z) {
-      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, comReg.lo.z),
-                   Dim3(comReg.hi.x, comReg.hi.y, intReg.lo.z));
+      Rect3 extReg(Dim3(comReg.lo.x, comReg.lo.y, comReg.lo.z), Dim3(comReg.hi.x, comReg.hi.y, intReg.lo.z));
       comReg.lo.z = intReg.lo.z; // slide face in
       ret[di].push_back(extReg);
     }
@@ -207,8 +201,6 @@ void DistributedDomain::exchange() {
       sender.send();
     }
   }
-  // FIXME: make sure colocated sends happen before anyone starts to recv
-  MPI_Barrier(MPI_COMM_WORLD); 
   nvtxRangePop();
 
   // send self messages
@@ -239,7 +231,7 @@ void DistributedDomain::exchange() {
   }
   nvtxRangePop();
 
-  // poll senders and recvers to move onto next step until all are done
+  // poll stateful senders and recvers to move onto next step until all are done
   LOG_DEBUG("[" << rank_ << "] start poll");
   nvtxRangePush("DD::exchange: poll");
   bool pending = true;
@@ -257,7 +249,7 @@ void DistributedDomain::exchange() {
             // std::cerr << "[" << rank_ << "] src=" << srcIdx << "
             // recv_h2d\n";
             recver->next();
-            goto senders; // try to overlap recv_h2d with send_h2h
+            goto senders; // try to overlap sends and recvs
           }
         }
       }
@@ -270,11 +262,21 @@ void DistributedDomain::exchange() {
         if (sender->active()) {
           pending = true;
           if (sender->next_ready()) {
-            // const Dim3 dstIdx = kv.first;
-            // std::cerr << "[" << rank_ << "] dst=" << dstIdx << "
-            // send_h2h\n";
             sender->next();
-            goto recvers; // try to overlap recv_h2d with send_h2h
+            goto colo; // try to overlap sends and recvs
+          }
+        }
+      }
+    }
+  colo:
+    for (auto &domRecvers : coloRecvers_) {
+      for (auto &kv : domRecvers) {
+        ColocatedHaloRecver &recver = kv.second;
+        if (recver.active()) {
+          pending = true;
+          if (recver.next_ready()) {
+            recver.next();
+            goto recvers; // try to overlap sends and recvs
           }
         }
       }
