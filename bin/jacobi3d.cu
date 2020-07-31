@@ -8,7 +8,7 @@
 
 #include "stencil/stencil.hpp"
 
-// #define OVERLAP
+#define OVERLAP
 
 const float COLD_TEMP = 0;
 const float HOT_TEMP = 1;
@@ -57,14 +57,12 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
            x += gridDim.x * blockDim.x) {
         Dim3 o(x, y, z);
 
-        /* a sphere 1/10 of the CR in radius and 1/3 of the way over is 1
-           a simula
+        /* a sphere 1/10 of the CR in radius and x = 1/3 of the way over is set hot
+           a similar sphere of cold is at x = 2/3
         */
         if (dist(o, hotCenter) <= sphereRadius) {
-          // if (0) {
           dst[o] = HOT_TEMP;
         } else if (dist(o, coldCenter) <= sphereRadius) {
-          // } else if (0) {
           dst[o] = COLD_TEMP;
         } else {
 
@@ -84,25 +82,6 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
           val += mz;
           val /= 6;
           dst[o] = val;
-
-#if 0
-          if (val < 0.49) {
-            printf("KERNEL: too small %f @ %p %ld %ld %ld\n", val, &dst[o], o.x, o.y, o.z);
-          }
-
-          if (o == Dim3(99, 0, 54)) {
-            printf("KERNEL(99, 0, 54): dst=%f @ %p\n", val, &dst[o]);
-            printf("KERNEL(99, 0, 54): +x=%f cur=%f, -x=%f\n", px, src[o], mx);
-            printf("KERNEL(99, 0, 54): +y=%f cur=%f, -y=%f\n", py, src[o], my);
-            printf("KERNEL(99, 0, 54): +z=%f cur=%f, -z=%f\n", pz, src[o], mz);
-          }
-          if (o == Dim3(99, 0, 53)) {
-            printf("KERNEL(99, 0, 53): dst=%f @ %p\n", dst[o], &dst[o]);
-            printf("KERNEL(99, 0, 53): +x=%f cur=%f, -x=%f\n", px, src[o], mx);
-            printf("KERNEL(99, 0, 53): +y=%f cur=%f, -y=%f\n", py, src[o], my);
-            printf("KERNEL(99, 0, 53): +z=%f cur=%f, -z=%f\n", pz, src[o], mz);
-          }
-#endif
         }
       }
     }
@@ -233,10 +212,12 @@ int main(int argc, char **argv) {
       dim3 dimGrid = (reg.extent() + Dim3(dimBlock) - 1) / Dim3(dimBlock);
       d.set_device();
       init_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(src, reg, computeRegion);
-      CUDA_RUNTIME(cudaDeviceSynchronize());
     }
 
-    MPI_Barrier(MPI_COMM_WORLD);
+      // wait for stencil to complete
+      for (auto &s : computeStreams) {
+        CUDA_RUNTIME(cudaStreamSynchronize(s));
+      }
 
     if (1) {
 #ifdef OVERLAP
@@ -253,6 +234,9 @@ int main(int argc, char **argv) {
 
     for (size_t iter = 0; iter < 5000; ++iter) {
 
+      if (0 == rank)
+        std::cout << iter << "\n";
+
 #ifdef OVERLAP
       // launch operations on interior, safe to compute on before exchange
       for (size_t di = 0; di < dd.domains().size(); ++di) {
@@ -261,8 +245,8 @@ int main(int argc, char **argv) {
         const Accessor<float> src0 = d.get_curr_accessor<float>(dh);
         const Accessor<float> dst0 = d.get_next_accessor<float>(dh);
         nvtxRangePush("launch");
-        if (0 == rank)
-          std::cerr << rank << ": launch on region=" << mr << " (interior)\n";
+        // if (0 == rank)
+        //   std::cerr << rank << ": launch on region=" << mr << " (interior)\n";
         dim3 dimBlock = Dim3::make_block_dim(mr.extent(), 256);
         dim3 dimGrid = (mr.extent() + Dim3(dimBlock) - 1) / Dim3(dimBlock);
         d.set_device();
@@ -274,8 +258,8 @@ int main(int argc, char **argv) {
 #endif
 
       // exchange halos: update ghost elements with current values from neighbors
-      if (0 == rank)
-        std::cerr << rank << ": exchange\n";
+      // if (0 == rank)
+      //   std::cerr << rank << ": exchange\n";
       dd.exchange();
 
 #ifdef OVERLAP
@@ -287,8 +271,8 @@ int main(int argc, char **argv) {
         for (size_t si = 0; si < exteriors[di].size(); ++si) {
           nvtxRangePush("launch");
           const Rect3 mr = exteriors[di][si];
-          if (0 == rank)
-            std::cerr << rank << ": launch on region=" << mr << " (exterior)\n";
+          // if (0 == rank)
+          //   std::cerr << rank << ": launch on region=" << mr << " (exterior)\n";
           dim3 dimBlock = Dim3::make_block_dim(mr.extent(), 256);
           dim3 dimGrid = (mr.extent() + Dim3(dimBlock) - 1) / Dim3(dimBlock);
           d.set_device();
@@ -307,7 +291,7 @@ int main(int argc, char **argv) {
         const Accessor<float> dst = d.get_next_accessor<float>(dh);
         nvtxRangePush("launch (whole)");
         // if (0 == rank)
-        std::cerr << rank << ": launch on region=" << mr << " (whole)\n";
+        // std::cerr << rank << ": launch on region=" << mr << " (whole)\n";
         d.set_device();
         dim3 dimBlock = Dim3::make_block_dim(mr.extent(), 256);
         dim3 dimGrid = (mr.extent() + Dim3(dimBlock) - 1) / Dim3(dimBlock);
@@ -321,14 +305,8 @@ int main(int argc, char **argv) {
         CUDA_RUNTIME(cudaStreamSynchronize(s));
       }
 
-      // cudaDeviceSynchronize();
-
       // current = next
-      MPI_Barrier(MPI_COMM_WORLD);
       dd.swap();
-      MPI_Barrier(MPI_COMM_WORLD);
-
-      // cudaDeviceSynchronize();
 
       if (1 && (iter % 200 == 0)) {
 #ifdef OVERLAP
