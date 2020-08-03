@@ -156,6 +156,9 @@ Show queue: `swqueue`
 
 Run scripts are in `srcipts/summit`.
 
+nsight-systems 2020.3.1.71 can crash with the `osrt` or `mpi` profiler turned on.
+Disable with `nsys profile -t cuda,nvtx`.
+
 ```
 module load cmake
 module load cuda
