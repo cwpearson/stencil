@@ -84,7 +84,7 @@ public:
       assert(stream.device() == srcDomain->gpu());
       CUDA_RUNTIME(cudaSetDevice(stream.device()));
       assert(srcDomain->num_data() == dstDomain->num_data());
-
+      LOG_SPEW("grid=" << dimGrid << " block=" << dimBlock);
       multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos, dstSz,
                                                         srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
                                                         srcDomain->dev_elem_sizes(), srcDomain->num_data());

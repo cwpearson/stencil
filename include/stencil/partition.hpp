@@ -646,8 +646,8 @@ public:
 
     partition_ = NodePartition(size, radius, numNodes, gpusPerNode);
 
-    if (0 == mpiTopo.rank()) {
-      std::cerr << "NodeAware: " << partition_.sys_dim() << "x" << partition_.node_dim() << "\n";
+    if (0 == mpi::world_rank()) {
+      LOG_INFO("NodeAware: " << partition_.sys_dim() << "x" << partition_.node_dim());
     }
 
     // get the name of each node
