@@ -153,8 +153,12 @@ Show queue: `swqueue`
 
 * [jsrunvisualizer](jsrunvisualizer.olcf.ornl.gov)
 * [job-step-viewer](https://jobstepviewer.olcf.ornl.gov)
+* [jsrun arguments](https://docs.olcf.ornl.gov/systems/summit_user_guide.html#launching-a-job-with-jsrun)
 
 Run scripts are in `srcipts/summit`.
+
+nsight-systems 2020.3.1.71 can crash with the `osrt` or `mpi` profiler turned on.
+Disable with `nsys profile -t cuda,nvtx`.
 
 ```
 module load cmake
