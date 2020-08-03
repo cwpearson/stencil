@@ -10,8 +10,7 @@
  * exchanged
  */
 std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
-                                      const Radius &radius,
-                                      const size_t gpusPerRank) {
+                                      const Radius &radius) {
 
   int rank = mpi::world_rank();
 
@@ -22,8 +21,10 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
   DistributedDomain dd(extent.x, extent.y, extent.z);
   dd.set_radius(radius);
   dd.add_data<Q1>("d0");
-  dd.set_methods(MethodFlags::CudaMpi | MethodFlags::CudaMpiColocated);
-  //dd.set_methods(MethodFlags::CudaMpi);
+  MethodFlags methods;
+  methods |= MethodFlags::CudaMpi;
+  methods |= MethodFlags::CudaMpiColocated;
+  dd.set_methods(methods);
 
   // create distributed stencil
   dd.realize();
@@ -123,7 +124,7 @@ int main(int argc, char **argv) {
   // positive x-leaning
   radius = Radius::constant(0);
   radius.dir(1, 0, 0) = fR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
+  std::tie(stats, bytes) = bench(nIters, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -135,7 +136,7 @@ int main(int argc, char **argv) {
   radius = Radius::constant(0);
   radius.dir(1, 0, 0) = fR;
   radius.dir(-1, 0, 0) = fR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
+  std::tie(stats, bytes) = bench(nIters, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -151,7 +152,7 @@ int main(int argc, char **argv) {
   radius.dir(0, -1, 0) = fR;
   radius.dir(0, 0, 1) = fR;
   radius.dir(0, 0, -1) = fR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
+  std::tie(stats, bytes) = bench(nIters, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -169,7 +170,7 @@ int main(int argc, char **argv) {
   radius.dir(-1, 1, -1) = eR;
   radius.dir(-1, -1, 1) = eR;
   radius.dir(-1, -1, -1) = eR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
+  std::tie(stats, bytes) = bench(nIters, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -185,7 +186,7 @@ int main(int argc, char **argv) {
     ss << "/uniform/" << fR;
     nvtxRangePush(ss.str().c_str());
     radius = Radius::constant(2);
-    std::tie(stats, bytes) = bench(nIters, ext, radius, gpusPerRank);
+    std::tie(stats, bytes) = bench(nIters, ext, radius);
     nvtxRangePop();
     if (0 == rank) {
       report(ss.str(), bytes, stats);
