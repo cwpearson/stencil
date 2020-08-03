@@ -9,7 +9,7 @@
 /* return a summary of nIters exchanges to rank 0, and the number of bytes
  * exchanged
  */
-std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
+std::pair<Statistics, uint64_t> bench(const size_t nIters, const size_t nQuants, const Dim3 &extent,
                                       const Radius &radius) {
 
   int rank = mpi::world_rank();
@@ -20,8 +20,10 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
   // configure distributed stencil
   DistributedDomain dd(extent.x, extent.y, extent.z);
   dd.set_radius(radius);
-  dd.add_data<Q1>("d0");
-  MethodFlags methods;
+  for (size_t i = 0; i < nQuants; ++i) {
+    dd.add_data<Q1>("d");
+  }
+  MethodFlags methods = MethodFlags::None;
   methods |= MethodFlags::CudaMpi;
   methods |= MethodFlags::CudaMpiColocated;
   dd.set_methods(methods);
@@ -42,8 +44,7 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
     // done measure
     double elapsed = MPI_Wtime() - start;
     double maxElapsed;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank) {
       stats.insert(elapsed);
     }
@@ -51,15 +52,12 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const Dim3 &extent,
   return std::make_pair(stats, dd.halo_exchange_bytes());
 }
 
-void report_header() {
-  std::cout << "name,count,trimean (S),trimean (B/s),stddev,min,avg,max\n";
-}
+void report_header() { std::cout << "name,count,trimean (S),trimean (B/s),stddev,min,avg,max\n"; }
 
 void report(const std::string &cfg, uint64_t bytes, Statistics &stats) {
   std::cout << std::scientific;
-  std::cout << cfg << "," << stats.count() << "," << stats.trimean() << ","
-            << bytes / stats.trimean() << "," << stats.stddev() << ","
-            << stats.min() << "," << stats.avg() << "," << stats.max() << "\n";
+  std::cout << cfg << "," << stats.count() << "," << stats.trimean() << "," << bytes / stats.trimean() << ","
+            << stats.stddev() << "," << stats.min() << "," << stats.avg() << "," << stats.max() << "\n";
   std::cout << std::defaultfloat;
 }
 
@@ -80,6 +78,7 @@ int main(int argc, char **argv) {
 
   // CLI parameters
   int nIters = 30;
+  int nQuants = 1;
   Dim3 ext(128, 128, 128);
   int64_t fR = 2;
   int64_t eR = 2;
@@ -91,6 +90,7 @@ int main(int argc, char **argv) {
   p.add_option(ext.x, "--x")->help("x extent of compute domain");
   p.add_option(ext.y, "--y")->help("y extent of compute domain");
   p.add_option(ext.z, "--z")->help("z extent of compute domain");
+  p.add_option(nQuants, "--q")->help("number of quantities");
   p.add_option(fR, "--fr")->help("face radius");
   p.add_option(eR, "--er")->help("edge radius");
   p.add_option(cR, "--cr")->help("corner radius");
@@ -110,8 +110,7 @@ int main(int argc, char **argv) {
   srand(time(NULL) + rank);
 
   // benchmark parameters
-  Radius radius;   // stencil radius
-  int gpusPerRank; // the number of GPUs per rank
+  Radius radius; // stencil radius
 
   // benchmark results
   Statistics stats;
@@ -124,7 +123,7 @@ int main(int argc, char **argv) {
   // positive x-leaning
   radius = Radius::constant(0);
   radius.dir(1, 0, 0) = fR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius);
+  std::tie(stats, bytes) = bench(nIters, nQuants, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -136,7 +135,7 @@ int main(int argc, char **argv) {
   radius = Radius::constant(0);
   radius.dir(1, 0, 0) = fR;
   radius.dir(-1, 0, 0) = fR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius);
+  std::tie(stats, bytes) = bench(nIters, nQuants, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -152,7 +151,7 @@ int main(int argc, char **argv) {
   radius.dir(0, -1, 0) = fR;
   radius.dir(0, 0, 1) = fR;
   radius.dir(0, 0, -1) = fR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius);
+  std::tie(stats, bytes) = bench(nIters, nQuants, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -170,7 +169,7 @@ int main(int argc, char **argv) {
   radius.dir(-1, 1, -1) = eR;
   radius.dir(-1, -1, 1) = eR;
   radius.dir(-1, -1, -1) = eR;
-  std::tie(stats, bytes) = bench(nIters, ext, radius);
+  std::tie(stats, bytes) = bench(nIters, nQuants, ext, radius);
   if (0 == rank) {
     std::stringstream ss;
     ss << ext.x << "-" << ext.y << "-" << ext.z;
@@ -186,7 +185,7 @@ int main(int argc, char **argv) {
     ss << "/uniform/" << fR;
     nvtxRangePush(ss.str().c_str());
     radius = Radius::constant(2);
-    std::tie(stats, bytes) = bench(nIters, ext, radius);
+    std::tie(stats, bytes) = bench(nIters, nQuants, ext, radius);
     nvtxRangePop();
     if (0 == rank) {
       report(ss.str(), bytes, stats);
