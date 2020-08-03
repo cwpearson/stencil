@@ -84,7 +84,6 @@ int main(int argc, char **argv) {
   int64_t eR = 2;
   int64_t cR = 2;
 
-
   // parse CLI arguments
   argparse::Parser p("benchmark stencil library exchange");
   p.add_option(nIters, "--iters")->help("number of iterations to measure");

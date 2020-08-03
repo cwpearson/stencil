@@ -18,59 +18,13 @@
 #include "stencil/direction_map.hpp"
 #include "stencil/gpu_topology.hpp"
 #include "stencil/local_domain.cuh"
+#include "stencil/logging.hpp"
 #include "stencil/mpi_topology.hpp"
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
 #include "stencil/radius.hpp"
 #include "stencil/tx.hpp"
 #include "stencil/tx_cuda.cuh"
-
-#ifndef STENCIL_OUTPUT_LEVEL
-#define STENCIL_OUTPUT_LEVEL 0
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 0
-#define LOG_SPEW(x)                                                            \
-  if (0 == rank_) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_SPEW(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 1
-#define LOG_DEBUG(x)                                                           \
-  if (0 == rank_) std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_DEBUG(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 2
-#define LOG_INFO(x)                                                            \
-  if (0 == rank_) std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_INFO(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 3
-#define LOG_WARN(x)                                                            \
-  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_WARN(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 4
-#define LOG_ERROR(x)                                                           \
-  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_ERROR(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 5
-#define LOG_FATAL(x)                                                           \
-  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
-  exit(1);
-#else
-#define LOG_FATAL(x) exit(1);
-#endif
 
 enum class MethodFlags {
   None = 0,
@@ -100,9 +54,7 @@ inline MethodFlags operator&(MethodFlags a, MethodFlags b) {
   return static_cast<MethodFlags>(static_cast<int>(a) & static_cast<int>(b));
 }
 
-inline bool operator&&(MethodFlags a, MethodFlags b) {
-  return (a & b) != MethodFlags::None;
-}
+inline bool operator&&(MethodFlags a, MethodFlags b) { return (a & b) != MethodFlags::None; }
 
 inline bool any(MethodFlags a) noexcept { return a != MethodFlags::None; }
 
@@ -142,16 +94,13 @@ private:
   // PeerCopySenders for same-rank exchanges
   std::vector<std::map<size_t, PeerCopySender>> peerCopySenders_;
 
-  std::vector<std::map<Dim3, StatefulSender *>>
-      remoteSenders_; // remoteSender_[domain][dstIdx] = sender
-  std::vector<std::map<Dim3, StatefulRecver *>>
-      remoteRecvers_; // remoteRecver_[domain][srcIdx] = recver
+  std::vector<std::map<Dim3, StatefulSender *>> remoteSenders_; // remoteSender_[domain][dstIdx] = sender
+  std::vector<std::map<Dim3, StatefulRecver *>> remoteRecvers_; // remoteRecver_[domain][srcIdx] = recver
 
   // kernel sender for same-domain sends
   PeerAccessSender peerAccessSender_;
 
-  std::vector<std::map<Dim3, ColocatedHaloSender>>
-      coloSenders_; // vec[domain][dstIdx] = sender
+  std::vector<std::map<Dim3, ColocatedHaloSender>> coloSenders_; // vec[domain][dstIdx] = sender
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
   // total number of bytes moved during the halo exchange, set in realize()
@@ -172,8 +121,7 @@ public:
 #endif
 
   DistributedDomain(size_t x, size_t y, size_t z)
-      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All),
-        strategy_(PlacementStrategy::NodeAware) {
+      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware) {
 
 #if STENCIL_MEASURE_TIME == 1
     timeMpiTopo_ = 0;
@@ -197,20 +145,17 @@ public:
 #if STENCIL_MEASURE_TIME == 1
     double elapsed = MPI_Wtime() - start;
     double maxElapsed = -1;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
       timeMpiTopo_ += maxElapsed;
     }
 #endif
 
-    std::cerr << "[" << rank_ << "] colocated with "
-              << mpiTopology_.colocated_size() << " ranks\n";
+    std::cerr << "[" << rank_ << "] colocated with " << mpiTopology_.colocated_size() << " ranks\n";
 
     int deviceCount;
     CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
-    std::cerr << "[" << rank_ << "] cudaGetDeviceCount= " << deviceCount
-              << "\n";
+    std::cerr << "[" << rank_ << "] cudaGetDeviceCount= " << deviceCount << "\n";
 
     /*
   cudaComputeModeDefault = 0
@@ -226,8 +171,7 @@ public:
     cudaDeviceProp prop;
     for (int i = 0; i < deviceCount; ++i) {
       CUDA_RUNTIME(cudaGetDeviceProperties(&prop, i));
-      std::cerr << "[" << rank_
-                << "] cudaDeviceProp.computeMode=" << prop.computeMode << "\n";
+      std::cerr << "[" << rank_ << "] cudaDeviceProp.computeMode=" << prop.computeMode << "\n";
     }
 
     // Determine GPUs this DistributedDomain is reposible for
@@ -235,8 +179,7 @@ public:
       // if fewer colocated ranks than GPUs, round-robin GPUs to ranks
       if (mpiTopology_.colocated_size() <= deviceCount) {
         for (int id = 0; id < deviceCount; ++id) {
-          if (id % mpiTopology_.colocated_size() ==
-              mpiTopology_.colocated_rank()) {
+          if (id % mpiTopology_.colocated_size() == mpiTopology_.colocated_rank()) {
             gpus_.push_back(id);
           }
         }
@@ -253,12 +196,11 @@ public:
     start = MPI_Wtime();
 #endif
     std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
-    MPI_Allgather(gpus_.data(), int(gpus_.size()), MPI_INT, nodeCudaIds.data(),
-                  int(gpus_.size()), MPI_INT, mpiTopology_.colocated_comm());
+    MPI_Allgather(gpus_.data(), int(gpus_.size()), MPI_INT, nodeCudaIds.data(), int(gpus_.size()), MPI_INT,
+                  mpiTopology_.colocated_comm());
 #if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
       timeNodeGpus_ += maxElapsed;
     }
@@ -291,8 +233,7 @@ public:
     nvtxRangePop();
 #if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
       timePeerEn_ += maxElapsed;
     }
@@ -335,15 +276,11 @@ public:
   */
   void set_methods(MethodFlags flags) noexcept { flags_ = flags; }
 
-  void set_placement(PlacementStrategy strategy) noexcept {
-    strategy_ = strategy;
-  }
+  void set_placement(PlacementStrategy strategy) noexcept { strategy_ = strategy; }
 
   /*! return true if any provided methods are enabled
    */
-  bool any_methods(MethodFlags methods) const noexcept {
-    return (methods & flags_) != MethodFlags::None;
-  }
+  bool any_methods(MethodFlags methods) const noexcept { return (methods & flags_) != MethodFlags::None; }
 
   /* Choose GPUs for this rank. Call before realize()
    */
@@ -354,7 +291,7 @@ public:
   const Dim3 &get_origin(int64_t i) const { return domains_[i].origin(); }
 
   /* return the compute region of the entire distributed domain
-  */
+   */
   const Rect3 get_compute_region() const noexcept;
 
   /* return the total number of bytes moved during the halo exchange
@@ -386,8 +323,7 @@ public:
 #if STENCIL_MEASURE_TIME == 1
     double maxElapsed = -1;
     double elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
       timePlacement_ += maxElapsed;
     }
@@ -409,8 +345,7 @@ public:
 
       const int cudaId = placement_->get_cuda(idx);
 
-      fprintf(stderr, "rank=%d gpu=%ld (cuda id=%d) => [%ld,%ld,%ld]\n", rank_,
-              domId, cudaId, idx.x, idx.y, idx.z);
+      fprintf(stderr, "rank=%d gpu=%ld (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, domId, cudaId, idx.x, idx.y, idx.z);
 
       LocalDomain sd(sdSize, sdOrigin, cudaId);
       sd.set_radius(radius_);
@@ -428,8 +363,7 @@ public:
     CUDA_RUNTIME(cudaGetLastError());
 #if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
       timeRealize_ += maxElapsed;
     }
@@ -454,11 +388,9 @@ public:
     // coloOutboxed[di][dstRank] = messages
 
     // inbox for each remote domain my domains recv from
-    std::vector<std::map<Dim3, std::vector<Message>>>
-        remoteInboxes; // remoteOutboxes_[domain][srcIdx] = messages
+    std::vector<std::map<Dim3, std::vector<Message>>> remoteInboxes; // remoteOutboxes_[domain][srcIdx] = messages
     // outbox for each remote domain my domains send to
-    std::vector<std::map<Dim3, std::vector<Message>>>
-        remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
+    std::vector<std::map<Dim3, std::vector<Message>>> remoteOutboxes; // remoteOutboxes[domain][dstIdx] = messages
 
     LOG_DEBUG("[" << rank_ << "]"
                   << "comm plan");
@@ -524,8 +456,7 @@ public:
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
-              if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) &&
-                  gpu_topo::peer(myDev, dstDev)) {
+              if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
                 assert(di < coloOutboxes.size());
                 coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
                 coloOutboxes[di][dstIdx].push_back(sMsg);
@@ -537,16 +468,12 @@ public:
               assert(di < remoteOutboxes.size());
               remoteOutboxes[di][dstIdx].push_back(sMsg);
               LOG_DEBUG("Plan send <remote> "
-                       << myIdx << " (r" << rank_ << "d" << di << "g" << myDev
-                       << ")"
-                       << " -> " << dstIdx << " (r" << dstRank << "d" << dstGPU
-                       << "g" << dstDev << ")"
-                       << " (dir=" << dir << ", rad" << dir * -1 << "="
-                       << radius_.dir(dir * -1) << ")");
+                        << myIdx << " (r" << rank_ << "d" << di << "g" << myDev << ")"
+                        << " -> " << dstIdx << " (r" << dstRank << "d" << dstGPU << "g" << dstDev << ")"
+                        << " (dir=" << dir << ", rad" << dir * -1 << "=" << radius_.dir(dir * -1) << ")");
               goto send_planned;
             }
-            LOG_FATAL("No method available to send required message "
-                      << sMsg.dir_ << "\n");
+            LOG_FATAL("No method available to send required message " << sMsg.dir_ << "\n");
           send_planned: // successfully found a way to send
 
             // TODO: this assumes we have periodic boundaries
@@ -570,8 +497,7 @@ public:
               }
             }
             if (any_methods(MethodFlags::CudaMpiColocated)) {
-              if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) &&
-                  gpu_topo::peer(srcDev, myDev)) {
+              if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) && gpu_topo::peer(srcDev, myDev)) {
                 assert(di < coloInboxes.size());
                 coloInboxes[di].emplace(srcIdx, std::vector<Message>());
                 coloInboxes[di][srcIdx].push_back(sMsg);
@@ -582,9 +508,8 @@ public:
               assert(di < remoteInboxes.size());
               remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
               remoteInboxes[di][srcIdx].push_back(sMsg);
-              LOG_SPEW("Plan recv <remote> "
-                       << srcIdx << "->" << myIdx << " (dir=" << dir << "): r"
-                       << dir * -1 << "=" << radius_.dir(dir * -1));
+              LOG_SPEW("Plan recv <remote> " << srcIdx << "->" << myIdx << " (dir=" << dir << "): r" << dir * -1 << "="
+                                             << radius_.dir(dir * -1));
               goto recv_planned;
             }
             LOG_FATAL("No method available to recv required message");
@@ -598,8 +523,7 @@ public:
     nvtxRangePop(); // plan
 #if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
       timePlan_ += maxElapsed;
     }
@@ -625,8 +549,7 @@ public:
 
       planFile << "domains\n";
       for (size_t di = 0; di < domains_.size(); ++di) {
-        planFile << di << ":cuda" << domains_[di].gpu() << ":"
-                 << placement_->get_idx(rank_, di)
+        planFile << di << ":cuda" << domains_[di].gpu() << ":" << placement_->get_idx(rank_, di)
                  << " sz=" << domains_[di].size() << "\n";
       }
       planFile << "\n";
@@ -636,31 +559,26 @@ public:
         size_t peerBytes = 0;
         for (int qi = 0; qi < domains_[msg.srcGPU_].num_data(); ++qi) {
           // send size matches size of halo that we're recving into
-          const size_t bytes =
-              domains_[msg.srcGPU_].halo_bytes(msg.dir_ * -1, qi);
+          const size_t bytes = domains_[msg.srcGPU_].halo_bytes(msg.dir_ * -1, qi);
           peerBytes += bytes;
           sendBytes_ += bytes;
         }
-        planFile << msg.srcGPU_ << "->" << msg.dstGPU_ << " " << msg.dir_ << " "
-                 << peerBytes << "B\n";
+        planFile << msg.srcGPU_ << "->" << msg.dstGPU_ << " " << msg.dir_ << " " << peerBytes << "B\n";
       }
       planFile << "\n";
 
       planFile << "== peerCopy ==\n";
       for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
-        for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size();
-             ++dstGPU) {
+        for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size(); ++dstGPU) {
           size_t peerBytes = 0;
           for (const auto &msg : peerCopyOutboxes[srcGPU][dstGPU]) {
             for (int64_t i = 0; i < domains_[srcGPU].num_data(); ++i) {
               // send size matches size of halo that we're recving into
-              const int64_t bytes =
-                  domains_[srcGPU].halo_bytes(msg.dir_ * -1, i);
+              const int64_t bytes = domains_[srcGPU].halo_bytes(msg.dir_ * -1, i);
               peerBytes += bytes;
               sendBytes_ += bytes;
             }
-            planFile << srcGPU << "->" << dstGPU << " " << msg.dir_ << " "
-                     << peerBytes << "B\n";
+            planFile << srcGPU << "->" << dstGPU << " " << msg.dir_ << " " << peerBytes << "B\n";
           }
         }
       }
@@ -675,8 +593,7 @@ public:
           auto &box = kv.second;
           planFile << "colo to dstIdx=" << dstIdx << "\n";
           for (auto &msg : box) {
-            planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->"
-                     << msg.dstGPU_ << ")\n";
+            planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->" << msg.dstGPU_ << ")\n";
             for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
               // send size matches size of halo that we're recving into
               sendBytes_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
@@ -694,8 +611,7 @@ public:
           auto &box = kv.second;
           planFile << "remote to dstIdx=" << dstIdx << "\n";
           for (auto &msg : box) {
-            planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->"
-                     << msg.dstGPU_ << ")\n";
+            planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->" << msg.dstGPU_ << ")\n";
             for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
               // send size matches size of halo that we're recving into
               sendBytes_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
@@ -707,8 +623,7 @@ public:
 
       // give every rank the total send volume
       nvtxRangePush("distribute send bytes to all ranks");
-      MPI_Allreduce(MPI_IN_PLACE, &sendBytes_, 1, MPI_UINT64_T, MPI_SUM,
-                    MPI_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, &sendBytes_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
 
       if (rank_ == 0) {
         LOG_INFO(sendBytes_ << "B in halo exchange");
@@ -736,8 +651,7 @@ public:
         if (0 == remoteSenders_[di].count(dstIdx)) {
           StatefulSender *sender = nullptr;
           if (any_methods(MethodFlags::CudaAwareMpi)) {
-            sender = new CudaAwareMpiSender(rank_, di, dstRank, dstGPU,
-                                            domains_[di]);
+            sender = new CudaAwareMpiSender(rank_, di, dstRank, dstGPU, domains_[di]);
           } else if (any_methods(MethodFlags::CudaMpi)) {
             sender = new RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]);
           }
@@ -752,8 +666,7 @@ public:
         if (0 == remoteRecvers_[di].count(srcIdx)) {
           StatefulRecver *recver = nullptr;
           if (any_methods(MethodFlags::CudaAwareMpi)) {
-            recver = new CudaAwareMpiRecver(srcRank, srcGPU, rank_, di,
-                                            domains_[di]);
+            recver = new CudaAwareMpiRecver(srcRank, srcGPU, rank_, di, domains_[di]);
           } else if (any_methods(MethodFlags::CudaMpi)) {
             recver = new RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]);
           }
@@ -777,21 +690,17 @@ public:
         const Dim3 dstIdx = kv.first;
         const int dstRank = placement_->get_rank(dstIdx);
         const int dstGPU = placement_->get_subdomain_id(dstIdx);
-        std::cerr << "rank " << rank_ << " create ColoSender to " << dstIdx
-                  << " on " << dstRank << " (" << dstGPU << ")\n";
-        coloSenders_[di].emplace(
-            dstIdx,
-            ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
+        std::cerr << "rank " << rank_ << " create ColoSender to " << dstIdx << " on " << dstRank << " (" << dstGPU
+                  << ")\n";
+        coloSenders_[di].emplace(dstIdx, ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
       }
       for (auto &kv : coloInboxes[di]) {
         const Dim3 srcIdx = kv.first;
         const int srcRank = placement_->get_rank(srcIdx);
         const int srcGPU = placement_->get_subdomain_id(srcIdx);
-        std::cerr << "rank " << rank_ << " create ColoRecver from " << srcIdx
-                  << " on " << srcRank << " (" << srcGPU << ")\n";
-        coloRecvers_[di].emplace(
-            srcIdx,
-            ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
+        std::cerr << "rank " << rank_ << " create ColoRecver from " << srcIdx << " on " << srcRank << " (" << srcGPU
+                  << ")\n";
+        coloRecvers_[di].emplace(srcIdx, ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
       }
     }
     nvtxRangePop(); // create colocated
@@ -804,12 +713,9 @@ public:
 
     // create all required colocated senders/recvers
     for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
-      for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size();
-           ++dstGPU) {
+      for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size(); ++dstGPU) {
         if (!peerCopyOutboxes[srcGPU][dstGPU].empty()) {
-          peerCopySenders_[srcGPU].emplace(
-              dstGPU, PeerCopySender(srcGPU, dstGPU, domains_[srcGPU],
-                                     domains_[dstGPU]));
+          peerCopySenders_[srcGPU].emplace(dstGPU, PeerCopySender(srcGPU, dstGPU, domains_[srcGPU], domains_[dstGPU]));
         }
       }
     }
@@ -836,50 +742,38 @@ public:
     assert(coloSenders_.size() == coloRecvers_.size());
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
-        const Dim3 srcIdx = placement_->get_idx(rank_, di);
         const Dim3 dstIdx = kv.first;
         const int dstRank = placement_->get_rank(dstIdx);
         auto &sender = kv.second;
-        std::cerr << "rank=" << rank_ << " colo sender.start_prepare " << srcIdx
-                  << "->" << dstIdx << "(rank " << dstRank << ")\n";
+        LOG_DEBUG(" colo sender.start_prepare " << placement_->get_idx(rank_, di) << "->" << dstIdx << "(rank "
+                                                << dstRank << ")");
         sender.start_prepare(coloOutboxes[di][dstIdx]);
       }
       for (auto &kv : coloRecvers_[di]) {
         const Dim3 srcIdx = kv.first;
-        const Dim3 dstIdx = placement_->get_idx(rank_, di);
         auto &recver = kv.second;
-        std::cerr << "rank=" << rank_ << " colo recver.start_prepare " << srcIdx
-                  << "->" << dstIdx << "\n";
+        LOG_DEBUG(" colo recver.start_prepare " << srcIdx << "->" << placement_->get_idx(rank_, di));
         recver.start_prepare(coloInboxes[di][srcIdx]);
       }
     }
-    std::cerr << "rank=" << rank_
-              << " DistributedDomain::realize: finish_prepare "
-                 "ColocatedHaloSender/ColocatedHaloRecver\n";
+    LOG_DEBUG("DistributedDomain::realize: finish_prepare ColocatedHaloSender/ColocatedHaloRecver");
     for (size_t di = 0; di < coloSenders_.size(); ++di) {
       for (auto &kv : coloSenders_[di]) {
         const Dim3 dstIdx = kv.first;
         auto &sender = kv.second;
         const int srcDev = domains_[di].gpu();
-        const Dim3 srcIdx = placement_->get_idx(rank_, di);
         const int dstDev = placement_->get_cuda(dstIdx);
-        std::cerr << "rank=" << rank_ << " colo sender.finish_prepare "
-                  << srcIdx << " -> " << dstIdx << "\n";
+        LOG_DEBUG("colo sender.finish_prepare " << placement_->get_idx(rank_, di) << " -> " << dstIdx);
         sender.finish_prepare();
       }
       for (auto &kv : coloRecvers_[di]) {
-        const Dim3 srcIdx = kv.first;
         auto &recver = kv.second;
-        std::cerr << "rank=" << rank_
-                  << " colo recver.finish_prepare for colo from " << srcIdx
-                  << "\n";
+        LOG_DEBUG("colo recver.finish_prepare for colo from " << kv.first);
         recver.finish_prepare();
       }
     }
     nvtxRangePop(); // prep colocated
-    std::cerr
-        << "rank=" << rank_
-        << "DistributedDomain::realize: prepare RemoteSender/RemoteRecver\n";
+    LOG_DEBUG("DistributedDomain::realize: prepare RemoteSender/RemoteRecver");
     nvtxRangePush("DistributedDomain::realize: prep remote");
     assert(remoteSenders_.size() == remoteRecvers_.size());
     for (size_t di = 0; di < remoteSenders_.size(); ++di) {
@@ -898,8 +792,7 @@ public:
 
 #if STENCIL_MEASURE_TIME == 1
     elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0,
-               MPI_COMM_WORLD);
+    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
       timeCreate_ += maxElapsed;
     }
@@ -909,11 +802,11 @@ public:
   /* Swap current and next pointers
    */
   void swap() {
-    LOG_DEBUG("rank=" << rank_ << " enter swap()");
+    LOG_DEBUG("enter swap()");
     for (auto &d : domains_) {
       d.swap();
     }
-    LOG_DEBUG("rank=" << rank_ << " finish swap()");
+    LOG_DEBUG("finish swap()");
   }
 
   /* Return the coordinates of the stencil region that can be safely operated on
@@ -941,11 +834,3 @@ public:
   */
   void write_paraview(const std::string &prefix, bool zeroNaNs = false);
 };
-
-
-#undef LOG_SPEW
-#undef LOG_DEBUG
-#undef LOG_INFO
-#undef LOG_WARN
-#undef LOG_ERROR
-#undef LOG_FATAL

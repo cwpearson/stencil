@@ -14,55 +14,9 @@
 #include "local_domain.cuh"
 #include "mat2d.hpp"
 #include "mpi_topology.hpp"
+#include "stencil/logging.hpp"
 #include "stencil/qap.hpp"
 #include "stencil/radius.hpp"
-
-#ifndef STENCIL_OUTPUT_LEVEL
-#define STENCIL_OUTPUT_LEVEL 0
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 0
-#define LOG_SPEW(x)                                                            \
-  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_SPEW(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 1
-#define LOG_DEBUG(x)                                                           \
-  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_DEBUG(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 2
-#define LOG_INFO(x)                                                            \
-  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_INFO(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 3
-#define LOG_WARN(x)                                                            \
-  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_WARN(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 4
-#define LOG_ERROR(x)                                                           \
-  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_ERROR(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 5
-#define LOG_FATAL(x)                                                           \
-  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
-  exit(1);
-#else
-#define LOG_FATAL(x) exit(1);
-#endif
 
 namespace collective {}
 
@@ -92,16 +46,14 @@ private:
     }
     if (n > 2)
       result.push_back(n);
-    std::sort(result.begin(), result.end(),
-              [](int64_t a, int64_t b) { return b < a; });
+    std::sort(result.begin(), result.end(), [](int64_t a, int64_t b) { return b < a; });
     return result;
   }
 
   static int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
 
 public:
-  RankPartition(const Dim3 &size, const int64_t n)
-      : size_(size), dim_(1, 1, 1) {
+  RankPartition(const Dim3 &size, const int64_t n) : size_(size), dim_(1, 1, 1) {
 
     // split repeatedly by the prime factors of n
     std::vector<int64_t> factors = prime_factors(n);
@@ -191,9 +143,8 @@ public:
   }
 };
 
-
 /* A 2-level partition of a 3D space amongst nodes in the system, and then GPUs in the node
-*/
+ */
 class NodePartition {
 
 private:
@@ -222,8 +173,7 @@ private:
     }
     if (n > 2)
       result.push_back(n);
-    std::sort(result.begin(), result.end(),
-              [](int64_t a, int64_t b) { return b < a; });
+    std::sort(result.begin(), result.end(), [](int64_t a, int64_t b) { return b < a; });
     return result;
   }
 
@@ -271,9 +221,9 @@ public:
          The interface size is scaled by the kernel radius in that dimension, positive + negative
       */
 
-      const int64_t xIface = size_.y * size_.z * (radius.dir(1,0,0) + radius.dir(-1,0,0));
-      const int64_t yIface = size_.x * size_.z * (radius.dir(0,1,0) + radius.dir(0,-1,0));
-      const int64_t zIface = size_.x * size_.y * (radius.dir(0,0,1) + radius.dir(0,0,-1));
+      const int64_t xIface = size_.y * size_.z * (radius.dir(1, 0, 0) + radius.dir(-1, 0, 0));
+      const int64_t yIface = size_.x * size_.z * (radius.dir(0, 1, 0) + radius.dir(0, -1, 0));
+      const int64_t zIface = size_.x * size_.y * (radius.dir(0, 0, 1) + radius.dir(0, 0, -1));
 
       if (xIface <= yIface && xIface <= zIface) { // split in x
         size_.x = div_ceil(size_.x, amt);
@@ -294,9 +244,9 @@ public:
         continue;
       }
 
-      const int64_t xIface = size_.y * size_.z * (radius.dir(1,0,0) + radius.dir(-1,0,0));
-      const int64_t yIface = size_.x * size_.z * (radius.dir(0,1,0) + radius.dir(0,-1,0));
-      const int64_t zIface = size_.x * size_.y * (radius.dir(0,0,1) + radius.dir(0,0,-1));
+      const int64_t xIface = size_.y * size_.z * (radius.dir(1, 0, 0) + radius.dir(-1, 0, 0));
+      const int64_t yIface = size_.x * size_.z * (radius.dir(0, 1, 0) + radius.dir(0, -1, 0));
+      const int64_t zIface = size_.x * size_.y * (radius.dir(0, 0, 1) + radius.dir(0, 0, -1));
 
       if (xIface <= yIface && xIface <= zIface) { // split in x
         size_.x = div_ceil(size_.x, amt);
@@ -355,9 +305,7 @@ public:
   }
 
   Dim3 sys_idx(int64_t i) const noexcept { return dimensionize(i, sys_dim()); }
-  Dim3 node_idx(int64_t i) const noexcept {
-    return dimensionize(i, node_dim());
-  }
+  Dim3 node_idx(int64_t i) const noexcept { return dimensionize(i, node_dim()); }
   Dim3 idx(int64_t i) const noexcept { return dimensionize(i, dim()); }
 };
 
@@ -427,14 +375,10 @@ public:
   int get_cuda(const Dim3 &idx) override { return cuda_[idx]; }
 
   /* size of a subdomain */
-  Dim3 subdomain_size(const Dim3 &idx) override {
-    return partition_.subdomain_size(idx);
-  }
+  Dim3 subdomain_size(const Dim3 &idx) override { return partition_.subdomain_size(idx); }
 
   /* origin of a subdomain */
-  Dim3 subdomain_origin(const Dim3 &idx) override {
-    return partition_.subdomain_origin(idx);
-  }
+  Dim3 subdomain_origin(const Dim3 &idx) override { return partition_.subdomain_origin(idx); }
 
   Dim3 dim() override { return partition_.dim(); }
 
@@ -447,8 +391,7 @@ public:
     // have everyone request one work item per GPU
     const int workItems = rankCudaIds.size();
     std::vector<int> workItemCounts(mpiTopo.size());
-    MPI_Allgather(&workItems, 1, MPI_INT, workItemCounts.data(), 1, MPI_INT,
-                  MPI_COMM_WORLD);
+    MPI_Allgather(&workItems, 1, MPI_INT, workItemCounts.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
     if (mpiTopo.rank() == 0) {
       std::cerr << "Trivial: workItemCounts:";
@@ -458,8 +401,7 @@ public:
       std::cerr << "\n";
     }
 
-    const int numSubdomains =
-        std::accumulate(workItemCounts.begin(), workItemCounts.end(), 0);
+    const int numSubdomains = std::accumulate(workItemCounts.begin(), workItemCounts.end(), 0);
 
     if (mpiTopo.rank() == 0) {
       std::cerr << "Trivial: numSubdomains=" << numSubdomains << "\n";
@@ -503,9 +445,8 @@ public:
 
     // determine which CUDA id each subdomain will be assigned to
     std::vector<int> cudaAssignments(numSubdomains);
-    MPI_Allgatherv(rankCudaIds.data(), rankCudaIds.size(), MPI_INT,
-                   cudaAssignments.data(), workItemCounts.data(), offs.data(),
-                   MPI_INT, MPI_COMM_WORLD);
+    MPI_Allgatherv(rankCudaIds.data(), rankCudaIds.size(), MPI_INT, cudaAssignments.data(), workItemCounts.data(),
+                   offs.data(), MPI_INT, MPI_COMM_WORLD);
 
     if (0 == mpiTopo.rank()) {
       std::cerr << "Trivial: cudaAssignments:";
@@ -527,8 +468,7 @@ public:
       const Dim3 sdSize = partition_.subdomain_size(idx);
 
       if (0 == mpiTopo.rank()) {
-        std::cerr << idx << "is sd" << id << " on r" << rank << " cuda" << cuda
-                  << ")" << sdSize << "\n";
+        std::cerr << idx << "is sd" << id << " on r" << rank << " cuda" << cuda << ")" << sdSize << "\n";
       }
 
       assert(rank >= 0);
@@ -681,22 +621,17 @@ public:
 
   int get_cuda(const Dim3 &idx) override { return cuda_[idx]; }
 
-  Dim3 subdomain_size(const Dim3 &idx) override {
-    return partition_.subdomain_size(idx);
-  }
+  Dim3 subdomain_size(const Dim3 &idx) override { return partition_.subdomain_size(idx); }
 
   /* origin of a subdomain */
-  Dim3 subdomain_origin(const Dim3 &idx) override {
-    return partition_.subdomain_origin(idx);
-  }
+  Dim3 subdomain_origin(const Dim3 &idx) override { return partition_.subdomain_origin(idx); }
 
   Dim3 dim() override { return partition_.dim(); }
 
-  NodeAware(
-      const Dim3 &size, // total domain size
-      MpiTopology &mpiTopo, Radius radius,
-      const std::vector<int> &rankCudaIds // which CUDA devices the calling
-                                          // rank wants to contribute
+  NodeAware(const Dim3 &size, // total domain size
+            MpiTopology &mpiTopo, Radius radius,
+            const std::vector<int> &rankCudaIds // which CUDA devices the calling
+                                                // rank wants to contribute
   ) {
     LOG_DEBUG("NodeAware: entered ctor");
     MPI_Barrier(MPI_COMM_WORLD);
@@ -712,8 +647,7 @@ public:
     partition_ = NodePartition(size, radius, numNodes, gpusPerNode);
 
     if (0 == mpiTopo.rank()) {
-      std::cerr << "NodeAware: " << partition_.sys_dim() << "x"
-                << partition_.node_dim() << "\n";
+      std::cerr << "NodeAware: " << partition_.sys_dim() << "x" << partition_.node_dim() << "\n";
     }
 
     // get the name of each node
@@ -729,8 +663,8 @@ public:
     if (0 == mpiTopo.rank()) {
       allNames.resize(MPI_MAX_PROCESSOR_NAME * mpiTopo.size());
     }
-    MPI_Gather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, allNames.data(),
-               MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0, MPI_COMM_WORLD);
+    MPI_Gather(name, MPI_MAX_PROCESSOR_NAME, MPI_CHAR, allNames.data(), MPI_MAX_PROCESSOR_NAME, MPI_CHAR, 0,
+               MPI_COMM_WORLD);
     if (0 == mpiTopo.rank()) {
       LOG_DEBUG("NodeAware: gathered names to root");
     }
@@ -779,8 +713,7 @@ public:
 
     // gather up all CUDA ids that all ranks are contributing
     std::vector<int> globalCudaIds(numSubdomains);
-    MPI_Allgather(rankCudaIds.data(), rankCudaIds.size(), MPI_INT,
-                  globalCudaIds.data(), rankCudaIds.size(), MPI_INT,
+    MPI_Allgather(rankCudaIds.data(), rankCudaIds.size(), MPI_INT, globalCudaIds.data(), rankCudaIds.size(), MPI_INT,
                   mpiTopo.comm());
 
     if (0 == mpiTopo.rank()) {
@@ -820,10 +753,8 @@ public:
         for (int64_t ri = 0; ri < ranksPerNode; ++ri) {  // rank i in this node
           for (int64_t gi = 0; gi < gpusPerRank; ++gi) { // gpu i in this rank
             const int64_t ci = ri * gpusPerRank + gi;
-            for (int64_t rj = 0; rj < ranksPerNode;
-                 ++rj) { // rank j in this node
-              for (int64_t gj = 0; gj < gpusPerRank;
-                   ++gj) { // gpu j in this rank
+            for (int64_t rj = 0; rj < ranksPerNode; ++rj) {  // rank j in this node
+              for (int64_t gj = 0; gj < gpusPerRank; ++gj) { // gpu j in this rank
                 const int64_t cj = rj * gpusPerRank + gj;
 
                 // recover the cuda device ID for this component
@@ -878,8 +809,7 @@ public:
 
         for (int64_t id = 0; id < gpusPerNode; ++id) {
           const Dim3 nodeIdx = partition_.node_idx(id);
-          const Dim3 sdSize =
-              partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
+          const Dim3 sdSize = partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
 
           // each component is owned by a rank and has a local ID
           size_t component = components[id];
@@ -888,8 +818,7 @@ public:
           const int gpuId = component % gpusPerRank;
           const int cuda = globalCudaIds[rank * gpusPerRank + gpuId];
 
-          std::cerr << "nodeIdx=" << nodeIdx << " size=" << sdSize
-                    << " rank=" << rank << " gpuId=" << gpuId
+          std::cerr << "nodeIdx=" << nodeIdx << " size=" << sdSize << " rank=" << rank << " gpuId=" << gpuId
                     << " cuda=" << cuda << "\n";
 
           rankAssignment[node * gpusPerNode + id] = rank;
@@ -901,12 +830,9 @@ public:
     } // 0 == rank
 
     // broadcast the data to all ranks
-    MPI_Bcast(rankAssignment.data(), rankAssignment.size(), MPI_INT, 0,
-              MPI_COMM_WORLD);
-    MPI_Bcast(idForDomain.data(), idForDomain.size(), MPI_INT, 0,
-              MPI_COMM_WORLD);
-    MPI_Bcast(cudaAssignment.data(), cudaAssignment.size(), MPI_INT, 0,
-              MPI_COMM_WORLD);
+    MPI_Bcast(rankAssignment.data(), rankAssignment.size(), MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(idForDomain.data(), idForDomain.size(), MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(cudaAssignment.data(), cudaAssignment.size(), MPI_INT, 0, MPI_COMM_WORLD);
 
     for (size_t i = 0; i < rankAssignment.size(); ++i) {
       // convert i into a domain idx
@@ -921,9 +847,8 @@ public:
       cuda_[idx] = cuda;
 
       if (0 == mpiTopo.rank()) {
-        std::cerr << "idx=" << idx << " size=" << partition_.subdomain_size(idx)
-                  << " rank=" << rank << " subdomain=" << subdomain
-                  << " cuda=" << cuda << "\n";
+        std::cerr << "idx=" << idx << " size=" << partition_.subdomain_size(idx) << " rank=" << rank
+                  << " subdomain=" << subdomain << " cuda=" << cuda << "\n";
       }
 
       // convert rank and subdomain to idx
@@ -937,10 +862,3 @@ public:
     }
   }
 };
-
-#undef LOG_SPEW
-#undef LOG_DEBUG
-#undef LOG_INFO
-#undef LOG_WARN
-#undef LOG_ERROR
-#undef LOG_FATAL

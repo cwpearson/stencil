@@ -17,52 +17,10 @@
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/local_domain.cuh"
+#include "stencil/logging.hpp"
 #include "stencil/packer.cuh"
 #include "stencil/rcstream.hpp"
-
 #include "tx_common.hpp"
-
-#ifndef STENCIL_OUTPUT_LEVEL
-#define STENCIL_OUTPUT_LEVEL 0
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 0
-#define LOG_SPEW(x) std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_SPEW(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 1
-#define LOG_DEBUG(x) std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_DEBUG(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 2
-#define LOG_INFO(x) std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_INFO(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 3
-#define LOG_WARN(x) std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_WARN(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 4
-#define LOG_ERROR(x) std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_ERROR(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 5
-#define LOG_FATAL(x)                                                                                                   \
-  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";                                           \
-  exit(1);
-#else
-#define LOG_FATAL(x) exit(1);
-#endif
 
 inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::hex << std::setfill('0'); // needs to be set only once
@@ -268,9 +226,7 @@ public:
     }
   }
 
-  int payload() const noexcept {
-    return ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
-  }
+  int payload() const noexcept { return ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF); }
 
   void start_prepare(size_t numBytes) {
 
@@ -322,7 +278,8 @@ public:
     CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_, bufSize_, stream));
     // record the event
     CUDA_RUNTIME(cudaEventRecord(event_, stream));
-    MPI_Isend(&junk_, 1, MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedNotify>(payload()), MPI_COMM_WORLD, &notifyReq_);
+    MPI_Isend(&junk_, 1, MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedNotify>(payload()), MPI_COMM_WORLD,
+              &notifyReq_);
   }
 
   void wait() {
@@ -1010,10 +967,3 @@ public:
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
   }
 };
-
-#undef LOG_SPEW
-#undef LOG_DEBUG
-#undef LOG_INFO
-#undef LOG_WARN
-#undef LOG_ERROR
-#undef LOG_FATAL

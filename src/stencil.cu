@@ -1,54 +1,7 @@
 #include "stencil/stencil.hpp"
+#include "stencil/logging.hpp"
 
 #include <vector>
-
-#ifndef STENCIL_OUTPUT_LEVEL
-#define STENCIL_OUTPUT_LEVEL 0
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 0
-#define LOG_SPEW(x)                                                                                                    \
-  if (0 == rank_)                                                                                                      \
-    std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_SPEW(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 1
-#define LOG_DEBUG(x)                                                                                                   \
-  if (0 == rank_)                                                                                                      \
-    std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_DEBUG(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 2
-#define LOG_INFO(x)                                                                                                    \
-  if (0 == rank_)                                                                                                      \
-    std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_INFO(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 3
-#define LOG_WARN(x) std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_WARN(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 4
-#define LOG_ERROR(x) std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_ERROR(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 5
-#define LOG_FATAL(x)                                                                                                   \
-  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";                                           \
-  exit(1);
-#else
-#define LOG_FATAL(x) exit(1);
-#endif
 
 /* start with the whole compute region, and check each direction of the
 stencil. move the correponding face/edge/corner inward enough to compensate
@@ -171,7 +124,7 @@ void DistributedDomain::exchange() {
    */
 
   // start remote send d2h
-  LOG_DEBUG("[" << rank_ << "] remote send start");
+  LOG_DEBUG("remote send start");
   nvtxRangePush("DD::exchange: remote send d2h");
   for (auto &domSenders : remoteSenders_) {
     for (auto &kv : domSenders) {
@@ -182,7 +135,7 @@ void DistributedDomain::exchange() {
   nvtxRangePop();
 
   // send same-rank messages
-  LOG_DEBUG("rank=" << rank_ << " send peer copy");
+  LOG_DEBUG("send peer copy");
   nvtxRangePush("DD::exchange: peer copy send");
   for (auto &src : peerCopySenders_) {
     for (auto &kv : src) {
@@ -193,7 +146,7 @@ void DistributedDomain::exchange() {
   nvtxRangePop();
 
   // start colocated Senders
-  LOG_DEBUG("rank=" << rank_ << " start colo send");
+  LOG_DEBUG("start colo send");
   nvtxRangePush("DD::exchange: colo send");
   for (auto &domSenders : coloSenders_) {
     for (auto &kv : domSenders) {
@@ -204,13 +157,13 @@ void DistributedDomain::exchange() {
   nvtxRangePop();
 
   // send self messages
-  LOG_DEBUG("rank=" << rank_ << " send peer access");
+  LOG_DEBUG("send peer access");
   nvtxRangePush("DD::exchange: peer access send");
   peerAccessSender_.send();
   nvtxRangePop();
 
   // start colocated recvers
-  LOG_DEBUG("rank=" << rank_ << " start colo recv");
+  LOG_DEBUG("start colo recv");
   nvtxRangePush("DD::exchange: colo recv");
   for (auto &domRecvers : coloRecvers_) {
     for (auto &kv : domRecvers) {
@@ -303,14 +256,14 @@ void DistributedDomain::exchange() {
   nvtxRangePush("colocated.wait()");
   for (auto &domSenders : coloSenders_) {
     for (auto &kv : domSenders) {
-      LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait colocated sender");
+      LOG_SPEW("domain=" << kv.first << " wait colocated sender");
       ColocatedHaloSender &sender = kv.second;
       sender.wait();
     }
   }
   for (auto &domRecvers : coloRecvers_) {
     for (auto &kv : domRecvers) {
-      LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait colocated recver");
+      LOG_SPEW("domain=" << kv.first << " wait colocated recver");
       ColocatedHaloRecver &recver = kv.second;
       recver.wait();
     }
@@ -321,7 +274,7 @@ void DistributedDomain::exchange() {
   // printf("rank=%d wait for RemoteRecver/RemoteSender\n", rank_);
   for (auto &domRecvers : remoteRecvers_) {
     for (auto &kv : domRecvers) {
-      LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait remote recver");
+      LOG_SPEW("domain=" << kv.first << " wait remote recver");
       StatefulRecver *recver = kv.second;
       assert(recver);
       recver->wait();
@@ -329,7 +282,7 @@ void DistributedDomain::exchange() {
   }
   for (auto &domSenders : remoteSenders_) {
     for (auto &kv : domSenders) {
-      LOG_SPEW("rank=" << rank_ << " domain=" << kv.first << " wait remote sender");
+      LOG_SPEW("domain=" << kv.first << " wait remote sender");
       StatefulSender *sender = kv.second;
       assert(sender);
       sender->wait();
@@ -348,7 +301,7 @@ void DistributedDomain::exchange() {
 
   // wait for all ranks to be done
   // TODO: this should be safe to remove
-  LOG_SPEW("rank=" << rank_ << " post-exchange barrier");
+  LOG_SPEW("post-exchange barrier");
   nvtxRangePush("barrier");
   MPI_Barrier(MPI_COMM_WORLD);
   nvtxRangePop(); // barrier

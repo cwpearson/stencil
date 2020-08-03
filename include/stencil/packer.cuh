@@ -6,54 +6,8 @@
 #include "align.cuh"
 #include "local_domain.cuh"
 #include "pack_kernel.cuh"
+#include "stencil/logging.hpp"
 #include "tx_common.hpp"
-
-#ifndef STENCIL_OUTPUT_LEVEL
-#define STENCIL_OUTPUT_LEVEL 0
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 0
-#define LOG_SPEW(x)                                                            \
-  std::cerr << "SPEW[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_SPEW(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 1
-#define LOG_DEBUG(x)                                                           \
-  std::cerr << "DEBUG[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_DEBUG(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 2
-#define LOG_INFO(x)                                                            \
-  std::cerr << "INFO[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_INFO(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 3
-#define LOG_WARN(x)                                                            \
-  std::cerr << "WARN[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_WARN(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 4
-#define LOG_ERROR(x)                                                           \
-  std::cerr << "ERROR[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";
-#else
-#define LOG_ERROR(x)
-#endif
-
-#if STENCIL_OUTPUT_LEVEL <= 5
-#define LOG_FATAL(x)                                                           \
-  std::cerr << "FATAL[" << __FILE__ << ":" << __LINE__ << "] " << x << "\n";   \
-  exit(1);
-#else
-#define LOG_FATAL(x) exit(1);
-#endif
 
 /* Use the CUDA Graph API to accelerate repeated
    pack/unpack kernel launches
@@ -68,8 +22,7 @@ inline void rand_sleep() {
 class Packer {
 public:
   // prepare pack a domain for messages
-  virtual void prepare(LocalDomain *domain,
-                       const std::vector<Message> &messages) = 0;
+  virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages) = 0;
 
   // pack
   virtual void pack() = 0;
@@ -84,8 +37,7 @@ public:
 class Unpacker {
 public:
   // prepare pack a domain for messages
-  virtual void prepare(LocalDomain *domain,
-                       const std::vector<Message> &messages) = 0;
+  virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages) = 0;
 
   virtual void unpack() = 0;
 
@@ -97,14 +49,13 @@ public:
 
 /*! pack all quantities in a single domain into dst
  */
-static __global__ void
-dev_packer_pack_domain(void *dst,            // buffer to pack into
-                       void **srcs,          // raw pointer to each quanitity
-                       size_t *elemSizes,    // element size for each quantity
-                       const size_t nQuants, // number of quantities
-                       const Dim3 rawSz,     // domain size (elements)
-                       const Dim3 pos,       // halo position
-                       const Dim3 ext        // halo extent
+static __global__ void dev_packer_pack_domain(void *dst,            // buffer to pack into
+                                              void **srcs,          // raw pointer to each quanitity
+                                              size_t *elemSizes,    // element size for each quantity
+                                              const size_t nQuants, // number of quantities
+                                              const Dim3 rawSz,     // domain size (elements)
+                                              const Dim3 pos,       // halo position
+                                              const Dim3 ext        // halo extent
 ) {
   size_t offset = 0;
   for (size_t qi = 0; qi < nQuants; ++qi) {
@@ -142,25 +93,19 @@ private:
       const Dim3 ext = domain_->halo_extent(msg.dir_ * -1);
 
       if (ext.flatten() == 0) {
-        LOG_FATAL("asked to pack for direction "
-                  << msg.dir_
-                  << " but computed message size is 0, ext=" << ext);
+        LOG_FATAL("asked to pack for direction " << msg.dir_ << " but computed message size is 0, ext=" << ext);
       }
 
-      LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext
-                                            << " pos=" << pos << " @ "
-                                            << offset);
+      LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext << " pos=" << pos << " @ " << offset);
       const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
       const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / Dim3(dimBlock);
       assert(offset < size_);
 
-      LOG_SPEW("DevicePacker::pack(): grid= "
-               << dimGrid.x << "," << dimGrid.y << "," << dimGrid.z << " block="
-               << dimBlock.x << "," << dimBlock.y << "," << dimBlock.z);
-      dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream_>>>(
-          &devBuf_[offset], domain_->dev_curr_datas(),
-          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
-          pos, ext);
+      LOG_SPEW("DevicePacker::pack(): grid= " << dimGrid.x << "," << dimGrid.y << "," << dimGrid.z
+                                              << " block=" << dimBlock.x << "," << dimBlock.y << "," << dimBlock.z);
+      dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[offset], domain_->dev_curr_datas(),
+                                                                domain_->dev_elem_sizes(), domain_->num_data(),
+                                                                domain_->raw_size(), pos, ext);
 #if STENCIL_USE_CUDA_GRAPH == 0
       // 900: not allowed while stream is capturing
       CUDA_RUNTIME(cudaGetLastError());
@@ -175,8 +120,7 @@ private:
 
 public:
   DevicePacker(cudaStream_t stream)
-      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL),
-        instance_(NULL) {}
+      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
   ~DevicePacker() {
 #if STENCIL_USE_CUDA_GRAPH == 1
     // TODO: these need to be guarded from ctor without prepare()?
@@ -189,8 +133,7 @@ public:
 #endif
   }
 
-  virtual void prepare(LocalDomain *domain,
-                       const std::vector<Message> &messages) {
+  virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages) {
 
     domain_ = domain;
     dirs_ = messages;
@@ -248,10 +191,9 @@ public:
   virtual void *data() { return devBuf_; }
 };
 
-inline __device__ void
-dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
-                         const Dim3 dstPos, const Dim3 dstExtent,
-                         const void *__restrict__ src, const size_t elemSize) {
+inline __device__ void dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize, const Dim3 dstPos,
+                                                const Dim3 dstExtent, const void *__restrict__ src,
+                                                const size_t elemSize) {
 
   const unsigned int tz = blockDim.z * blockIdx.z + threadIdx.z;
   const unsigned int ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -265,12 +207,10 @@ dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
     unsigned int zo = zi + dstPos.z;
     for (unsigned int yi = ty; yi < dstExtent.y; yi += blockDim.y * gridDim.y) {
       unsigned int yo = yi + dstPos.y;
-      for (unsigned int xi = tx; xi < dstExtent.x;
-           xi += blockDim.x * gridDim.x) {
+      for (unsigned int xi = tx; xi < dstExtent.x; xi += blockDim.x * gridDim.x) {
         unsigned int xo = xi + dstPos.x;
         unsigned int oi = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
-        unsigned int ii =
-            zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
+        unsigned int ii = zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
         if (4 == elemSize) {
           uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
           const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
@@ -290,14 +230,13 @@ dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize,
   }
 }
 
-static __global__ void
-dev_unpacker_unpack_domain(void **dsts,       // buffer to pack into
-                           void *src,         // raw pointer to each quanitity
-                           size_t *elemSizes, // element size for each quantity
-                           const size_t nQuants, // number of quantities
-                           const Dim3 rawSz,     // domain size (elements)
-                           const Dim3 pos,       // halo position
-                           const Dim3 ext        // halo extent
+static __global__ void dev_unpacker_unpack_domain(void **dsts,          // buffer to pack into
+                                                  void *src,            // raw pointer to each quanitity
+                                                  size_t *elemSizes,    // element size for each quantity
+                                                  const size_t nQuants, // number of quantities
+                                                  const Dim3 rawSz,     // domain size (elements)
+                                                  const Dim3 pos,       // halo position
+                                                  const Dim3 ext        // halo extent
 ) {
   size_t offset = 0;
   for (unsigned int qi = 0; qi < nQuants; ++qi) {
@@ -319,7 +258,6 @@ private:
 
   char *devBuf_;
 
-
   cudaStream_t stream_;
   cudaGraph_t graph_;
   cudaGraphExec_t instance_;
@@ -334,18 +272,15 @@ private:
       const Dim3 ext = domain_->halo_extent(dir);
       const Dim3 pos = domain_->halo_pos(dir, true /*exterior*/);
 
-      LOG_SPEW("DeviceUnpacker::unpack(): dir=" << msg.dir_ << " ext=" << ext
-                                                << " pos=" << pos << " @"
-                                                << offset);
+      LOG_SPEW("DeviceUnpacker::unpack(): dir=" << msg.dir_ << " ext=" << ext << " pos=" << pos << " @" << offset);
 
       const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
       const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream_>>>(
-          domain_->dev_curr_datas(), &devBuf_[offset],
-          domain_->dev_elem_sizes(), domain_->num_data(), domain_->raw_size(),
-          pos, ext);
+      dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream_>>>(domain_->dev_curr_datas(), &devBuf_[offset],
+                                                                    domain_->dev_elem_sizes(), domain_->num_data(),
+                                                                    domain_->raw_size(), pos, ext);
 #if STENCIL_USE_CUDA_GRAPH == 0
-// 900: operation not permitted while stream is capturing
+      // 900: operation not permitted while stream is capturing
       CUDA_RUNTIME(cudaGetLastError());
 #endif
       for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
@@ -356,7 +291,8 @@ private:
   }
 
 public:
-  DeviceUnpacker(cudaStream_t stream) : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
+  DeviceUnpacker(cudaStream_t stream)
+      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
   ~DeviceUnpacker() {
 #if STENCIL_USE_CUDA_GRAPH == 1
     // TODO: these need to be guarded from ctor without prepare()?
@@ -368,9 +304,8 @@ public:
     }
 #endif
   }
-  
-  virtual void prepare(LocalDomain *domain,
-                       const std::vector<Message> &messages) override {
+
+  virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages) override {
     domain_ = domain;
     dirs_ = messages;
 
@@ -412,7 +347,6 @@ public:
 #else
     // no other prep to do
 #endif
-
   }
 
   virtual void unpack() override {
@@ -428,12 +362,5 @@ public:
 
   virtual void *data() override { return devBuf_; }
 };
-
-#undef LOG_SPEW
-#undef LOG_DEBUG
-#undef LOG_INFO
-#undef LOG_WARN
-#undef LOG_ERROR
-#undef LOG_FATAL
 
 #undef STENCIL_USE_CUDA_GRAPH
