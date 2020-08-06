@@ -122,7 +122,7 @@ public:
 #endif
 
   DistributedDomain(size_t x, size_t y, size_t z)
-      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware) {
+      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware), sendBytes_(0) {
 
 #if STENCIL_MEASURE_TIME == 1
     timeMpiTopo_ = 0;
@@ -332,6 +332,11 @@ public:
   Do a halo exchange of the "current" quantities and return
   */
   void exchange();
+
+  /* total number of bytes moved during exchange
+     valid after realize()
+  */
+  uint64_t exchanged_bytes() const noexcept { return sendBytes_; }
 
   /* Dump distributed domain to a series of paraview files
 
