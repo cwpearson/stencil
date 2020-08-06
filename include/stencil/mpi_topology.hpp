@@ -15,11 +15,9 @@ public:
    */
   MpiTopology(MPI_Comm comm) : comm_(comm), shmComm_(nullptr) {
     if (comm_) {
-      MPI_Comm_split_type(comm_, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
-                          &shmComm_);
+      MPI_Comm_split_type(comm_, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shmComm_);
 
-      fprintf(stderr, "MpiTopology: shmcomm rank %d/%d\n", colocated_rank(),
-             colocated_size());
+      LOG_DEBUG("MpiTopology: shmcomm rank " << colocated_rank() << "/" << colocated_size());
 
       // Give every rank a list of co-located ranks
 
@@ -92,9 +90,5 @@ public:
   }
 
   // true if the calling rank in comm is colocated with `rank`
-  bool colocated(int rank) const noexcept {
-    return 0 != colocated_.count(rank);
-  }
+  bool colocated(int rank) const noexcept { return 0 != colocated_.count(rank); }
 };
-
-
