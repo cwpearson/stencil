@@ -200,11 +200,12 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
     * [x] Control which exchange method should be used
   * v2
     * [x] ParaView output files `DistributedDomain::write_paraview(const std::string &prefix)`
-    * [ ] support uneven radius (branch=`feature/multi-radius`)
-    * [ ] "Accessor Object" for data
-      * [ ] Index according to point in compute domain
-    * [ ] Support overlapped computation and communication
+    * [x] support uneven radius (branch=`feature/multi-radius`)
+    * [x] "Accessor Object" for data
+      * [x] Index according to point in compute domain
+    * [x] Support overlapped computation and communication
       * interface for extracting interior/exterior of compute region for kernel invocations
+  * v3
     * [ ] allow a manual partition before placement
       * constrain to single subdomain per GPU
 
@@ -212,7 +213,8 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
     * [ ] Autodetect CUDA-Aware MPI support
       * testing at build time with `ompi_info`
       * `MPI_T_cvar_read` / `MPI_T_cvar_get_info` ?
-    * [ ] N-Dimensional data with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)
+    * [ ] N-Dimensional data 
+      * with [cuTensor](https://docs.nvidia.com/cuda/cutensor/index.html)?
     * [ ] selectable halo multiplier
       * fewer, larger messages and less frequent barriers
       * larger halo allocations

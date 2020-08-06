@@ -152,6 +152,10 @@ int main(int argc, char **argv) {
 #if STENCIL_MEASURE_TIME == 1
     if (0 == rank) {
       std::string methodStr;
+      if (methods == MethodFlags::All) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "all";
+      }
       if (methods && MethodFlags::CudaMpi) {
         methodStr += methodStr.empty() ? "" : ",";
         methodStr += "staged";
@@ -172,18 +176,15 @@ int main(int argc, char **argv) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "kernel";
       }
-      if (methods == MethodFlags::All) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "all";
-      }
+
       printf("weak %s x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d "
              "mpi_topo %f "
              "node_gpus %f peer_en %f placement %f realize %f plan "
-             "%f create %f exchange %f\n",
+             "%f create %f exchange %f swap %f\n",
              methodStr.c_str(), x, y, z, nIters, numGpus, numNodes, size,
              dd.timeMpiTopo_, dd.timeNodeGpus_, dd.timePeerEn_,
              dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
-             dd.timeExchange_);
+             dd.timeExchange_, dd.timeSwap_);
     }
 #endif // STENCIL_MEASURE_TIME
 
