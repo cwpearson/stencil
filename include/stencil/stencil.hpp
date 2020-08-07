@@ -103,8 +103,13 @@ private:
   std::vector<std::map<Dim3, ColocatedHaloSender>> coloSenders_; // vec[domain][dstIdx] = sender
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
-  // total number of bytes moved during the halo exchange, set in realize()
-  uint64_t sendBytes_;
+#ifdef STENCIL_TRACK_STATS
+  // count of how many bytes are sent through various methods in each exchange
+  uint64_t numBytesCudaMpi_;
+  uint64_t numBytesCudaMpiColocated_;
+  uint64_t numBytesCudaMemcpyPeer_;
+  uint64_t numBytesCudaKernel_;
+#endif
 
 public:
 #if STENCIL_MEASURE_TIME == 1
@@ -333,7 +338,7 @@ public:
   */
   void exchange();
 
-  /* total number of bytes moved during exchange
+  /* total number of bytes moved during each exchange
      valid after realize()
   */
   uint64_t exchanged_bytes() const noexcept { return sendBytes_; }

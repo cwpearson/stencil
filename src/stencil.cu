@@ -1,5 +1,5 @@
-#include "stencil/stencil.hpp"
 #include "stencil/logging.hpp"
+#include "stencil/stencil.hpp"
 
 #include <vector>
 
@@ -235,7 +235,13 @@ void DistributedDomain::realize() {
 
   ----------------------------*/
   {
-    sendBytes_ = 0;
+#ifdef STENCIL_TRACK_STATS
+    numBytesCudaMpi_ = 0;
+    numBytesCudaAwareMpi_ = 0;
+    numBytesCudaMpiColocated_ = 0;
+    numBytesCudaMemcpyPeer_ = 0;
+    numBytesCudaKernel_ = 0;
+#endif
     std::string planFileName = "plan_" + std::to_string(rank_) + ".txt";
     std::ofstream planFile(planFileName, std::ofstream::out);
 
@@ -257,7 +263,9 @@ void DistributedDomain::realize() {
         // send size matches size of halo that we're recving into
         const size_t bytes = domains_[msg.srcGPU_].halo_bytes(msg.dir_ * -1, qi);
         peerBytes += bytes;
-        sendBytes_ += bytes;
+#ifdef STENCIL_TRACK_STATS
+        numBytesCudaKernel_ += bytes;
+#endif
       }
       planFile << msg.srcGPU_ << "->" << msg.dstGPU_ << " " << msg.dir_ << " " << peerBytes << "B\n";
     }
@@ -272,7 +280,9 @@ void DistributedDomain::realize() {
             // send size matches size of halo that we're recving into
             const int64_t bytes = domains_[srcGPU].halo_bytes(msg.dir_ * -1, i);
             peerBytes += bytes;
-            sendBytes_ += bytes;
+#ifdef STENCIL_TRACK_STATS
+            numBytesCudaMemcpyPeer_ += bytes;
+#endif
           }
           planFile << srcGPU << "->" << dstGPU << " " << msg.dir_ << " " << peerBytes << "B\n";
         }
@@ -290,10 +300,12 @@ void DistributedDomain::realize() {
         planFile << "colo to dstIdx=" << dstIdx << "\n";
         for (auto &msg : box) {
           planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->" << msg.dstGPU_ << ")\n";
+#ifdef STENCIL_TRACK_STATS
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
-            sendBytes_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
+            numBytesCudaMpiColocated_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
           }
+#endif
         }
       }
     }
@@ -308,23 +320,33 @@ void DistributedDomain::realize() {
         planFile << "remote to dstIdx=" << dstIdx << "\n";
         for (auto &msg : box) {
           planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->" << msg.dstGPU_ << ")\n";
+#ifdef STENCIL_TRACK_STATS
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
-            sendBytes_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
+            numBytesCudaMpi_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
           }
+#endif
         }
       }
     }
     planFile.close();
 
-    // give every rank the total send volume
-    nvtxRangePush("distribute send bytes to all ranks");
-    MPI_Allreduce(MPI_IN_PLACE, &sendBytes_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+// give every rank the total send volume
+#ifdef STENCIL_TRACK_STATS
+    nvtxRangePush("allreduce communication stats");
+    MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMpi_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMpiColocated_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMemcpyPeer_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaKernel_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+    nvtxRangePop();
 
     if (rank_ == 0) {
-      LOG_INFO(sendBytes_ << "B in halo exchange");
+      LOG_INFO(numBytesCudaMpi_ << "B CudaMpi / exchange");
+      LOG_INFO(numBytesCudaMpiColocated_ << "B CudaMpiColocated / exchange");
+      LOG_INFO(numBytesCudaMemcpyPeer_ << "B CudaMemcpyPeer / exchange");
+      LOG_INFO(numBytesCudaKernel_ << "B CudaKernel / exchange");
     }
-    nvtxRangePop();
+#endif
   }
 
 #if STENCIL_MEASURE_TIME == 1
@@ -441,8 +463,8 @@ void DistributedDomain::realize() {
       const Dim3 dstIdx = kv.first;
       const int dstRank = placement_->get_rank(dstIdx);
       auto &sender = kv.second;
-      LOG_DEBUG(" colo sender.start_prepare " << placement_->get_idx(rank_, di) << "->" << dstIdx << "(rank "
-                                              << dstRank << ")");
+      LOG_DEBUG(" colo sender.start_prepare " << placement_->get_idx(rank_, di) << "->" << dstIdx << "(rank " << dstRank
+                                              << ")");
       sender.start_prepare(coloOutboxes[di][dstIdx]);
     }
     for (auto &kv : coloRecvers_[di]) {
