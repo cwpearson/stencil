@@ -127,7 +127,7 @@ public:
 #endif
 
   DistributedDomain(size_t x, size_t y, size_t z)
-      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware), sendBytes_(0) {
+      : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware) {
 
 #if STENCIL_MEASURE_TIME == 1
     timeMpiTopo_ = 0;
@@ -306,10 +306,10 @@ public:
    */
   const Rect3 get_compute_region() const noexcept;
 
-  /* return the total number of bytes moved during the halo exchange
+  /* return the total number of bytes moved during the halo exchange for `method`
   ( after realize() )
   */
-  size_t halo_exchange_bytes() const { return sendBytes_; }
+  uint64_t exchange_bytes_for_method(const MethodFlags &method) const;
 
   /* Initialize resources for a previously-configured domain.
   (before exchange())
@@ -337,11 +337,6 @@ public:
   Do a halo exchange of the "current" quantities and return
   */
   void exchange();
-
-  /* total number of bytes moved during each exchange
-     valid after realize()
-  */
-  uint64_t exchanged_bytes() const noexcept { return sendBytes_; }
 
   /* Dump distributed domain to a series of paraview files
 

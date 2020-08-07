@@ -88,8 +88,8 @@ int main(int argc, char **argv) {
     std::cerr << "WARN: not release mode\n";
 #endif
 
-    std::cout << numGpus << " subdomains " << size << " ranks: " << x << ","
-              << y << "," << z << "=" << x * y * z << "\n";
+    std::cout << numGpus << " subdomains " << size << " ranks: " << x << "," << y << "," << z << "=" << x * y * z
+              << "\n";
     if (useNaivePlacement) {
       std::cout << "naive placement\n";
     } else {
@@ -173,13 +173,19 @@ int main(int argc, char **argv) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "all";
       }
-// same as weak.cu
-// header should be
-// bin,config,x,y,z,s,bytes,iters,gpus,nodes,ranks,mpi_topo,node_gpus,peer_en,placement,realize,plan,create,exchange,swap,
-      printf("strong,%s,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%d,%e,%e,%e,%e,%e,%e,%e,%e,%e\n",
-             methodStr.c_str(), x, y, z, x*y*z, dd.exchanged_bytes(), nIters, numGpus, numNodes, size,
-             dd.timeMpiTopo_, dd.timeNodeGpus_, dd.timePeerEn_,
-             dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
+      // clang-format off
+      // same as weak.cu
+      // header should be
+      // bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,peer_en,placement,realize,plan,create,exchange,swap,
+      // clang-format on
+      printf("weak,%s,%lu,%lu,%lu,%lu," // s
+             "%lu,%lu,%lu,%lu,"         // <- exchange bytes
+             "%d,%d,%d,%d,%e,%e,%e,%e,%e,%e,%e,%e,%e\n",
+             methodStr.c_str(), x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
+             dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
+             dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
+             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numGpus, numNodes, size, dd.timeMpiTopo_,
+             dd.timeNodeGpus_, dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
              dd.timeExchange_, dd.timeSwap_);
     }
 #endif // STENCIL_MEASURE_TIME

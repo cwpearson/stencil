@@ -17,7 +17,7 @@ export NUM_ITER=30
 set -x
 
 # CSV header
-echo bin,config,x,y,z,s,bytes,iters,gpus,nodes,ranks,mpi_topo,node_gpus,peer_en,placement,realize,plan,create,exchange,swap
+echo bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,peer_en,placement,realize,plan,create,exchange,swap
 
 # one rank per node, 1-6 GPUs, weak
 for gpus in 1 2 3 4 5 6; do

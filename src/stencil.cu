@@ -3,6 +3,23 @@
 
 #include <vector>
 
+uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method) const {
+  uint64_t ret = 0;
+  if ((method && MethodFlags::CudaMpi) || (method && MethodFlags::CudaAwareMpi)) {
+    ret += numBytesCudaMpi_;
+  }
+  if (method && MethodFlags::CudaMpiColocated) {
+    ret += numBytesCudaMpiColocated_;
+  }
+  if (method && MethodFlags::CudaMemcpyPeer) {
+    ret += numBytesCudaMemcpyPeer_;
+  }
+  if (method && MethodFlags::CudaKernel ) {
+    ret += numBytesCudaKernel_;
+  }
+  return ret;
+}
+
 void DistributedDomain::realize() {
   // TODO: make sure everyone has the same Placement Strategy
 
@@ -237,7 +254,6 @@ void DistributedDomain::realize() {
   {
 #ifdef STENCIL_TRACK_STATS
     numBytesCudaMpi_ = 0;
-    numBytesCudaAwareMpi_ = 0;
     numBytesCudaMpiColocated_ = 0;
     numBytesCudaMemcpyPeer_ = 0;
     numBytesCudaKernel_ = 0;
