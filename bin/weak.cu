@@ -95,24 +95,24 @@ int main(int argc, char **argv) {
     std::cout << numGpus << " subdomains " << size << " ranks: " << x << ","
               << y << "," << z << "=" << x * y * z << "\n";
     if (useNaivePlacement) {
-      std::cout << "naive placement\n";
+      std::cerr << "naive placement\n";
     } else {
-      std::cout << "node-aware placement\n";
+      std::cerr << "node-aware placement\n";
     }
     if ((methods & MethodFlags::CudaMpi) != MethodFlags::None) {
-      std::cout << "CudaMpi enabled\n";
+      std::cerr << "CudaMpi enabled\n";
     }
     if ((methods & MethodFlags::CudaAwareMpi) != MethodFlags::None) {
-      std::cout << "CudaAwareMpi enabled\n";
+      std::cerr << "CudaAwareMpi enabled\n";
     }
     if ((methods & MethodFlags::CudaMpiColocated) != MethodFlags::None) {
-      std::cout << "CudaMpiColocated enabled\n";
+      std::cerr << "CudaMpiColocated enabled\n";
     }
     if ((methods & MethodFlags::CudaMemcpyPeer) != MethodFlags::None) {
-      std::cout << "CudaMemcpyPeer enabled\n";
+      std::cerr << "CudaMemcpyPeer enabled\n";
     }
     if ((methods & MethodFlags::CudaKernel) != MethodFlags::None) {
-      std::cout << "CudaKernel enabled\n";
+      std::cerr << "CudaKernel enabled\n";
     }
   }
 
@@ -145,6 +145,7 @@ int main(int argc, char **argv) {
       nvtxRangePush("exchange");
       dd.exchange();
       nvtxRangePop();
+      dd.swap();
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -152,10 +153,6 @@ int main(int argc, char **argv) {
 #if STENCIL_MEASURE_TIME == 1
     if (0 == rank) {
       std::string methodStr;
-      if (methods == MethodFlags::All) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "all";
-      }
       if (methods && MethodFlags::CudaMpi) {
         methodStr += methodStr.empty() ? "" : ",";
         methodStr += "staged";
@@ -176,12 +173,16 @@ int main(int argc, char **argv) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "kernel";
       }
+      if (methods == MethodFlags::All) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "all";
+      }
 
-      printf("weak %s x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d "
-             "mpi_topo %f "
-             "node_gpus %f peer_en %f placement %f realize %f plan "
-             "%f create %f exchange %f swap %f\n",
-             methodStr.c_str(), x, y, z, nIters, numGpus, numNodes, size,
+// same as strong.cu
+// header should be
+// bin,config,x,y,z,s,bytes,iters,gpus,nodes,ranks,mpi_topo,node_gpus,peer_en,placement,realize,plan,create,exchange,swap,
+      printf("weak,%s,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%d,%e,%e,%e,%e,%e,%e,%e,%e,%e\n",
+             methodStr.c_str(), x, y, z, x*y*z, dd.exchanged_bytes(), nIters, numGpus, numNodes, size,
              dd.timeMpiTopo_, dd.timeNodeGpus_, dd.timePeerEn_,
              dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
              dd.timeExchange_, dd.timeSwap_);
