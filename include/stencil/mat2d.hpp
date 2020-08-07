@@ -3,6 +3,8 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <cassert>
+#include <limits>
 
 struct Shape {
   uint64_t x;

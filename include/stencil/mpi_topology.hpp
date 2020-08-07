@@ -2,6 +2,8 @@
 
 #include <mpi.h>
 
+#include <set>
+
 class MpiTopology {
 private:
   MPI_Comm comm_;
