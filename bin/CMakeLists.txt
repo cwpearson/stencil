@@ -69,6 +69,10 @@ add_executable(weak weak.cu)
 target_link_libraries(weak stencil::stencil)
 add_args(weak)
 
+add_executable(weak-exchange weak_exchange.cu)
+target_link_libraries(weak-exchange stencil::stencil)
+add_args(weak-exchange)
+
 add_executable(strong strong.cu)
 target_link_libraries(strong stencil::stencil)
 add_args(strong)
