@@ -68,7 +68,7 @@ else()
 endif()
 
 target_compile_features(stencil PUBLIC cxx_std_11)
-set_target_properties(stencil PROPERTIES CUDA_STANDARD 11)
+target_compile_features(stencil PUBLIC cuda_std_11)
 
 target_compile_options(stencil PRIVATE
 $<$<COMPILE_LANGUAGE:CXX>:
@@ -133,18 +133,18 @@ endif()
 
 if (USE_CUDA_AWARE_MPI)
   message(STATUS "Using CUDA-Aware MPI")
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA_AWARE_MPI=1)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_USE_CUDA_AWARE_MPI=1)
 else()
 	message(STATUS "NOT using CUDA-Aware MPI (USE_CUDA_AWARE_MPI=ON to enable)")
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA_AWARE_MPI=0)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_USE_CUDA_AWARE_MPI=0)
 endif()
 
 if (MEASURE_TIME)
   message(STATUS "MEASURE_TIME=ON, compiling with -DSTENCIL_MEASURE_TIME=1")
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_MEASURE_TIME=1)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_MEASURE_TIME=1)
 else()
   message(STATUS "MEASURE_TIME=OFF, compiling with -DSTENCIL_MEASURE_TIME=0")
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_MEASURE_TIME=0)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_MEASURE_TIME=0)
 endif()
 
 if (TRACK_STATS)
@@ -156,7 +156,7 @@ else()
 endif()
 
 if(CMAKE_CUDA_COMPILER)
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=1)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_USE_CUDA=1)
   message(STATUS "CUDA found, compiling with STENCIL_USE_CUDA=1")
 
   set(CUDA_TOOLKIT_ROOT_DIR "${CMAKE_CUDA_COMPILER}")
@@ -171,7 +171,7 @@ if(CMAKE_CUDA_COMPILER)
   message(STATUS "nvToolsExt found: ${NVTOOLSEXT_LIB}")
 
 else()
-  target_compile_definitions(stencil INTERFACE -DSTENCIL_USE_CUDA=0)
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_USE_CUDA=0)
   message(STATUS "CUDA not found, compiling with STENCIL_USE_CUDA=0")
 endif()
 
