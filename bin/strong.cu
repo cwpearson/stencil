@@ -141,6 +141,7 @@ int main(int argc, char **argv) {
       nvtxRangePush("exchange");
       dd.exchange();
       nvtxRangePop();
+      dd.swap();
     }
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -172,14 +173,14 @@ int main(int argc, char **argv) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "all";
       }
-      printf("strong %s x %lu y %lu z %lu n %d gpus %d nodes %d ranks %d "
-             "mpi_topo %f "
-             "node_gpus %f peer_en %f placement %f realize %f plan "
-             "%f create %f exchange %f\n",
-             methodStr.c_str(), x, y, z, nIters, numGpus, numNodes, size,
+// same as weak.cu
+// header should be
+// bin,config,x,y,z,s,bytes,iters,gpus,nodes,ranks,mpi_topo,node_gpus,peer_en,placement,realize,plan,create,exchange,swap,
+      printf("strong,%s,%lu,%lu,%lu,%lu,%lu,%d,%d,%d,%d,%e,%e,%e,%e,%e,%e,%e,%e,%e\n",
+             methodStr.c_str(), x, y, z, x*y*z, dd.exchanged_bytes(), nIters, numGpus, numNodes, size,
              dd.timeMpiTopo_, dd.timeNodeGpus_, dd.timePeerEn_,
              dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
-             dd.timeExchange_);
+             dd.timeExchange_, dd.timeSwap_);
     }
 #endif // STENCIL_MEASURE_TIME
 
