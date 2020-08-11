@@ -164,9 +164,9 @@ if (parser.need_help()) {
   }
 
 
-  x = size_t(double(x) * pow(double(size), 0.33333) + 0.5); // round to nearest
-  y = size_t(double(y) * pow(double(size), 0.33333) + 0.5);
-  z = size_t(double(z) * pow(double(size), 0.33333) + 0.5);
+  x = size_t(double(x) * pow(double(numSubdoms), 0.33333) + 0.5); // round to nearest
+  y = size_t(double(y) * pow(double(numSubdoms), 0.33333) + 0.5);
+  z = size_t(double(z) * pow(double(numSubdoms), 0.33333) + 0.5);
 
 
   cudaDeviceProp prop;
