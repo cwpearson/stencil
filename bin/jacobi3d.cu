@@ -109,11 +109,11 @@ int main(int argc, char **argv) {
 
   argparse::Parser parser("a cwpearson/argparse-powered CLI app");
   // clang-format off
-  parser.add_flag(useStaged, "--remote")->help("Enable RemoteSender/Recver");
+  parser.add_flag(useStaged, "--staged")->help("Enable RemoteSender/Recver");
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
   parser.add_flag(useCudaAwareMPI, "--cuda-aware-mpi"->help("Enable CudaAwareMpiSender/Recver");
 #endif
-  parser.add_flag(useColo, "--colocated")->help("Enable ColocatedHaloSender/Recver");
+  parser.add_flag(useColo, "--colo")->help("Enable ColocatedHaloSender/Recver");
   parser.add_flag(useMemcpyPeer, "--peer")->help("Enable PeerAccessSender");
   parser.add_flag(useKernel, "--kernel")->help("Enable PeerCopySender");
   parser.add_flag(trivial, "--trivial")->help("Skip node-aware placement");
