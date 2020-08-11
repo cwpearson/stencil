@@ -152,14 +152,15 @@ if (parser.need_help()) {
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
-  // int numSubdoms;
-  // {
-  //   MpiTopology topo(MPI_COMM_WORLD);
-  //   numSubdoms = size / topo.colocated_size() * devCount;
-  // }
+  // only works if no GPUs are overloaded
+  int numSubdoms;
+  {
+    MpiTopology topo(MPI_COMM_WORLD);
+    numSubdoms = size / topo.colocated_size() * devCount;
+  }
 
   if (0 == rank) {
-    std::cerr << "assuming " << size << " subdomains\n";
+    std::cerr << "assuming " << numSubdoms << " subdomains\n";
   }
 
 
@@ -374,7 +375,7 @@ if (parser.need_help()) {
       methodStr += "kernel";
     }
 
-    std::cout << "jacobi3d," << methodStr << "," << x << "," << y << "," << z << "," << iterTime.min() << ","
+    std::cout << "jacobi3d," << methodStr << size <<","<< devCount << "," << x << "," << y << "," << z << "," << iterTime.min() << ","
               << iterTime.trimean() << "\n";
   }
 
