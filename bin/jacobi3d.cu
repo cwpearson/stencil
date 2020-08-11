@@ -1,6 +1,5 @@
 #include <cmath>
 
-
 #include <nvToolsExt.h>
 
 #include "argparse/argparse.hpp"
@@ -119,8 +118,8 @@ int main(int argc, char **argv) {
   parser.add_flag(trivial, "--trivial")->help("Skip node-aware placement");
   parser.add_flag(noOverlap, "--no-overlap")->help("Don't overlap communication and computation");
   parser.add_option(prefix, "--prefix")->help("prefix for output files");
-  parser.add_option(iters, "--iters")->help("number of iterations");
-  parser.add_option(checkpointPeriod, "--period")->help("iterations between checkpoints");
+  parser.add_option(iters, "--iters", "-n")->help("number of iterations");
+  parser.add_option(checkpointPeriod, "--period", "-q")->help("iterations between checkpoints");
   parser.add_positional(x)->required();
   parser.add_positional(y)->required();
   parser.add_positional(z)->required();
@@ -261,7 +260,7 @@ if (parser.need_help()) {
     const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
 
     for (int iter = 0; iter < iters; ++iter) {
-      
+
       double elapsed = MPI_Wtime();
 
       if (overlap) {
@@ -326,7 +325,6 @@ if (parser.need_help()) {
         }
       }
 
-
       // wait for stencil to complete before swapping pointers
       for (auto &s : computeStreams) {
         CUDA_RUNTIME(cudaStreamSynchronize(s));
@@ -352,7 +350,30 @@ if (parser.need_help()) {
 
 
   if (0 == mpi::world_rank()) {
-    std::cout << "jacobi3d," << x << "," << y << "," << z << "," << iterTime.min() << "," << iterTime.trimean() << "\n";
+    std::string methodStr;
+    if (methods && MethodFlags::CudaMpi) {
+      methodStr += methodStr.empty() ? "" : ",";
+      methodStr += "staged";
+    }
+    if (methods && MethodFlags::CudaAwareMpi) {
+      methodStr += methodStr.empty() ? "" : "/";
+      methodStr += "cuda-aware";
+    }
+    if (methods && MethodFlags::CudaMpiColocated) {
+      methodStr += methodStr.empty() ? "" : "/";
+      methodStr += "colo";
+    }
+    if (methods && MethodFlags::CudaMemcpyPeer) {
+      methodStr += methodStr.empty() ? "" : "/";
+      methodStr += "peer";
+    }
+    if (methods && MethodFlags::CudaKernel) {
+      methodStr += methodStr.empty() ? "" : "/";
+      methodStr += "kernel";
+    }
+
+    std::cout << "jacobi3d," << methodStr << "," << x << "," << y << "," << z << "," << iterTime.min() << ","
+              << iterTime.trimean() << "\n";
   }
 
   MPI_Finalize();
