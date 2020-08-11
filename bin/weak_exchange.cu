@@ -91,16 +91,19 @@ int main(int argc, char **argv) {
 
   if (0 == rank) {
 #ifndef NDEBUG
-    std::cout << "WARN: not release mode\n";
-    std::cerr << "WARN: not release mode\n";
+    std::cout << "ERR: not release mode\n";
+    std::cerr << "ERR: not release mode\n";
+    exit(-1);
 #endif
 #if STENCIL_MEASURE_TIME == 1
-    std::cout << "WARN: detailed time measurement\n";
-    std::cerr << "WARN: detailed time measurement\n";
+    std::cout << "ERR: detailed time measurement\n";
+    std::cerr << "ERR: detailed time measurement\n";
+    exit(-1);
 #endif
 #ifndef STENCIL_TRACK_STATS
-    std::cout << "WARN: not tracking stats\n";
-    std::cerr << "WARN: not tracking stats\n";
+    std::cout << "ERR: not tracking stats\n";
+    std::cerr << "ERR: not tracking stats\n";
+    exit(-1);
 #endif
   }
 
@@ -136,7 +139,6 @@ int main(int argc, char **argv) {
     elapsed = MPI_Wtime() - elapsed;
     MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-#if STENCIL_MEASURE_TIME == 1
     if (0 == rank) {
       std::string methodStr;
       if (methods && MethodFlags::CudaMpi) {
@@ -177,7 +179,6 @@ int main(int argc, char **argv) {
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
              dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numGpus, numNodes, size, elapsed);
     }
-#endif // STENCIL_MEASURE_TIME
 
   } // send domains out of scope before MPI_Finalize
 
