@@ -163,6 +163,7 @@ void DistributedDomain::realize() {
             }
           }
           if (any_methods(MethodFlags::CudaMemcpyPeer)) {
+            LOG_DEBUG("peer " << rank_ << " " << dstRank << " peer(" << myDev << "," << dstDev << ")=" << gpu_topo::peer(myDev, dstDev));
             if (dstRank == rank_ && gpu_topo::peer(myDev, dstDev)) {
               peerCopyOutboxes[di][dstGPU].push_back(sMsg);
               goto send_planned;
@@ -664,6 +665,8 @@ const Rect3 DistributedDomain::get_compute_region() const noexcept { return Rect
 
 void DistributedDomain::exchange() {
 
+  nvtxRangePush("DD::exchange()");
+
 #if STENCIL_MEASURE_TIME == 1
   MPI_Barrier(MPI_COMM_WORLD);
   double start = MPI_Wtime();
@@ -850,6 +853,8 @@ void DistributedDomain::exchange() {
     timeExchange_ += maxElapsed;
   }
 #endif
+
+  nvtxRangePop(); // "DD::excchange"
 
   // No barrier necessary: the CPU thread has already blocked until all recvs are done, so it is safe to proceed.
 }
