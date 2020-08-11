@@ -103,7 +103,7 @@ private:
   std::vector<std::map<Dim3, ColocatedHaloSender>> coloSenders_; // vec[domain][dstIdx] = sender
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
   // count of how many bytes are sent through various methods in each exchange
   uint64_t numBytesCudaMpi_;
   uint64_t numBytesCudaMpiColocated_;
@@ -112,9 +112,15 @@ private:
 #endif
 
 public:
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_EXCHANGE_STATS
   /* record total time spent on operations. Valid at MPI rank 0
    */
+  double timeExchange_;
+  double timeSwap_;
+#endif
+
+#ifdef STENCIL_SETUP_STATS
+  /* total time spent on setup ops*/
   double timeMpiTopo_;
   double timeNodeGpus_;
   double timePeerEn_;
@@ -122,14 +128,12 @@ public:
   double timePlan_;
   double timeRealize_;
   double timeCreate_;
-  double timeExchange_;
-  double timeSwap_;
 #endif
 
   DistributedDomain(size_t x, size_t y, size_t z)
       : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware) {
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
     timeMpiTopo_ = 0;
     timeNodeGpus_ = 0;
     timePeerEn_ = 0;
@@ -137,6 +141,9 @@ public:
     timePlan_ = 0;
     timeRealize_ = 0;
     timeCreate_ = 0;
+#endif
+
+#ifdef STENCIL_EXCHANGE_STATS
     timeExchange_ = 0;
     timeSwap_ = 0;
 #endif
@@ -144,12 +151,12 @@ public:
     MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
     MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
     MPI_Barrier(MPI_COMM_WORLD);
     double start = MPI_Wtime();
 #endif
     mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
     double elapsed = MPI_Wtime() - start;
     double maxElapsed = -1;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -198,14 +205,14 @@ public:
 
 // create a list of cuda device IDs in use by the ranks on this node
 // TODO: assumes all ranks use the same number of GPUs
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
     std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
     MPI_Allgather(gpus_.data(), int(gpus_.size()), MPI_INT, nodeCudaIds.data(), int(gpus_.size()), MPI_INT,
                   mpiTopology_.colocated_comm());
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {
@@ -225,7 +232,7 @@ public:
       }
     }
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
@@ -237,7 +244,7 @@ public:
       }
     }
     nvtxRangePop();
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
     elapsed = MPI_Wtime() - start;
     MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
     if (0 == rank_) {

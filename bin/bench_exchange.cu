@@ -73,8 +73,8 @@ int main(int argc, char **argv) {
   int rank = mpi::world_rank();
   int size = mpi::world_size();
 
-#if STENCIL_MEASURE_TIME != 0
-  std::cerr << "WARN: compiled with STENCIL_MEASURE_TIME != 0. Extra overhead "
+#ifdef STENCIL_EXCHANGE_STATS
+  std::cerr << "WARN: compiled with STENCIL_EXCHANGE_STATS != 0. Extra overhead "
                "may be present.\n";
 #endif
 

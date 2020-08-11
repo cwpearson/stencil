@@ -5,7 +5,7 @@
 
 uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method) const {
   uint64_t ret = 0;
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
   if ((method && MethodFlags::CudaMpi) || (method && MethodFlags::CudaAwareMpi)) {
     ret += numBytesCudaMpi_;
   }
@@ -18,6 +18,8 @@ uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method)
   if (method && MethodFlags::CudaKernel) {
     ret += numBytesCudaKernel_;
   }
+#else
+  (void)method;
 #endif
   return ret;
 }
@@ -26,7 +28,7 @@ void DistributedDomain::realize() {
   // TODO: make sure everyone has the same Placement Strategy
 
   // compute domain placement
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   MPI_Barrier(MPI_COMM_WORLD);
   double start = MPI_Wtime();
 #endif
@@ -40,7 +42,7 @@ void DistributedDomain::realize() {
   }
   assert(placement_);
   nvtxRangePop(); // "placement"
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   double maxElapsed = -1;
   double elapsed = MPI_Wtime() - start;
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -49,7 +51,7 @@ void DistributedDomain::realize() {
   }
 #endif
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   MPI_Barrier(MPI_COMM_WORLD);
   start = MPI_Wtime();
 #endif
@@ -78,7 +80,7 @@ void DistributedDomain::realize() {
   for (auto &d : domains_) {
     d.realize();
   }
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   elapsed = MPI_Wtime() - start;
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   if (0 == rank_) {
@@ -86,7 +88,7 @@ void DistributedDomain::realize() {
   }
 #endif
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   MPI_Barrier(MPI_COMM_WORLD);
   start = MPI_Wtime();
 #endif
@@ -236,7 +238,7 @@ void DistributedDomain::realize() {
   }
 
   nvtxRangePop(); // plan
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   elapsed = MPI_Wtime() - start;
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   if (0 == rank_) {
@@ -254,7 +256,7 @@ void DistributedDomain::realize() {
 
   ----------------------------*/
   {
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
     numBytesCudaMpi_ = 0;
     numBytesCudaMpiColocated_ = 0;
     numBytesCudaMemcpyPeer_ = 0;
@@ -281,7 +283,7 @@ void DistributedDomain::realize() {
         // send size matches size of halo that we're recving into
         const size_t bytes = domains_[msg.srcGPU_].halo_bytes(msg.dir_ * -1, qi);
         peerBytes += bytes;
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
         numBytesCudaKernel_ += bytes;
 #endif
       }
@@ -298,7 +300,7 @@ void DistributedDomain::realize() {
             // send size matches size of halo that we're recving into
             const int64_t bytes = domains_[srcGPU].halo_bytes(msg.dir_ * -1, i);
             peerBytes += bytes;
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
             numBytesCudaMemcpyPeer_ += bytes;
 #endif
           }
@@ -318,7 +320,7 @@ void DistributedDomain::realize() {
         planFile << "colo to dstIdx=" << dstIdx << "\n";
         for (auto &msg : box) {
           planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->" << msg.dstGPU_ << ")\n";
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
             numBytesCudaMpiColocated_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
@@ -338,7 +340,7 @@ void DistributedDomain::realize() {
         planFile << "remote to dstIdx=" << dstIdx << "\n";
         for (auto &msg : box) {
           planFile << "dir=" << msg.dir_ << " (" << msg.srcGPU_ << "->" << msg.dstGPU_ << ")\n";
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
             numBytesCudaMpi_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
@@ -350,7 +352,7 @@ void DistributedDomain::realize() {
     planFile.close();
 
 // give every rank the total send volume
-#ifdef STENCIL_TRACK_STATS
+#ifdef STENCIL_SETUP_STATS
     nvtxRangePush("allreduce communication stats");
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMpi_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMpiColocated_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
@@ -367,7 +369,7 @@ void DistributedDomain::realize() {
 #endif
   }
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   MPI_Barrier(MPI_COMM_WORLD);
   start = MPI_Wtime();
 #endif
@@ -526,7 +528,7 @@ void DistributedDomain::realize() {
   }
   nvtxRangePop(); // prep remote
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_SETUP_STATS
   elapsed = MPI_Wtime() - start;
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   if (0 == rank_) {
@@ -538,7 +540,7 @@ void DistributedDomain::realize() {
 void DistributedDomain::swap() {
   LOG_DEBUG("swap()");
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_EXCHANGE_STATS
   MPI_Barrier(MPI_COMM_WORLD);
   double start = MPI_Wtime();
 #endif
@@ -547,7 +549,7 @@ void DistributedDomain::swap() {
     d.swap();
   }
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_EXCHANGE_STATS
   double elapsed = MPI_Wtime() - start;
   double maxElapsed = -1;
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
@@ -666,7 +668,7 @@ const Rect3 DistributedDomain::get_compute_region() const noexcept { return Rect
 
 void DistributedDomain::exchange() {
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_EXCHANGE_STATS
   MPI_Barrier(MPI_COMM_WORLD);
   double start = MPI_Wtime();
 #endif
@@ -844,7 +846,7 @@ void DistributedDomain::exchange() {
   }
   nvtxRangePop(); // remote wait
 
-#if STENCIL_MEASURE_TIME == 1
+#ifdef STENCIL_EXCHANGE_STATS
   double maxElapsed = -1;
   double elapsed = MPI_Wtime() - start;
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);

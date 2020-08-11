@@ -146,7 +146,7 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-#if STENCIL_MEASURE_TIME == 1
+#if defined(STENCIL_EXCHANGE_STATS) && defined(STENCIL_SETUP_STATS)
     if (0 == rank) {
       std::string methodStr;
       if (methods && MethodFlags::CudaMpi) {
@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
              dd.timeNodeGpus_, dd.timePeerEn_, dd.timePlacement_, dd.timeRealize_, dd.timePlan_, dd.timeCreate_,
              dd.timeExchange_, dd.timeSwap_);
     }
-#endif // STENCIL_MEASURE_TIME
+#endif // STENCIL_EXCHANGE_STATS
 
   } // send domains out of scope before MPI_Finalize
 
