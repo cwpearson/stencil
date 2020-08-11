@@ -6,14 +6,14 @@ source ci/env.sh
 mkdir -p $CMAKE_PREFIX
 if [[ ! -f $CMAKE_PREFIX/bin/cmake ]]; then
     if [[ $TRAVIS_CPU_ARCH == "ppc64le" ]]; then
-        wget -qSL https://cmake.org/files/v3.13/cmake-3.13.5.tar.gz -O cmake.tar.gz
+        wget -qSL https://github.com/Kitware/CMake/releases/download/v3.17.4/cmake-3.17.4.tar.gz -O cmake.tar.gz
         tar -xf cmake.tar.gz --strip-components=1 -C $CMAKE_PREFIX
         rm cmake.tar.gz
         cd $CMAKE_PREFIX
         ./bootstrap --prefix=$CMAKE_PREFIX
         make -j `nproc` install
     elif [[ $TRAVIS_CPU_ARCH == "amd64" ]]; then
-        wget -qSL https://cmake.org/files/v3.13/cmake-3.13.5-Linux-x86_64.tar.gz -O cmake.tar.gz
+        wget -qSL https://github.com/Kitware/CMake/releases/download/v3.17.4/cmake-3.17.4-Linux-x86_64.tar.gz -O cmake.tar.gz
         tar -xf cmake.tar.gz --strip-components=1 -C $CMAKE_PREFIX
         rm cmake.tar.gz
     fi
