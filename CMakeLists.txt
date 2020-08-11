@@ -3,7 +3,8 @@
 # 3.10+ findopenmp gained support for language-specific components
 # 3.11+ for CMake not to add -fopenmp to the nvcc flags
 # 3.13+ for target_link_directories
-cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+# 3.17+ for CMAKE_CUDA_KNOWN_FEATURES/cuda_std_11
+cmake_minimum_required(VERSION 3.17 FATAL_ERROR)
 
 project(stencil LANGUAGES CXX VERSION 0.1.0.0)
 
