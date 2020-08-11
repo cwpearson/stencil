@@ -375,8 +375,8 @@ if (parser.need_help()) {
       methodStr += "kernel";
     }
 
-    std::cout << "jacobi3d," << methodStr << size <<","<< devCount << "," << x << "," << y << "," << z << "," << iterTime.min() << ","
-              << iterTime.trimean() << "\n";
+    std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
+              << iterTime.min() << "," << iterTime.trimean() << "\n";
   }
 
   MPI_Finalize();
