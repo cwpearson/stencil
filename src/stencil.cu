@@ -868,7 +868,7 @@ void DistributedDomain::write_paraview(const std::string &prefix, bool zeroNaNs)
 
   for (size_t di = 0; di < domains_.size(); ++di) {
     int64_t id = rank * domains_.size() + di;
-    const std::string path = prefix + std::to_string(id) + ".txt";
+    const std::string path = prefix + "_" + std::to_string(id) + ".txt";
 
     LocalDomain &domain = domains_[di];
 
