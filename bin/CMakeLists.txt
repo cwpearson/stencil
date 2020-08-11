@@ -61,7 +61,7 @@ add_executable(astaroth-sim astaroth_sim.cu)
 target_link_libraries(astaroth-sim stencil::stencil)
 add_args(astaroth-sim)
 
-add_executable(jacobi3d jacobi3d.cu)
+add_executable(jacobi3d jacobi3d.cu statistics.cpp)
 target_link_libraries(jacobi3d stencil::stencil)
 add_args(jacobi3d)
 

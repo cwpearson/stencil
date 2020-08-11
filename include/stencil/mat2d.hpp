@@ -103,13 +103,13 @@ public:
   Mat2D &operator=(Mat2D &&rhs) = default;
 
   inline T &at(int64_t i, int64_t j) noexcept {
-    assert(i < shape_.y);
-    assert(j < shape_.x);
+    assert(i < int64_t(shape_.y));
+    assert(j < int64_t(shape_.x));
     return data_[i * shape_.x + j];
   }
   inline const T &at(int64_t i, int64_t j) const noexcept {
-    assert(i < shape_.y);
-    assert(j < shape_.x);
+    assert(i < int64_t(shape_.y));
+    assert(j < int64_t(shape_.x));
     return data_[i * shape_.x + j];
   }
 
