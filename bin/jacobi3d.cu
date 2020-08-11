@@ -96,6 +96,7 @@ int main(int argc, char **argv) {
 
   bool trivial = false;
   bool noOverlap = false;
+  bool paraview = false;
 
   size_t x = 512;
   size_t y = 512;
@@ -117,7 +118,8 @@ int main(int argc, char **argv) {
   parser.add_flag(useKernel, "--kernel")->help("Enable PeerCopySender");
   parser.add_flag(trivial, "--trivial")->help("Skip node-aware placement");
   parser.add_flag(noOverlap, "--no-overlap")->help("Don't overlap communication and computation");
-  parser.add_option(prefix, "--prefix")->help("prefix for output files");
+  parser.add_option(prefix, "--prefix")->help("prefix for paraview files");
+  parser.add_flag(paraview, "--paraview")->help("dump paraview files");
   parser.add_option(iters, "--iters", "-n")->help("number of iterations");
   parser.add_option(checkpointPeriod, "--period", "-q")->help("iterations between checkpoints");
   parser.add_positional(x)->required();
@@ -252,7 +254,7 @@ if (parser.need_help()) {
       CUDA_RUNTIME(cudaStreamSynchronize(s));
     }
 
-    if (1) {
+    if (paraview) {
       dd.write_paraview(prefix + "jacobi3d_init");
     }
 
@@ -337,12 +339,12 @@ if (parser.need_help()) {
       MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
       iterTime.insert(elapsed);
 
-      if (iter % checkpointPeriod == 0) {
+      if (paraview && (iter % checkpointPeriod == 0)) {
         dd.write_paraview(prefix + "jacobi3d_" + std::to_string(iter));
       }
     }
 
-    if (1) {
+    if (paraview) {
       dd.write_paraview(prefix + "jacobi3d_final");
     }
 
