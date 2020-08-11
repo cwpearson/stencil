@@ -5,6 +5,7 @@
 
 uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method) const {
   uint64_t ret = 0;
+#ifdef STENCIL_TRACK_STATS
   if ((method && MethodFlags::CudaMpi) || (method && MethodFlags::CudaAwareMpi)) {
     ret += numBytesCudaMpi_;
   }
@@ -14,9 +15,10 @@ uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method)
   if (method && MethodFlags::CudaMemcpyPeer) {
     ret += numBytesCudaMemcpyPeer_;
   }
-  if (method && MethodFlags::CudaKernel ) {
+  if (method && MethodFlags::CudaKernel) {
     ret += numBytesCudaKernel_;
   }
+#endif
   return ret;
 }
 

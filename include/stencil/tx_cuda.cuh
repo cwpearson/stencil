@@ -357,7 +357,11 @@ public:
 
   /*! have stream wait for data to arrive
 
-     FIXME: if this gets called before the other rank sends, then it won't work
+     If this gets called before the associated ColocatedDeviceSender starts the copy, then it will
+     not work, of course.
+     Rely on whoever owns us to handle that case.
+
+     FIXME: should we wait on event instead of stream?
    */
   void wait(RcStream &stream) {
     assert(event_);
@@ -487,7 +491,8 @@ public:
 
   void next() {
     if (State::WAIT_NOTIFY == state_) {
-      // have recver wait on copy event, then insert unpack into stream
+      // have device recver wait on its stream, and then unpack the data.
+      // The device recver knows how to exchange with the 
       state_ = State::WAIT_COPY;
       recver_.wait(stream_);
       unpacker_.unpack();
