@@ -1,12 +1,13 @@
-#include <chrono>
 #include <cmath>
-#include <thread>
+
 
 #include <nvToolsExt.h>
 
 #include "argparse/argparse.hpp"
 
 #include "stencil/stencil.hpp"
+
+#include "statistics.hpp"
 
 const float COLD_TEMP = 0;
 const float HOT_TEMP = 1;
@@ -101,6 +102,11 @@ int main(int argc, char **argv) {
   size_t y = 512;
   size_t z = 512;
 
+  std::string prefix;
+
+  int iters;
+  int checkpointPeriod = -1;
+
   argparse::Parser parser("a cwpearson/argparse-powered CLI app");
   // clang-format off
   parser.add_flag(useStaged, "--remote")->help("Enable RemoteSender/Recver");
@@ -112,20 +118,28 @@ int main(int argc, char **argv) {
   parser.add_flag(useKernel, "--kernel")->help("Enable PeerCopySender");
   parser.add_flag(trivial, "--trivial")->help("Skip node-aware placement");
   parser.add_flag(noOverlap, "--no-overlap")->help("Don't overlap communication and computation");
+  parser.add_option(prefix, "--prefix")->help("prefix for output files");
+  parser.add_option(iters, "--iters")->help("number of iterations");
+  parser.add_option(checkpointPeriod, "--period")->help("iterations between checkpoints");
   parser.add_positional(x)->required();
   parser.add_positional(y)->required();
   parser.add_positional(z)->required();
   // clang-format on
 
   if (!parser.parse(argc, argv)) {
-    std::cout << parser.help() << "\n";
+    std::cerr << parser.help() << "\n";
     exit(EXIT_FAILURE);
   }
 
 if (parser.need_help()) {
-    std::cout << parser.help() << "\n";
+    std::cerr << parser.help() << "\n";
     return 0;
 }
+
+  // default checkpoint 10 times
+  if (checkpointPeriod <= 0) {
+    checkpointPeriod = iters / 10;
+  }
 
   MPI_Init(&argc, &argv);
 
@@ -137,15 +151,21 @@ if (parser.need_help()) {
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
-  int numSubdoms;
-  {
-    MpiTopology topo(MPI_COMM_WORLD);
-    numSubdoms = size / topo.colocated_size() * devCount;
-  }
+  // int numSubdoms;
+  // {
+  //   MpiTopology topo(MPI_COMM_WORLD);
+  //   numSubdoms = size / topo.colocated_size() * devCount;
+  // }
 
   if (0 == rank) {
-    std::cout << "assuming " << numSubdoms << " subdomains\n";
+    std::cerr << "assuming " << size << " subdomains\n";
   }
+
+
+  x = size_t(double(x) * pow(double(size), 0.33333) + 0.5); // round to nearest
+  y = size_t(double(y) * pow(double(size), 0.33333) + 0.5);
+  z = size_t(double(z) * pow(double(size), 0.33333) + 0.5);
+
 
   cudaDeviceProp prop;
   CUDA_RUNTIME(cudaGetDeviceProperties(&prop, 0));
@@ -180,10 +200,6 @@ if (parser.need_help()) {
     overlap = false;
   }
 
-  if (0 == rank) {
-    std::cout << "domain: " << x << "," << y << "," << z << "\n";
-  }
-
   Radius radius = Radius::constant(0);
   // x
   radius.dir(1, 0, 0) = 1;
@@ -195,6 +211,9 @@ if (parser.need_help()) {
   radius.dir(0, 0, 1) = 1;
   radius.dir(0, 0, -1) = 1;
   // radius.set_face(1);
+
+
+  Statistics iterTime;
 
   {
     DistributedDomain dd(x, y, z);
@@ -229,26 +248,21 @@ if (parser.need_help()) {
       init_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(src, reg, computeRegion);
     }
 
-    // wait for stencil to complete
+    // wait for init to complete
     for (auto &s : computeStreams) {
       CUDA_RUNTIME(cudaStreamSynchronize(s));
     }
 
     if (1) {
-      if (overlap) {
-        dd.write_paraview("overlap_init");
-      } else {
-        dd.write_paraview("init");
-      }
+      dd.write_paraview(prefix + "jacobi3d_init");
     }
 
     const std::vector<Rect3> interiors = dd.get_interior();
     const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
 
-    for (size_t iter = 0; iter < 5000; ++iter) {
-
-      if (0 == rank)
-        std::cout << iter << "\n";
+    for (int iter = 0; iter < iters; ++iter) {
+      
+      double elapsed = MPI_Wtime();
 
       if (overlap) {
         // launch operations on interior, safe to compute on before exchange
@@ -266,7 +280,6 @@ if (parser.need_help()) {
           stencil_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(dst0, src0, mr, computeRegion);
           CUDA_RUNTIME(cudaGetLastError());
           nvtxRangePop(); // launch
-                          // CUDA_RUNTIME(cudaDeviceSynchronize());
         }
       }
 
@@ -292,7 +305,6 @@ if (parser.need_help()) {
             stencil_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(dst, src, mr, computeRegion);
             CUDA_RUNTIME(cudaGetLastError());
             nvtxRangePop(); // launch
-            CUDA_RUNTIME(cudaDeviceSynchronize());
           }
         }
       } else {
@@ -313,7 +325,9 @@ if (parser.need_help()) {
           nvtxRangePop(); // launch (whole)
         }
       }
-      // wait for stencil to complete
+
+
+      // wait for stencil to complete before swapping pointers
       for (auto &s : computeStreams) {
         CUDA_RUNTIME(cudaStreamSynchronize(s));
       }
@@ -321,24 +335,25 @@ if (parser.need_help()) {
       // current = next
       dd.swap();
 
-      if (1 && (iter % 200 == 0)) {
-        if (overlap) {
-          dd.write_paraview("overlap_iter_" + std::to_string(iter) + "_");
-        } else {
-          dd.write_paraview("iter_" + std::to_string(iter) + "_");
-        }
+      elapsed = MPI_Wtime() - elapsed;
+      MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      iterTime.insert(elapsed);
+
+      if (iter % checkpointPeriod == 0) {
+        dd.write_paraview(prefix + "jacobi3d_" + std::to_string(iter));
       }
     }
 
     if (1) {
-      if (overlap) {
-        dd.write_paraview("overlap_final");
-      } else {
-        dd.write_paraview("final");
-      }
+      dd.write_paraview(prefix + "jacobi3d_final");
     }
 
   } // send domains out of scope before MPI_Finalize
+
+
+  if (0 == mpi::world_rank()) {
+    std::cout << "jacobi3d," << x << "," << y << "," << z << "," << iterTime.min() << "," << iterTime.trimean() << "\n";
+  }
 
   MPI_Finalize();
 
