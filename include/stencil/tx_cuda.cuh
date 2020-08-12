@@ -9,10 +9,7 @@
 #include <mpi.h>
 
 #include <nvToolsExt.h>
-
-// getpid()
-#include <sys/types.h>
-#include <unistd.h>
+#include <nvToolsExtCudaRt.h> // nvtxNameCudaStreamA
 
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
@@ -62,6 +59,10 @@ public:
     for (auto &msg : outbox_) {
       int srcDev = domains_[msg.srcGPU_]->gpu();
       streams_.emplace(srcDev, RcStream(srcDev, RcStream::Priority::HIGH));
+    }
+
+    for (size_t i = 0; i < streams_.size(); ++i) {
+      nvtxNameCudaStreamA(streams_[i], ("PeerAccessSender" + std::to_string(i)).c_str());
     }
   }
 
@@ -492,7 +493,7 @@ public:
   void next() {
     if (State::WAIT_NOTIFY == state_) {
       // have device recver wait on its stream, and then unpack the data.
-      // The device recver knows how to exchange with the 
+      // The device recver knows how to exchange with the
       state_ = State::WAIT_COPY;
       recver_.wait(stream_);
       unpacker_.unpack();
