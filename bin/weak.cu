@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
     std::cerr << "WARN: not release mode\n";
 #endif
 
-    std::cout << numGpus << " subdomains " << size << " ranks: " << x << "," << y << "," << z << "=" << x * y * z
+    std::cerr << numGpus << " subdomains " << size << " ranks: " << x << "," << y << "," << z << "=" << x * y * z
               << "\n";
     if (useNaivePlacement) {
       std::cerr << "naive placement\n";
