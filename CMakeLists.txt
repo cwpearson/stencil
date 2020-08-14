@@ -108,6 +108,7 @@ $<$<COMPILE_LANGUAGE:CUDA>:
 -Xcompiler=-Wstrict-aliasing;
 -Xcompiler=-Wswitch-enum;
 -Xcompiler=-Wvla;
+-Xptxas="-v";
 >
 )
 
