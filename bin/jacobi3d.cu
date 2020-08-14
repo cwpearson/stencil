@@ -389,8 +389,6 @@ if (parser.need_help()) {
       dd.write_paraview(prefix + "jacobi3d_final");
     }
 
-
-
     if (0 == mpi::world_rank()) {
       std::string methodStr;
       if (methods && MethodFlags::CudaMpi) {
@@ -415,13 +413,11 @@ if (parser.need_help()) {
       }
 
       std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
-      << dd.exchange_bytes_for_method(MethodFlags::CudaMpi) << ","
-      << dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated) << ","
-      << dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer) << ","
-      << dd.exchange_bytes_for_method(MethodFlags::CudaKernel) << ","
-      << iterTime.min() << "," << iterTime.trimean()
-      << "\n";
-
+                << dd.exchange_bytes_for_method(MethodFlags::CudaMpi) << ","
+                << dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated) << ","
+                << dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer) << ","
+                << dd.exchange_bytes_for_method(MethodFlags::CudaKernel) << "," << iterTime.min() << ","
+                << iterTime.trimean() << "\n";
     }
   } // send domains out of scope before MPI_Finalize
 
