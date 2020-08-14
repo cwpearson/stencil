@@ -71,17 +71,13 @@ add_executable(jacobi3d-strong jacobi3d_strong.cu statistics.cpp)
 target_link_libraries(jacobi3d-strong stencil::stencil)
 add_args(jacobi3d-strong)
 
-add_executable(weak weak.cu)
-target_link_libraries(weak stencil::stencil)
-add_args(weak)
+add_executable(exchange-weak exchange_weak.cu)
+target_link_libraries(exchange-weak stencil::stencil)
+add_args(exchange-weak)
 
-add_executable(weak-exchange weak_exchange.cu)
-target_link_libraries(weak-exchange stencil::stencil)
-add_args(weak-exchange)
-
-add_executable(strong strong.cu)
-target_link_libraries(strong stencil::stencil)
-add_args(strong)
+add_executable(exchange-strong exchange_strong.cu)
+target_link_libraries(exchange-strong stencil::stencil)
+add_args(exchange-strong)
 
 add_executable(pingpong pingpong.cu)
 target_link_libraries(pingpong stencil::stencil)

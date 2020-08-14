@@ -1,5 +1,5 @@
 /* measure purely total exchange time
-*/
+ */
 
 #include <cmath>
 
@@ -22,12 +22,26 @@ int main(int argc, char **argv) {
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
-  int numGpus;
+  int numSubdoms;
   int numNodes;
   {
     MpiTopology topo(MPI_COMM_WORLD);
-    numNodes = topo.size() / topo.colocated_size();
-    numGpus = size / topo.colocated_size() * devCount;
+
+    numNodes = size / topo.colocated_size();
+    int ranksPerNode = topo.colocated_size();
+    int subdomsPerRank = topo.colocated_size() > devCount ? 1 : devCount / topo.colocated_size();
+
+    if (0 == rank) {
+      std::cerr << numNodes << " nodes\n";
+      std::cerr << ranksPerNode << " ranks / node\n";
+      std::cerr << subdomsPerRank << " sd / rank\n";
+    }
+
+    numSubdoms = numNodes * ranksPerNode * subdomsPerRank;
+  }
+
+  if (0 == rank) {
+    std::cerr << "assuming " << numSubdoms << " subdomains\n";
   }
 
   size_t x = 512;
@@ -63,10 +77,7 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  x = size_t(double(x) * pow(double(numGpus), 0.33333) + 0.5); // round to nearest
-  y = size_t(double(y) * pow(double(numGpus), 0.33333) + 0.5);
-  z = size_t(double(z) * pow(double(numGpus), 0.33333) + 0.5);
-
+ 
   MethodFlags methods = MethodFlags::None;
   if (useStaged) {
     methods = MethodFlags::CudaMpi;
@@ -100,8 +111,9 @@ int main(int argc, char **argv) {
     std::cerr << "WARN: detailed time measurement\n";
 #endif
 #ifndef STENCIL_SETUP_STATS
-    std::cout << "WARN: not tracking stats\n";
-    std::cerr << "WARN: not tracking stats\n";
+    std::cout << "ERR: not tracking stats\n";
+    std::cerr << "ERR: not tracking stats\n";
+    exit(-1);
 #endif
   }
 
@@ -137,7 +149,7 @@ int main(int argc, char **argv) {
     elapsed = MPI_Wtime() - elapsed;
     MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-#ifdef STENCIL_EXCHANGE_STATS
+#ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
       std::string methodStr;
       if (methods && MethodFlags::CudaMpi) {
@@ -170,13 +182,13 @@ int main(int argc, char **argv) {
       // header should be
       // bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,exchange (S)
       // clang-format on
-      printf("weak,%s,%lu,%lu,%lu,%lu," // s
-             "%lu,%lu,%lu,%lu,"         // <- exchange bytes
+      printf("exchange,%s,%lu,%lu,%lu,%lu," // s
+             "%lu,%lu,%lu,%lu,"             // <- exchange bytes
              "%d,%d,%d,%d,%e\n",
              methodStr.c_str(), x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
              dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numGpus, numNodes, size, elapsed);
+             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);
     }
 #endif // STENCIL_EXCHANGE_STATS
 
