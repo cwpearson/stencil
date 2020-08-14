@@ -1,8 +1,6 @@
 #pragma once
 
-#include <algorithm>
 #include <cassert>
-#include <cmath>
 #include <iostream>
 #include <map>
 #include <numeric>
@@ -17,6 +15,8 @@
 #include "stencil/logging.hpp"
 #include "stencil/qap.hpp"
 #include "stencil/radius.hpp"
+#include "stencil/numeric.hpp"
+
 
 namespace collective {}
 
@@ -26,31 +26,6 @@ private:
   Dim3 dim_;  // the number of subdomains
   Dim3 size_; // the size of each subdomain
   Dim3 rem_;  // input size % dim_
-
-  /*! return the prime factors of n
-   */
-  static std::vector<int64_t> prime_factors(int64_t n) {
-    std::vector<int64_t> result;
-    if (0 == n) {
-      return result;
-    }
-    while (n % 2 == 0) {
-      result.push_back(2);
-      n = n / 2;
-    }
-    for (int i = 3; i <= sqrt(n); i = i + 2) {
-      while (n % i == 0) {
-        result.push_back(i);
-        n = n / i;
-      }
-    }
-    if (n > 2)
-      result.push_back(n);
-    std::sort(result.begin(), result.end(), [](int64_t a, int64_t b) { return b < a; });
-    return result;
-  }
-
-  static int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
 
 public:
   RankPartition(const Dim3 &size, const int64_t n) : size_(size), dim_(1, 1, 1) {
@@ -153,31 +128,6 @@ private:
 
   Dim3 size_; // approximate subdomain size
   Dim3 rem_;  // input size % sysDim_ * nodeDim_
-
-  /*! return the prime factors of n, sorted smallest to largest
-   */
-  static std::vector<int64_t> prime_factors(int64_t n) {
-    std::vector<int64_t> result;
-    if (0 == n) {
-      return result;
-    }
-    while (n % 2 == 0) {
-      result.push_back(2);
-      n = n / 2;
-    }
-    for (int i = 3; i <= sqrt(n); i = i + 2) {
-      while (n % i == 0) {
-        result.push_back(i);
-        n = n / i;
-      }
-    }
-    if (n > 2)
-      result.push_back(n);
-    std::sort(result.begin(), result.end(), [](int64_t a, int64_t b) { return b < a; });
-    return result;
-  }
-
-  static int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
 
   /* linearize an index `idx` in a space `dim` */
   static int64_t linearize(const Dim3 idx, const Dim3 dim) {

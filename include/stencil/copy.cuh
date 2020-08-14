@@ -144,3 +144,4 @@ multi_translate(void *__restrict__ *__restrict__ dsts, const Dim3 dstPos,
                    elemSizes[i]);
   }
 }
+

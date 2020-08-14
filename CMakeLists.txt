@@ -19,9 +19,21 @@ option(USE_CUDA_AWARE_MPI "assume CUDA-aware MPI support" OFF)
 option(SETUP_STATS "track statistics that may increase setup time" ON)
 option(EXCHANGE_STATS "track statistics that may increase exchange time" OFF)
 
+# Set a log level if none was specified
 if(NOT DEFINED STENCIL_OUTPUT_LEVEL)
 message(STATUS "STENCIL_OUTPUT_LEVEL not defined, setting to INFO")
 set(STENCIL_OUTPUT_LEVEL INFO CACHE STRING "one of SPEW DEBUG INFO WARN ERROR FATAL")
+endif()
+
+# Set a default build type if none was specified
+set(default_build_type "Release")
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
+  set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE
+      STRING "Choose the type of build." FORCE)
+  # Set the possible values of build type for cmake-gui
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+    "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
 
@@ -51,6 +63,8 @@ add_subdirectory(src)
 
 add_library(stencil SHARED ${STENCIL_SOURCES})
 add_library(stencil::stencil ALIAS stencil)
+
+# set_property(TARGET stencil PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 if (STENCIL_OUTPUT_LEVEL MATCHES SPEW)
   target_compile_definitions(stencil PUBLIC STENCIL_OUTPUT_LEVEL=5)
@@ -108,8 +122,10 @@ $<$<COMPILE_LANGUAGE:CUDA>:
 -Xcompiler=-Wstrict-aliasing;
 -Xcompiler=-Wswitch-enum;
 -Xcompiler=-Wvla;
+-Xptxas=-v;
 >
 )
+
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   target_compile_options(

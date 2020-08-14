@@ -10,9 +10,8 @@
 #include "stencil/stencil.hpp"
 
 template <typename T>
-__global__ void
-init_kernel(Accessor<T> dst, //<! [out] region to fill
-            Rect3 dstExt     //<! [in] the extent of the region to initialize
+__global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
+                            Rect3 dstExt     //<! [in] the extent of the region to initialize
 ) {
   const T ripple[4] = {0, 0.25, 0, -0.25};
   const size_t period = sizeof(ripple) / sizeof(ripple[0]);
@@ -21,16 +20,12 @@ init_kernel(Accessor<T> dst, //<! [out] region to fill
   const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
   const size_t tix = blockDim.x * blockIdx.x + threadIdx.x;
 
-  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z;
-       z += gridDim.z * blockDim.z) {
-    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y;
-         y += gridDim.y * blockDim.y) {
-      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x;
-           x += gridDim.x * blockDim.x) {
+  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z; z += gridDim.z * blockDim.z) {
+    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y; y += gridDim.y * blockDim.y) {
+      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
 
         Dim3 p(x, y, z);
-        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z +
-                ripple[p.z % period];
+        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period];
         dst[p] = val;
       }
     }
@@ -38,9 +33,8 @@ init_kernel(Accessor<T> dst, //<! [out] region to fill
 }
 
 template <typename T>
-__global__ void
-check_init_kernel(Accessor<T> dst, //<! [in] region to check
-                  Rect3 dstExt     //<! [in] the extent of the region to check
+__global__ void check_init_kernel(Accessor<T> dst, //<! [in] region to check
+                                  Rect3 dstExt     //<! [in] the extent of the region to check
 ) {
   const T ripple[4] = {0, 0.25, 0, -0.25};
   const size_t period = sizeof(ripple) / sizeof(ripple[0]);
@@ -49,16 +43,12 @@ check_init_kernel(Accessor<T> dst, //<! [in] region to check
   const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
   const size_t tix = blockDim.x * blockIdx.x + threadIdx.x;
 
-  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z;
-       z += gridDim.z * blockDim.z) {
-    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y;
-         y += gridDim.y * blockDim.y) {
-      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x;
-           x += gridDim.x * blockDim.x) {
+  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z; z += gridDim.z * blockDim.z) {
+    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y; y += gridDim.y * blockDim.y) {
+      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
 
         Dim3 p(x, y, z);
-        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z +
-                ripple[p.z % period];
+        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period];
         dst[p] = val;
       }
     }
@@ -108,6 +98,7 @@ TEST_CASE("derivative") {
     Rect3 ext = d.get_compute_region();
     std::cout << "extent " << ext << "\n";
 
+    d.set_device();
     init_kernel<<<dimGrid, dimBlock>>>(acc, ext);
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
@@ -118,7 +109,11 @@ TEST_CASE("derivative") {
   INFO("test init");
   for (auto &d : dd.domains()) {
     const Dim3 origin = d.origin();
+
+    // get the size of the interior
     const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
+    std::cerr << ext << "\n";
+
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
       auto vec = d.interior_to_host(qi);
@@ -136,12 +131,11 @@ TEST_CASE("derivative") {
         for (int64_t y = rect.lo.y; y < rect.hi.y; ++y) {
           for (int64_t x = rect.lo.x; x < rect.hi.x; ++x) {
             Dim3 p(x, y, z);
+            std::cerr << p << "\n";
             const Q1 ripple[4] = {0, 0.25, 0, -0.25};
             const size_t period = sizeof(ripple) / sizeof(ripple[0]);
             Q1 val = acc[p];
-            REQUIRE(val == p.x + ripple[p.x % period] + p.y +
-                               ripple[p.y % period] + p.z +
-                               ripple[p.z % period]);
+            REQUIRE(val == p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period]);
           }
         }
       }
@@ -178,9 +172,7 @@ TEST_CASE("derivative") {
             const Q1 ripple[4] = {0, 0.25, 0, -0.25};
             const size_t period = sizeof(ripple) / sizeof(ripple[0]);
             Q1 val = acc[p];
-            REQUIRE(val == p.x + ripple[p.x % period] + p.y +
-                               ripple[p.y % period] + p.z +
-                               ripple[p.z % period]);
+            REQUIRE(val == p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period]);
           }
         }
       }
@@ -243,9 +235,7 @@ TEST_CASE("derivative") {
               p.z -= dd.size().z;
             }
 
-            REQUIRE(val == p.x + ripple[p.x % period] + p.y +
-                               ripple[p.y % period] + p.z +
-                               ripple[p.z % period]);
+            REQUIRE(val == p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period]);
           }
         }
       }
