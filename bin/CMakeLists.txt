@@ -50,7 +50,7 @@ target_compile_options(
     -Xcompiler=-Wstrict-aliasing;
     -Xcompiler=-Wswitch-enum;
     -Xcompiler=-Wvla;
-    -Xptxas="-v";
+    -Xptxas=-v;
     -use-fast_math;
   >
 )

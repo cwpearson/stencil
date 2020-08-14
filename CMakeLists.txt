@@ -64,6 +64,8 @@ add_subdirectory(src)
 add_library(stencil SHARED ${STENCIL_SOURCES})
 add_library(stencil::stencil ALIAS stencil)
 
+# set_property(TARGET stencil PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+
 if (STENCIL_OUTPUT_LEVEL MATCHES SPEW)
   target_compile_definitions(stencil PUBLIC STENCIL_OUTPUT_LEVEL=5)
 elseif (STENCIL_OUTPUT_LEVEL MATCHES DEBUG)
@@ -120,9 +122,10 @@ $<$<COMPILE_LANGUAGE:CUDA>:
 -Xcompiler=-Wstrict-aliasing;
 -Xcompiler=-Wswitch-enum;
 -Xcompiler=-Wvla;
--Xptxas="-v";
+-Xptxas=-v;
 >
 )
+
 
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   target_compile_options(
