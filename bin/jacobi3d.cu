@@ -142,12 +142,26 @@ if (parser.need_help()) {
     checkpointPeriod = iters / 10;
   }
 
+
   MPI_Init(&argc, &argv);
 
   int size;
   int rank;
   MPI_Comm_size(MPI_COMM_WORLD, &size);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
+  if (0 == rank) {
+#ifndef NDEBUG
+    std::cout << "ERR: not release mode\n";
+    std::cerr << "ERR: not release mode\n";
+    exit(-1);
+#endif
+#ifdef STENCIL_EXCHANGE_STATS
+    std::cout << "ERR: STENCIL_EXCHANGE_STATS\n";
+    std::cerr << "ERR: STENCIL_EXCHANGE_STATS\n";
+    exit(-1);
+#endif
+  }
 
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
@@ -349,35 +363,41 @@ if (parser.need_help()) {
       dd.write_paraview(prefix + "jacobi3d_final");
     }
 
+
+
+    if (0 == mpi::world_rank()) {
+      std::string methodStr;
+      if (methods && MethodFlags::CudaMpi) {
+        methodStr += methodStr.empty() ? "" : ",";
+        methodStr += "staged";
+      }
+      if (methods && MethodFlags::CudaAwareMpi) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "cuda-aware";
+      }
+      if (methods && MethodFlags::CudaMpiColocated) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "colo";
+      }
+      if (methods && MethodFlags::CudaMemcpyPeer) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "peer";
+      }
+      if (methods && MethodFlags::CudaKernel) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "kernel";
+      }
+
+      std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
+      << dd.exchange_bytes_for_method(MethodFlags::CudaMpi) << ","
+      << dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated) << ","
+      << dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer) << ","
+      << dd.exchange_bytes_for_method(MethodFlags::CudaKernel) << ","
+      << iterTime.min() << "," << iterTime.trimean()
+      << "\n";
+
+    }
   } // send domains out of scope before MPI_Finalize
-
-
-  if (0 == mpi::world_rank()) {
-    std::string methodStr;
-    if (methods && MethodFlags::CudaMpi) {
-      methodStr += methodStr.empty() ? "" : ",";
-      methodStr += "staged";
-    }
-    if (methods && MethodFlags::CudaAwareMpi) {
-      methodStr += methodStr.empty() ? "" : "/";
-      methodStr += "cuda-aware";
-    }
-    if (methods && MethodFlags::CudaMpiColocated) {
-      methodStr += methodStr.empty() ? "" : "/";
-      methodStr += "colo";
-    }
-    if (methods && MethodFlags::CudaMemcpyPeer) {
-      methodStr += methodStr.empty() ? "" : "/";
-      methodStr += "peer";
-    }
-    if (methods && MethodFlags::CudaKernel) {
-      methodStr += methodStr.empty() ? "" : "/";
-      methodStr += "kernel";
-    }
-
-    std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
-              << iterTime.min() << "," << iterTime.trimean() << "\n";
-  }
 
   MPI_Finalize();
 
