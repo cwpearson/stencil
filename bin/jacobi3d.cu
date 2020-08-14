@@ -102,7 +102,7 @@ int main(int argc, char **argv) {
 
   std::string prefix;
 
-  int iters;
+  int iters = 5;
   int checkpointPeriod = -1;
 
   argparse::Parser parser("a cwpearson/argparse-powered CLI app");
@@ -154,7 +154,18 @@ if (parser.need_help()) {
   int numSubdoms;
   {
     MpiTopology topo(MPI_COMM_WORLD);
-    numSubdoms = size / topo.colocated_size() * devCount;
+
+    int numNodes = size / topo.colocated_size();
+    int ranksPerNode = topo.colocated_size();
+    int subdomsPerRank = topo.colocated_size() > devCount ? 1 : devCount / topo.colocated_size();
+
+    if (0 == rank) {
+      std::cerr << numNodes << " nodes\n";
+      std::cerr << ranksPerNode << " ranks / node\n";
+      std::cerr << subdomsPerRank << " sd / rank\n";
+    }
+
+    numSubdoms = numNodes * ranksPerNode * subdomsPerRank;
   }
 
   if (0 == rank) {
