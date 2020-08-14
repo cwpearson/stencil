@@ -15,7 +15,7 @@ inline int64_t nextPowerOfTwo(int64_t x) {
   return x;
 }
 
-/* return the prime factors of n, sorted smallest to largest
+/* return the prime factors of n, sorted largest to smallest
 */
 std::vector<int64_t> prime_factors(int64_t n);
 
