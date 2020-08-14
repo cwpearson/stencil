@@ -96,13 +96,12 @@ private:
         LOG_FATAL("asked to pack for direction " << msg.dir_ << " but computed message size is 0, ext=" << ext);
       }
 
-      LOG_SPEW("DevicePacker::pack(): dir=" << msg.dir_ << " ext=" << ext << " pos=" << pos << " @ " << offset);
+      LOG_SPEW("dir=" << msg.dir_ << " ext=" << ext << " pos=" << pos << " @ " << offset);
       const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
       const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / Dim3(dimBlock);
       assert(offset < size_);
 
-      LOG_SPEW("DevicePacker::pack(): grid= " << dimGrid.x << "," << dimGrid.y << "," << dimGrid.z
-                                              << " block=" << dimBlock.x << "," << dimBlock.y << "," << dimBlock.z);
+      LOG_SPEW("dev_packer_pack_domain grid=" << dimGrid << " block=" << dimBlock);
       dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[offset], domain_->dev_curr_datas(),
                                                                 domain_->dev_elem_sizes(), domain_->num_data(),
                                                                 domain_->raw_size(), pos, ext);
