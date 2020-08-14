@@ -51,8 +51,7 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
 
   for (int z = myReg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < myReg.hi.z; z += gridDim.z * blockDim.z) {
     for (int y = myReg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < myReg.hi.y; y += gridDim.y * blockDim.y) {
-      for (int x = myReg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < myReg.hi.x;
-           x += gridDim.x * blockDim.x) {
+      for (int x = myReg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < myReg.hi.x; x += gridDim.x * blockDim.x) {
         Dim3 o(x, y, z);
 
         /* a sphere 1/10 of the CR in radius and x = 1/3 of the way over is set hot
@@ -163,10 +162,27 @@ if (parser.need_help()) {
   }
 
 
-  x = size_t(double(x) * pow(double(numSubdoms), 0.33333) + 0.5); // round to nearest
-  y = size_t(double(y) * pow(double(numSubdoms), 0.33333) + 0.5);
-  z = size_t(double(z) * pow(double(numSubdoms), 0.33333) + 0.5);
+  /* scaling the cube with the number of GPUs caused wierd behavior
+     for certain sizes due to the partitioner.
+      Now, we'll just grow the domain by the reverse of the partitioning algorithm to keep each GPU
+      having the same aspect ratio, to keep the performance more understandable
 
+      The parition algorithm takes the pfs from largest to smallest, and recursively divides the longest axis
+      so, we take the pfs smallest to largest and scale the smallest axis up
+  */
+
+  {
+    std::vector<int64_t> pfs = prime_factors(numSubdoms);
+    for (int i = pfs.size() - 1; i >= 0; --i) {
+      if (x < y && x < z) {
+        x *= pfs[i];
+      } else if (y < z) {
+        y *= pfs[i];
+      } else {
+        z *= pfs[i];
+      }
+    }
+  }
 
   cudaDeviceProp prop;
   CUDA_RUNTIME(cudaGetDeviceProperties(&prop, 0));
