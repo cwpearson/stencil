@@ -51,7 +51,7 @@ target_compile_options(
     -Xcompiler=-Wswitch-enum;
     -Xcompiler=-Wvla;
     -Xptxas=-v;
-    -use-fast_math;
+    --use_fast_math;
   >
 )
 
