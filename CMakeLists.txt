@@ -19,9 +19,21 @@ option(USE_CUDA_AWARE_MPI "assume CUDA-aware MPI support" OFF)
 option(SETUP_STATS "track statistics that may increase setup time" ON)
 option(EXCHANGE_STATS "track statistics that may increase exchange time" OFF)
 
+# Set a log level if none was specified
 if(NOT DEFINED STENCIL_OUTPUT_LEVEL)
 message(STATUS "STENCIL_OUTPUT_LEVEL not defined, setting to INFO")
 set(STENCIL_OUTPUT_LEVEL INFO CACHE STRING "one of SPEW DEBUG INFO WARN ERROR FATAL")
+endif()
+
+# Set a default build type if none was specified
+set(default_build_type "Release")
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  message(STATUS "Setting build type to '${default_build_type}' as none was specified.")
+  set(CMAKE_BUILD_TYPE "${default_build_type}" CACHE
+      STRING "Choose the type of build." FORCE)
+  # Set the possible values of build type for cmake-gui
+  set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS
+    "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
 endif()
 
 
