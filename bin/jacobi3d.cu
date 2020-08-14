@@ -29,7 +29,7 @@ __global__ void init_kernel(Accessor<float> dst, const Rect3 reg, const Rect3 cR
 }
 
 __device__ int64_t dist(const Dim3 a, const Dim3 b) {
-  return sqrt(float((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)));
+  return __fsqrt_rn(float((a.x - b.x) * (a.x - b.x) + (a.y - b.y) * (a.y - b.y) + (a.z - b.z) * (a.z - b.z)));
 }
 
 /* Apply a 3d jacobi stencil to `reg`
@@ -47,11 +47,11 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
                        (cReg.lo.z + cReg.hi.z) / 2);
   const Dim3 coldCenter(cReg.lo.x + (cReg.hi.x - cReg.lo.x) * 2 / 3, (cReg.lo.y + cReg.hi.y) / 2,
                         (cReg.lo.z + cReg.hi.z) / 2);
-  const int64_t sphereRadius = (cReg.hi.x - cReg.lo.x) / 10;
+  const int sphereRadius = (cReg.hi.x - cReg.lo.x) / 10;
 
-  for (int64_t z = myReg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < myReg.hi.z; z += gridDim.z * blockDim.z) {
-    for (int64_t y = myReg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < myReg.hi.y; y += gridDim.y * blockDim.y) {
-      for (int64_t x = myReg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < myReg.hi.x;
+  for (int z = myReg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < myReg.hi.z; z += gridDim.z * blockDim.z) {
+    for (int y = myReg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < myReg.hi.y; y += gridDim.y * blockDim.y) {
+      for (int x = myReg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < myReg.hi.x;
            x += gridDim.x * blockDim.x) {
         Dim3 o(x, y, z);
 
@@ -63,7 +63,6 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
         } else if (dist(o, coldCenter) <= sphereRadius) {
           dst[o] = COLD_TEMP;
         } else {
-
           float px = src[o + Dim3(1, 0, 0)];
           float mx = src[o + Dim3(-1, 0, 0)];
           float py = src[o + Dim3(0, 1, 0)];

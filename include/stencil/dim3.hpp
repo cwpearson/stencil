@@ -1,5 +1,7 @@
 #pragma once
 
+#include "stencil/numeric.hpp"
+
 #include <cassert>
 #include <ostream>
 #include <iostream>
@@ -10,17 +12,7 @@
 #define CUDA_CALLABLE_MEMBER
 #endif
 
-inline int64_t nextPowerOfTwo(int64_t x) {
-  x--;
-  x |= x >> 1;
-  x |= x >> 2;
-  x |= x >> 4;
-  x |= x >> 8;
-  x |= x >> 16;
-  x |= x >> 32;
-  x++;
-  return x;
-}
+
 
 class Dim3 {
 public:

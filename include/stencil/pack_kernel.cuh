@@ -2,8 +2,10 @@
 
 #include "stencil/dim3.hpp"
 
-inline __device__ void grid_pack(void *__restrict__ dst, const void *__restrict__ src, const Dim3 srcSize,
-                                 const Dim3 srcPos, const Dim3 srcExtent, const size_t elemSize) {
+/* used in a variety of places, so we'll leave it as inlineable for now
+*/
+inline __device__ void grid_pack(void *__restrict__ dst, const void *__restrict__ src, const Dim3 srcSize, const Dim3 srcPos,
+                          const Dim3 srcExtent, const size_t elemSize) {
 
   const unsigned int tz = blockDim.z * blockIdx.z + threadIdx.z;
   const unsigned int ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -40,7 +42,5 @@ inline __device__ void grid_pack(void *__restrict__ dst, const void *__restrict_
   }
 }
 
-static __global__ void pack_kernel(void *__restrict__ dst, const void *__restrict__ src, const Dim3 srcSize,
-                                   const Dim3 srcPos, const Dim3 srcExtent, const size_t elemSize) {
-  grid_pack(dst, src, srcSize, srcPos, srcExtent, elemSize);
-}
+__global__ void pack_kernel(void *__restrict__ dst, const void *__restrict__ src, const Dim3 srcSize, const Dim3 srcPos,
+                            const Dim3 srcExtent, const size_t elemSize);
