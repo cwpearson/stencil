@@ -180,12 +180,12 @@ int main(int argc, char **argv) {
       // clang-format off
       // same as strong.cu
       // header should be
-      // bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,exchange (S)
+      // bin,config,naive,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,exchange (S)
       // clang-format on
-      printf("exchange,%s,%lu,%lu,%lu,%lu," // s
+      printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
              "%lu,%lu,%lu,%lu,"             // <- exchange bytes
              "%d,%d,%d,%d,%e\n",
-             methodStr.c_str(), x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
+             methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
              dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
              dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);
