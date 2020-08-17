@@ -56,6 +56,8 @@ target_compile_options(
 )
 
 target_include_directories(${tgt} SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
+# we require separable compilation for stencil library
+set_property(TARGET ${tgt} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 endmacro()
 
 

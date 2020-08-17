@@ -61,10 +61,11 @@ endif()
 
 add_subdirectory(src)
 
-add_library(stencil SHARED ${STENCIL_SOURCES})
+# only static libraries are suported by the device linker?
+# so I think we need STATIC with CUDA_SEPARABLE_COMPILATION
+add_library(stencil STATIC ${STENCIL_SOURCES})
 add_library(stencil::stencil ALIAS stencil)
-
-# set_property(TARGET stencil PROPERTY CUDA_SEPARABLE_COMPILATION ON)
+set_property(TARGET stencil PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 
 if (STENCIL_OUTPUT_LEVEL MATCHES SPEW)
   target_compile_definitions(stencil PUBLIC STENCIL_OUTPUT_LEVEL=5)

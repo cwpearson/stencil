@@ -69,6 +69,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     CUDA_RUNTIME(cudaMallocManaged(&dst, sizeof(TestType) * arrSz.x * arrSz.y));
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
+    std::cerr << dimGrid << " " << dimBlock << "\n";
     pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 0, arrSz.z - 1),
                                 Dim3(arrSz.x, arrSz.y, 1), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
