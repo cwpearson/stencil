@@ -205,12 +205,17 @@ int main(int argc, char **argv) {
       // clang-format off
       // same as strong.cu
       // header should be
-      // bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,exchange (S)
+      // bin,config,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,exchange (s)
       // clang-format on
       printf("exchange,%s,%lu,%lu,%lu,%lu," // s
+             "%lu,%lu,%lu," // ldx ldy ldz
              "%lu,%lu,%lu,%lu,"             // <- exchange bytes
              "%d,%d,%d,%d,%e\n",
-             methodStr.c_str(), x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
+             methodStr.c_str(), x, y, z, x * y * z, 
+             dd.domains()[0].size().x,
+             dd.domains()[0].size().y,
+             dd.domains()[0].size().z,
+             dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
              dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
              dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);

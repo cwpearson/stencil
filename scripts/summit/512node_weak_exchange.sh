@@ -24,7 +24,7 @@ OUT=/gpfs/alpine/scratch/cpearson/csc362/stencil_results/512node_weak_exchange.c
 set -x
 
 # CSV header
-echo "bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,exchange (s)" > $OUT
+echo "bin,config,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,exchange (s)" > $OUT
 
 # 6 ranks per node, 1 GPU per rank, weak
 for nodes in 1 2 4 8 16 32 64 128 256 384 512; do
