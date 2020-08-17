@@ -77,27 +77,32 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  /* scaling the cube with the number of GPUs caused wierd behavior
-     for certain sizes due to the partitioner.
-      Now, we'll just grow the domain by the reverse of the partitioning algorithm to keep each GPU
-      having the same aspect ratio, to keep the performance more understandable
+  /*
+  For a single node, scaling the compute domain as a cube while trying to keep gridpoints/GPU constant
+    cause weird-to-understand scaling performance for GPU kernels because the aspect ratio affects the GPU kernel
+    performance.
+  So, we just recursively mulitply the prime factors into the smallest dimensions to keep the shape constant.
 
-      The parition algorithm takes the pfs from largest to smallest, and recursively divides the longest axis
-      so, we take the pfs smallest to largest and scale the smallest axis up
+  For multiple nodes, it's generally impossible to guarantee a particular size of each subdomain due to the hierarchical
+  partitioning, so we just scale the whole compute region to keep the gridpoints / subdomain roughly constant.
   */
-  {
+  if (1 == numNodes) {
     std::vector<int64_t> pfs = prime_factors(numSubdoms);
-    std::reverse(pfs.begin(), pfs.end());
-    for (int i = pfs.size() - 1; i >= 0; --i) {
+    for (auto pf : pfs) {
       if (x <= y && x <= z) {
-        x *= pfs[i];
+        x *= pf;
       } else if (y <= z) {
-        y *= pfs[i];
+        y *= pf;
       } else {
-        z *= pfs[i];
+        z *= pf;
       }
     }
+  } else {
+    x *= std::pow(double(numSubdoms), 1.0 / 3);
+    y *= std::pow(double(numSubdoms), 1.0 / 3);
+    z *= std::pow(double(numSubdoms), 1.0 / 3);
   }
+
   MethodFlags methods = MethodFlags::None;
   if (useStaged) {
     methods = MethodFlags::CudaMpi;
