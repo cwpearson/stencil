@@ -72,6 +72,7 @@ int main(int argc, char **argv) {
   p.add_flag(useCudaAware, "--cuda-aware");
 #endif
   p.add_flag(useStaged, "--staged");
+  p.add_flag(useNaivePlacement, "--naive");
   if (!p.parse(argc, argv)) {
     std::cout << p.help() << "\n";
     exit(EXIT_FAILURE);
@@ -205,13 +206,13 @@ int main(int argc, char **argv) {
       // clang-format off
       // same as strong.cu
       // header should be
-      // bin,config,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,exchange (s)
+      // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,exchange (s)
       // clang-format on
-      printf("exchange,%s,%lu,%lu,%lu,%lu," // s
+      printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
              "%lu,%lu,%lu," // ldx ldy ldz
              "%lu,%lu,%lu,%lu,"             // <- exchange bytes
              "%d,%d,%d,%d,%e\n",
-             methodStr.c_str(), x, y, z, x * y * z, 
+             methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, 
              dd.domains()[0].size().x,
              dd.domains()[0].size().y,
              dd.domains()[0].size().z,
