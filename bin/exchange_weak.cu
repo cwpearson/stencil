@@ -168,7 +168,7 @@ int main(int argc, char **argv) {
     elapsed = MPI_Wtime() - elapsed;
     MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-#ifdef STENCIL_EXCHANGE_STATS
+#ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
       std::string methodStr;
       if (methods && MethodFlags::CudaMpi) {
@@ -209,7 +209,7 @@ int main(int argc, char **argv) {
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
              dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);
     }
-#endif // STENCIL_EXCHANGE_STATS
+#endif // STENCIL_SETUP_STATS
 
   } // send domains out of scope before MPI_Finalize
 
