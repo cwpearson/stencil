@@ -197,6 +197,7 @@ if (parser.need_help()) {
 
   {
     std::vector<int64_t> pfs = prime_factors(numSubdoms);
+    std::reverse(pfs.begin(), pfs.end());
     for (int i = pfs.size() - 1; i >= 0; --i) {
       if (x <= y && x <= z) {
         x *= pfs[i];
