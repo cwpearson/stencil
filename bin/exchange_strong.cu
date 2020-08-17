@@ -5,6 +5,8 @@
 
 #include <nvToolsExt.h>
 
+#include "statistics.hpp"
+
 #include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
@@ -138,6 +140,9 @@ int main(int argc, char **argv) {
     dd.realize();
 
     MPI_Barrier(MPI_COMM_WORLD);
+
+    Statistics stats;
+
     double elapsed = MPI_Wtime();
 
     for (int iter = 0; iter < nIters; ++iter) {
@@ -148,6 +153,7 @@ int main(int argc, char **argv) {
     }
     elapsed = MPI_Wtime() - elapsed;
     MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+    stats.insert(elapsed);
 
 #ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
@@ -180,7 +186,7 @@ int main(int argc, char **argv) {
       // clang-format off
       // same as strong.cu
       // header should be
-      // bin,config,naive,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,exchange (S)
+      // bin,config,naive,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,trimean (s)
       // clang-format on
       printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
              "%lu,%lu,%lu,%lu,"             // <- exchange bytes
@@ -188,7 +194,7 @@ int main(int argc, char **argv) {
              methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
              dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);
+             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, stats.trimean());
     }
 #endif // STENCIL_EXCHANGE_STATS
 

@@ -75,7 +75,7 @@ add_executable(exchange-weak exchange_weak.cu)
 target_link_libraries(exchange-weak stencil::stencil)
 add_args(exchange-weak)
 
-add_executable(exchange-strong exchange_strong.cu)
+add_executable(exchange-strong exchange_strong.cu statistics.cpp)
 target_link_libraries(exchange-strong stencil::stencil)
 add_args(exchange-strong)
 
