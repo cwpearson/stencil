@@ -88,9 +88,9 @@ int main(int argc, char **argv) {
   {
     std::vector<int64_t> pfs = prime_factors(numSubdoms);
     for (int i = pfs.size() - 1; i >= 0; --i) {
-      if (x < y && x < z) {
+      if (x <= y && x <= z) {
         x *= pfs[i];
-      } else if (y < z) {
+      } else if (y <= z) {
         y *= pfs[i];
       } else {
         z *= pfs[i];

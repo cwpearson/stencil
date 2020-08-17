@@ -164,7 +164,6 @@ if (parser.need_help()) {
   int devCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
-  // only works if no GPUs are overloaded
   int numSubdoms;
   {
     MpiTopology topo(MPI_COMM_WORLD);
@@ -199,9 +198,9 @@ if (parser.need_help()) {
   {
     std::vector<int64_t> pfs = prime_factors(numSubdoms);
     for (int i = pfs.size() - 1; i >= 0; --i) {
-      if (x < y && x < z) {
+      if (x <= y && x <= z) {
         x *= pfs[i];
-      } else if (y < z) {
+      } else if (y <= z) {
         y *= pfs[i];
       } else {
         z *= pfs[i];
