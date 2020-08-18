@@ -71,7 +71,7 @@ add_executable(jacobi3d-strong jacobi3d_strong.cu statistics.cpp)
 target_link_libraries(jacobi3d-strong stencil::stencil)
 add_args(jacobi3d-strong)
 
-add_executable(exchange-weak exchange_weak.cu)
+add_executable(exchange-weak exchange_weak.cu statistics.cpp)
 target_link_libraries(exchange-weak stencil::stencil)
 add_args(exchange-weak)
 

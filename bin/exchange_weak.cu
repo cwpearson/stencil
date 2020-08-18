@@ -8,6 +8,8 @@
 #include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
+#include "statistics.hpp"
+
 typedef std::chrono::duration<double> Dur;
 
 int main(int argc, char **argv) {
@@ -163,17 +165,21 @@ int main(int argc, char **argv) {
 
     dd.realize();
 
+    Statistics stats;
+
     MPI_Barrier(MPI_COMM_WORLD);
-    double elapsed = MPI_Wtime();
 
     for (int iter = 0; iter < nIters; ++iter) {
       if (0 == rank) {
         std::cerr << "exchange " << iter << "\n";
       }
+      double elapsed = MPI_Wtime();
       dd.exchange();
+      elapsed = MPI_Wtime() - elapsed;
+      MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      stats.insert(elapsed);
     }
-    elapsed = MPI_Wtime() - elapsed;
-    MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
 
 #ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
@@ -206,7 +212,7 @@ int main(int argc, char **argv) {
       // clang-format off
       // same as strong.cu
       // header should be
-      // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,exchange (s)
+      // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,trimean (s)
       // clang-format on
       printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
              "%lu,%lu,%lu," // ldx ldy ldz
@@ -219,7 +225,7 @@ int main(int argc, char **argv) {
              dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
              dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);
+             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, stats.trimean());
     }
 #endif // STENCIL_SETUP_STATS
 
