@@ -708,6 +708,7 @@ public:
                 const int64_t cj = rj * gpusPerRank + gj;
 
                 // recover the cuda device ID for this component
+                // FIXME: if CUDA_VISIBLE_DEVICES is used, all ranks will report GPU 0
                 const int di = globalCudaIds[ranks[ri] * gpusPerRank + gi];
                 const int dj = globalCudaIds[ranks[rj] * gpusPerRank + gj];
                 bandwidth[ci][cj] = gpu_topo::bandwidth(di, dj);
