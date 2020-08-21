@@ -1,25 +1,16 @@
 #include "stencil/cuda_runtime.hpp"
+#include "stencil/logging.hpp"
+#include "stencil/machine.hpp"
 #include "stencil/mpi.hpp"
 #include "stencil/nvml.hpp"
-#include "stencil/logging.hpp"
 
 #include <vector>
 
-/* some information about the machine we're running on
-   nodes indexed as 0..<N
-*/
-struct Machine {
-  std::vector<std::string> hostnames;  // hostname of each node
-  std::vector<std::vector<int>> ranks; // ranks on each node
-};
- 
-
 /* the NVML UUID looks like an array of chars like ascii "GPU-d1810711-f3ef-4529-8662-52609f808deb"
-the CUDA device prop UUID is an array of char with bytes that look like d1810711f3ef4529866252609f808deb when printed as hex
-return a vector of unsigned char from the nvml ascii string
-*/ 
-template<unsigned N>
-std::vector<unsigned char> parse_nvml_uuid(char uuid[N]) {
+the CUDA device prop UUID is an array of char with bytes that look like d1810711f3ef4529866252609f808deb when printed as
+hex return a vector of unsigned char from the nvml ascii string
+*/
+template <unsigned N> std::vector<unsigned char> parse_nvml_uuid(char uuid[N]) {
   std::vector<unsigned char> ret;
   LOG_DEBUG("parsing NVML uuid " << uuid);
 
@@ -27,21 +18,17 @@ std::vector<unsigned char> parse_nvml_uuid(char uuid[N]) {
   unsigned start = 0;
   for (unsigned i = 0; i < N && 0 != uuid[i]; ++i) {
     char c = uuid[i];
-    if (
-     (c == '-') || // this is part of the UUID string
-     (c >= 'a' && c <= 'f') ||
-     (c >= 'A' && c <= 'F') ||
-     (c >= '0' && c <= '9')
-    ) { // c is a UUID char
+    if ((c == '-') ||                                                                 // this is part of the UUID string
+        (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || (c >= '0' && c <= '9')) { // c is a UUID char
     } else {
       // c is not a UUID char, start parsing afterwards
-      start = i+1;
+      start = i + 1;
     }
   }
 
-  for (unsigned i = start; i < N && 0 != uuid[i]; ){
+  for (unsigned i = start; i < N && 0 != uuid[i];) {
 
-    if ('-' == uuid[i] ) {
+    if ('-' == uuid[i]) {
       ++i;
       continue;
     }
@@ -53,7 +40,6 @@ std::vector<unsigned char> parse_nvml_uuid(char uuid[N]) {
     }
     ret.push_back(val);
     i += 2;
-
   }
 
   return ret;
@@ -63,6 +49,30 @@ int main(int argc, char **argv) {
 
   MPI_Init(&argc, &argv);
 
+  Machine machine = Machine::build(MPI_COMM_WORLD);
+
+  if (0 == mpi::world_rank()) {
+    LOG_INFO("nodes: " << machine.num_nodes());
+    for (int rank = 0; rank < machine.num_ranks(); ++rank) {
+      LOG_INFO("rank " << rank << ": node " << machine.node_of_rank(rank));
+    }
+    for (int gpu = 0; gpu < machine.num_gpus(); ++gpu) {
+      std::string s;
+      s += "gpu ";
+      s += std::to_string(gpu);
+      s += "/";
+      s += std::string(machine.gpu(gpu).uuid());
+      s += ": ranks [";
+      for (auto r : machine.gpu(gpu).ranks()) {
+        s += std::to_string(r) + " ";
+      }
+      s += ']';
+      LOG_INFO(s);
+    }
+  }
+  #if 0
+  #endif
+#if 0
   const int rank = mpi::comm_rank(MPI_COMM_WORLD);
   const int size = mpi::comm_size(MPI_COMM_WORLD);
 
@@ -106,7 +116,7 @@ int main(int argc, char **argv) {
 
     LOG_INFO(" CUDA " << index << ": " << uuidStr);
   }
-
+#endif
   MPI_Finalize();
 
   return 0;
