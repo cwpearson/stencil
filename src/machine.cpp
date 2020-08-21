@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <set>
+#include <map>
 
 typedef Machine::Distance Distance;
 
