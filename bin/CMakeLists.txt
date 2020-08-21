@@ -102,3 +102,7 @@ add_args(bench-alltoallv)
 add_executable(bench-pack bench_pack.cu)
 target_link_libraries(bench-pack stencil::stencil)
 add_args(bench-pack)
+
+add_executable(machine-info machine_info.cu)
+target_link_libraries(machine-info stencil::stencil)
+add_args(machine-info)
