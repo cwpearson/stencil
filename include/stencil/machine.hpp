@@ -34,7 +34,7 @@ struct UUID {
   friend std::ostream &operator<<(std::ostream &os, const UUID &uuid);
 
   explicit operator std::string() const {
-    char buf[32+4+1];
+    char buf[32 + 4 + 1];
 
     unsigned char uc[16];
     std::memcpy(uc, bytes_, 16);
@@ -56,7 +56,7 @@ struct UUID {
   }
 };
 
-std::ostream &operator<<(std::ostream &os, const UUID &uuid) {
+inline std::ostream &operator<<(std::ostream &os, const UUID &uuid) {
   os << std::string(uuid);
   return os;
 }
@@ -114,9 +114,13 @@ public:
   };
 
 private:
-  std::vector<std::string> hostnames_; // hostname of each node
-  std::vector<int> nodeOfRank_;        // node of each rank
-  std::vector<GPU> gpus_;              // all GPUs in the machine
+  MPI_Comm comm_;
+  std::vector<std::string> hostnames_;                // hostname of each node
+  std::vector<int> nodeOfRank_;                       // node of each rank
+  std::vector<std::vector<int>> ranksOfNode_;         // rankson each node
+  std::vector<GPU> gpus_;                             // all GPUs in the machine
+  std::vector<std::vector<GPU::index_t>> gpusOfNode_; // the GPUs visible to ranks on a node
+  std::vector<std::vector<GPU::index_t>> gpusOfRank_; // the GPUs visible to a rank
 
 public:
 #if STENCIL_USE_MPI == 1
@@ -140,4 +144,15 @@ public:
   int num_gpus() const noexcept { return gpus_.size(); }
   int node_of_rank(const int rank) const noexcept { return nodeOfRank_[rank]; }
   const GPU &gpu(const GPU::index_t i) const noexcept { return gpus_[i]; }
+
+  // return the ranks this rank is colocated with (incl self)
+  std::vector<int> colocated_ranks(int rank) const noexcept;
+
+  /* return the GPUs visible to ranks on a node
+   */
+  const std::vector<GPU::index_t> &gpus_of_node(int node) const noexcept { return gpusOfNode_[node]; }
+
+  /* return the GPUs visible to a rank
+  */
+  const std::vector<GPU::index_t> &gpus_of_rank(int rank) const noexcept {return gpusOfRank_[rank]; };
 };

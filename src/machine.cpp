@@ -5,8 +5,8 @@
 #include "stencil/mpi.hpp"
 
 #include <algorithm>
-#include <set>
 #include <map>
+#include <set>
 
 typedef Machine::Distance Distance;
 
@@ -16,7 +16,6 @@ Machine Machine::build(MPI_Comm comm) {
   const int commSize = mpi::comm_size(comm);
 
   Machine machine;
-
 
   // Assign the same order of hostnames_ in each rank
   {
@@ -39,7 +38,7 @@ Machine Machine::build(MPI_Comm comm) {
     for (const std::string &name : uniqueNames) {
       machine.hostnames_.push_back(name);
     }
-    LOG_DEBUG("found " << machine.hostnames_.size() << " unique hostname(s)");
+    LOG_DEBUG("found " << machine.hostnames_.size() << " unique hostname(s) in the machine");
   }
 
   // Find the node of each rank in the machine
@@ -60,8 +59,17 @@ Machine Machine::build(MPI_Comm comm) {
       }
     }
     machine.nodeOfRank_.resize(commSize);
-    LOG_DEBUG("my node: " << node);
     MPI_Allgather(&node, 1, MPI_INT, machine.nodeOfRank_.data(), 1, MPI_INT, comm);
+  }
+
+  // invert to ranks on each node
+  {
+    machine.ranksOfNode_.resize(machine.hostnames_.size());
+    for (int rank = 0; rank < int(machine.nodeOfRank_.size()); ++rank) {
+      int node = machine.nodeOfRank_[rank];
+      machine.ranksOfNode_[node].push_back(rank);
+      LOG_SPEW("node " << node << " has rank " << rank);
+    }
   }
 
   // Find the rank of each GPU in the machine
@@ -84,22 +92,23 @@ Machine Machine::build(MPI_Comm comm) {
     // convert uuids to bytes
     std::vector<char> uuidBytes;
     for (const auto &uuid : uuids) {
-        uuidBytes.insert(uuidBytes.end(), uuid.bytes_, uuid.bytes_ + sizeof(uuid.bytes_));
+      uuidBytes.insert(uuidBytes.end(), uuid.bytes_, uuid.bytes_ + sizeof(uuid.bytes_));
     }
 
     // broadcast GPU UUIDs to all ranks
     std::vector<char> commUUIDbytes(uuidBytes.size() * commSize);
-    MPI_Allgather(uuidBytes.data(), uuidBytes.size(), MPI_BYTE, commUUIDbytes.data(),
-                  uuidBytes.size(), MPI_BYTE, comm);
+    MPI_Allgather(uuidBytes.data(), uuidBytes.size(), MPI_BYTE, commUUIDbytes.data(), uuidBytes.size(), MPI_BYTE, comm);
+    LOG_SPEW("Allgathered GPU uuid bytes");
 
     // convert bytes to uuids
     std::vector<UUID> commUUIDs;
     for (size_t i = 0; i < uuids.size() * commSize; ++i) {
-        char buf[16];
-        std::memcpy(buf, &commUUIDbytes[i*16], 16);
-        UUID uuid(buf);
-        commUUIDs.push_back(uuid);
+      char buf[16];
+      std::memcpy(buf, &commUUIDbytes[i * 16], 16);
+      UUID uuid(buf);
+      commUUIDs.push_back(uuid);
     }
+    LOG_SPEW("converted to UUIDs");
 
     {
       // uniqify UUIDs and track contributing ranks
@@ -109,22 +118,49 @@ Machine Machine::build(MPI_Comm comm) {
         UUID &uuid = commUUIDs[i];
         // recieved gpus.size() uuids from each rank, so recover rank from uuid index
         uuidRanks[uuid].push_back(i / uuids.size());
+        LOG_SPEW(uuid << "came from rank " << i / uuids.size());
       }
 
       for (const std::pair<UUID, std::vector<int>> &kv : uuidRanks) {
-        machine.gpus_.push_back(GPU(kv.first, kv.second));
+        GPU gpu(kv.first, kv.second);
+        machine.gpus_.push_back(gpu);
+        LOG_SPEW("added GPU " << machine.gpus_.size());
       }
     }
-            #if 0
-    #endif
-  }
+    LOG_SPEW("finished building GPU list");
 
+    // invert to find which GPUs are visible to ranks on each node
+    {
+      LOG_SPEW("commSize=" << commSize);
+      machine.gpusOfRank_.resize(commSize);
+      for (GPU::index_t gi = 0; gi < machine.gpus_.size(); ++gi) {
+        for (int rank : machine.gpus_[gi].ranks()) {
+          machine.gpusOfRank_[rank].push_back(gi);
+          LOG_SPEW("rank " << rank << " sees GPU " << gi);
+        }
+      }
+      LOG_SPEW("hostnames_.size()=" << machine.hostnames_.size());
+      machine.gpusOfNode_.resize(machine.hostnames_.size());
+      for (GPU::index_t gi = 0; gi < machine.gpus_.size(); ++gi) {
+        int rank = machine.gpus_[gi].ranks()[0];
+        int node = machine.nodeOfRank_[rank];
+        machine.gpusOfNode_[node].push_back(gi);
+        LOG_SPEW("node " << node << " has GPU " << gi);
+      }
+    }
+  }
 
   return machine;
 };
 #endif
 
 Distance Machine::gpu_distance(const unsigned srcId, const unsigned dstId) const {}
+
+  // return the ranks this rank is colocated with (incl self)
+  std::vector<int> Machine::colocated_ranks(int rank) const noexcept { 
+    int node = nodeOfRank_[rank];
+    return ranksOfNode_[node]; 
+  }
 
 #if 0
 
@@ -141,3 +177,4 @@ Distance Machine::gpu_distance(const unsigned srcId, const unsigned dstId) const
   std::sort(coloRanks.begin(), coloRanks.end());
 
 #endif
+
