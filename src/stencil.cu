@@ -173,6 +173,12 @@ void DistributedDomain::realize() {
               goto send_planned;
             }
           }
+/*
+FIXME: for now, we require that all GPUs be visible to all colocated ranks.
+This is used to detect the GPU distance.
+Ultimately, we'd like to be able to figure this out even in the presence of CUDA_VISIBLE_DEVICES making each rank have a different CUDA device 0
+Then, we could restrict CPU code to run on CPUs nearby to the GPU
+*/
           if (any_methods(MethodFlags::CudaMpiColocated)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
