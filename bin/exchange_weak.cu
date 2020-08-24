@@ -52,6 +52,7 @@ int main(int argc, char **argv) {
 
   int nIters = 30;
   bool useNaivePlacement = false;
+  std::string prefix;
   bool useKernel = false;
   bool usePeer = false;
   bool useColo = false;
@@ -66,6 +67,7 @@ int main(int argc, char **argv) {
   p.add_positional(y)->required();
   p.add_positional(z)->required();
   p.add_positional(nIters)->required();
+  p.add_option(prefix, "--prefix");
   p.add_flag(useKernel, "--kernel");
   p.add_flag(usePeer, "--peer");
   p.add_flag(useColo, "--colo");
@@ -162,6 +164,8 @@ int main(int argc, char **argv) {
     dd.add_data<float>("d1");
     dd.add_data<float>("d2");
     dd.add_data<float>("d3");
+
+    dd.set_output_prefix(prefix);
 
     dd.realize();
 
