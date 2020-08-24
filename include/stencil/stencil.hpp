@@ -19,6 +19,7 @@
 #include "stencil/gpu_topology.hpp"
 #include "stencil/local_domain.cuh"
 #include "stencil/logging.hpp"
+#include "stencil/machine.hpp"
 #include "stencil/mpi_topology.hpp"
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
@@ -70,6 +71,7 @@ private:
 
   // MPI-related topology information
   MpiTopology mpiTopology_;
+  Machine machine_;
 
   Placement *placement_;
 
@@ -122,7 +124,6 @@ public:
 #ifdef STENCIL_SETUP_STATS
   /* total time spent on setup ops*/
   double timeMpiTopo_;
-  double timeNodeGpus_;
   double timePeerEn_;
   double timePlacement_;
   double timePlan_;
@@ -135,7 +136,6 @@ public:
 
 #ifdef STENCIL_SETUP_STATS
     timeMpiTopo_ = 0;
-    timeNodeGpus_ = 0;
     timePeerEn_ = 0;
     timePlacement_ = 0;
     timePlan_ = 0;
@@ -156,6 +156,7 @@ public:
     double start = MPI_Wtime();
 #endif
     mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
+    machine_ = Machine::build(MPI_COMM_WORLD);
 #ifdef STENCIL_SETUP_STATS
     double elapsed = MPI_Wtime() - start;
     double maxElapsed = -1;
@@ -164,8 +165,6 @@ public:
       timeMpiTopo_ += maxElapsed;
     }
 #endif
-
-    std::cerr << "[" << rank_ << "] colocated with " << mpiTopology_.colocated_size() << " ranks\n";
 
     int deviceCount;
     CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
@@ -185,62 +184,95 @@ public:
     cudaDeviceProp prop;
     for (int i = 0; i < deviceCount; ++i) {
       CUDA_RUNTIME(cudaGetDeviceProperties(&prop, i));
-      std::cerr << "[" << rank_ << "] cudaDeviceProp.computeMode=" << prop.computeMode << "\n";
+      LOG_INFO("cudaDeviceProp.computeMode=" << prop.computeMode);
+      if (prop.computeMode != 0) {
+        // TODO: once we can limit to one rank per exlcusive GPU, we can lift this
+        LOG_FATAL("need cudaComputeModeDefault");
+      }
     }
 
-    // Determine GPUs this DistributedDomain is reposible for
-    if (gpus_.empty()) {
-      // if fewer colocated ranks than GPUs, round-robin GPUs to ranks
-      if (mpiTopology_.colocated_size() <= deviceCount) {
-        for (int id = 0; id < deviceCount; ++id) {
-          if (id % mpiTopology_.colocated_size() == mpiTopology_.colocated_rank()) {
-            gpus_.push_back(id);
+    // get the ranks on this node and the GPUs that are visible to ranks on this node
+    const std::vector<int> coloRanks = machine_.colocated_ranks(rank_);
+    LOG_INFO("colocated with " << coloRanks.size() << " ranks");
+    const int node = machine_.node_of_rank(rank_);
+    const std::vector<GPU::index_t> coloGPUs = machine_.gpus_of_node(node);
+    LOG_DEBUG(coloGPUs.size() << " GPUs on node");
+
+    const int gpusPerRank = coloGPUs.size() / coloRanks.size();
+
+    // if there are more ranks than GPUs, distribute ranks among GPUs
+    std::map<int, std::vector<GPU::index_t>> rankGPUs;
+    if (coloRanks.size() > coloGPUs.size()) {
+      // max number of ranks using each GPU
+      // TODO: if exclusive compute mode, then set use limit to 1
+      // TODO: track use-limit per GPU? I guess it's possible some are exclusive and some are not
+      const int useLimit = coloRanks.size() / coloGPUs.size();
+      LOG_DEBUG("max " << useLimit << " ranks using each GPU");
+
+      // how many ranks are using each GPU
+      std::map<GPU::index_t, int> users;
+      for (GPU::index_t gi : coloGPUs) {
+        users[gi] = 0;
+      }
+
+      for (auto rank : coloRanks) {
+        bool found = false;
+        // grab visible GPUs that are still available
+        for (auto gi : machine_.gpus_of_rank(rank)) {
+          if (users[gi] < useLimit) {
+            found = true;
+            users[gi] += 1;
+            rankGPUs[rank].push_back(gi);
+            LOG_INFO("assign GPU" << gi << " to rank " << rank);
+            break;
           }
         }
-      } else { // if more ranks, share gpus among ranks
-        gpus_.push_back(mpiTopology_.colocated_rank() % deviceCount);
-      }
-    }
-    assert(!gpus_.empty());
-
-// create a list of cuda device IDs in use by the ranks on this node
-// TODO: assumes all ranks use the same number of GPUs
-#ifdef STENCIL_SETUP_STATS
-    MPI_Barrier(MPI_COMM_WORLD);
-    start = MPI_Wtime();
-#endif
-    std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
-    MPI_Allgather(gpus_.data(), int(gpus_.size()), MPI_INT, nodeCudaIds.data(), int(gpus_.size()), MPI_INT,
-                  mpiTopology_.colocated_comm());
-#ifdef STENCIL_SETUP_STATS
-    elapsed = MPI_Wtime() - start;
-    MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
-    if (0 == rank_) {
-      timeNodeGpus_ += maxElapsed;
-    }
-#endif
-    {
-      {
-#if STENCIL_OUTPUT_LEVEL <= 2
-        std::stringstream ss;
-        ss << "[" << rank_ << "] colocated with ranks using gpus";
-        for (auto &e : nodeCudaIds) {
-          ss << " " << e;
+        if (!found) {
+          LOG_FATAL("unable to find a GPU");
         }
-        LOG_INFO(ss.str());
-#endif
       }
+    }
+    // if there are >= GPUs as ranks, go through ranks until all GPUs have been claimed
+    else {
+      LOG_DEBUG("distribute ");
+      std::set<GPU::index_t> available(coloGPUs.begin(), coloGPUs.end());
+      for (int i = 0; !available.empty(); ++i) {
+        int rank = coloRanks[i % coloRanks.size()];
+        bool found = false;
+        // grab a visible GPU that is still available
+        for (auto gi : machine_.gpus_of_rank(rank)) {
+          if (available.count(gi)) {
+            found = true;
+            available.erase(gi);
+            rankGPUs[rank].push_back(gi);
+            LOG_INFO("assign GPU " << gi << " to rank " << rank);
+            break;
+          }
+        }
+        if (!found) {
+          LOG_FATAL("there were GPUs left, but a rank counldn't claim one");
+        }
+      }
+    }
+
+    gpus_.insert(gpus_.end(), rankGPUs[rank_].begin(), rankGPUs[rank_].end());
+    for (GPU::index_t gi : gpus_) {
+      LOG_INFO("using GPU " << gi);
+    }
+
+    if (gpus_.empty()) {
+      LOG_FATAL("selected no GPUs");
     }
 
 #ifdef STENCIL_SETUP_STATS
     MPI_Barrier(MPI_COMM_WORLD);
     start = MPI_Wtime();
 #endif
-    // Try to enable peer access between all GPUs
+    // Try to enable peer access between visible GPUs
     nvtxRangePush("peer_en");
-    for (const auto &srcGpu : gpus_) {
-      for (const auto &dstGpu : nodeCudaIds) {
-        gpu_topo::enable_peer(srcGpu, dstGpu);
+    for (int src = 0; src < deviceCount; ++src) {
+      for (int dst = 0; dst < deviceCount; ++dst) {
+        gpu_topo::enable_peer(src, dst);
       }
     }
     nvtxRangePop();
