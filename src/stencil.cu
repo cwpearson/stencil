@@ -120,7 +120,7 @@ void DistributedDomain::realize() {
 
 #ifdef STENCIL_SETUP_STATS
   // rank-rank communication amount matrix
-  Mat2D<uint64_t> rankCommBytes(mpi::comm_size(MPI_COMM_WORLD), mpi::comm_size(MPI_COMM_WORLD));
+  Mat2D<uint64_t> rankCommBytes(mpi::comm_size(MPI_COMM_WORLD), mpi::comm_size(MPI_COMM_WORLD), 0);
 #endif
 
   peerCopyOutboxes.resize(gpus_.size());
@@ -278,9 +278,9 @@ to be loaded with numpy.loadtxt
 #ifdef STENCIL_SETUP_STATS
   {
     if (0 == rank_) {
-      MPI_Reduce(MPI_IN_PLACE, rankCommBytes.data(), rankCommBytes.size(), MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+      MPI_Reduce(MPI_IN_PLACE, rankCommBytes.data(), rankCommBytes.size(), MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
     } else {
-      MPI_Reduce(rankCommBytes.data(), rankCommBytes.data(), rankCommBytes.size(), MPI_DOUBLE, MPI_MAX, 0,
+      MPI_Reduce(rankCommBytes.data(), rankCommBytes.data(), rankCommBytes.size(), MPI_DOUBLE, MPI_SUM, 0,
                  MPI_COMM_WORLD);
     }
 
