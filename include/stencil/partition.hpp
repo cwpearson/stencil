@@ -13,10 +13,9 @@
 #include "mat2d.hpp"
 #include "mpi_topology.hpp"
 #include "stencil/logging.hpp"
+#include "stencil/numeric.hpp"
 #include "stencil/qap.hpp"
 #include "stencil/radius.hpp"
-#include "stencil/numeric.hpp"
-
 
 namespace collective {}
 
@@ -256,7 +255,6 @@ public:
 
   Dim3 sys_idx(int64_t i) const noexcept { return dimensionize(i, sys_dim()); }
   Dim3 node_idx(int64_t i) const noexcept { return dimensionize(i, node_dim()); }
-  Dim3 idx(int64_t i) const noexcept { return dimensionize(i, dim()); }
 };
 
 enum class PlacementStrategy { NodeAware, Trivial };
@@ -691,7 +689,7 @@ public:
 
         const Dim3 sysIdx = partition_.sys_idx(node);
         auto &ranks = nodeRanks[node]; // ranks in this node
-        std::cerr << "placement on node " << node << " " << sysIdx << "\n";
+        std::cerr << "placement on node " << node << " sys_idx=" << sysIdx << "\n";
         std::cerr << "ranks:";
         for (auto &e : ranks)
           std::cerr << " " << e;
@@ -738,10 +736,10 @@ public:
               dir.y = 1;
             if (dir.z != 0 && dir.z == 1 - globalDim.z)
               dir.z = 1;
-            std::cerr << dir << "=" << srcIdx << "->" << dstIdx << "\n";
             if (Dim3(0, 0, 0) == dir || dir.any_gt(1) || dir.any_lt(-1)) {
               continue;
             } else {
+              LOG_DEBUG("dir=" << dir << ": " << srcIdx << "->" << dstIdx);
               const Dim3 sz = partition_.subdomain_size(srcIdx);
               double cost = comm_cost(dir, sz, radius);
               comm[i][j] = cost;
@@ -769,12 +767,14 @@ public:
           const int gpuId = component % gpusPerRank;
           const int cuda = globalCudaIds[rank * gpusPerRank + gpuId];
 
-          std::cerr << "nodeIdx=" << nodeIdx << " size=" << sdSize << " rank=" << rank << " gpuId=" << gpuId
-                    << " cuda=" << cuda << "\n";
+          // implicitly, the global ID is grouped by node, and subdomain id within that node
+          const size_t gi = node * gpusPerNode + id;
+          LOG_DEBUG("global id=" << gi << " nodeIdx=" << nodeIdx << " size=" << sdSize << " rank=" << rank
+                                 << " gpuId=" << gpuId << " (cuda=" << cuda << ")");
 
-          rankAssignment[node * gpusPerNode + id] = rank;
-          idForDomain[node * gpusPerNode + id] = gpuId;
-          cudaAssignment[node * gpusPerNode + id] = cuda;
+          rankAssignment[gi] = rank;
+          idForDomain[gi] = gpuId;
+          cudaAssignment[gi] = cuda;
         }
       }
 
@@ -785,12 +785,20 @@ public:
     MPI_Bcast(idForDomain.data(), idForDomain.size(), MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(cudaAssignment.data(), cudaAssignment.size(), MPI_INT, 0, MPI_COMM_WORLD);
 
-    for (size_t i = 0; i < rankAssignment.size(); ++i) {
-      // convert i into a domain idx
-      const Dim3 idx = partition_.idx(i);
-      const int subdomain = idForDomain[i];
-      const int rank = rankAssignment[i];
-      const int cuda = cudaAssignment[i];
+    // implicitly first M are first node, next M are second node, so not okay to use partition_.idx()
+    for (size_t gi = 0; gi < rankAssignment.size(); ++gi) {
+      const int subdomain = idForDomain[gi];
+      const int rank = rankAssignment[gi];
+      const int cuda = cudaAssignment[gi];
+
+      // recover node
+      const size_t node = gi / gpusPerNode;
+      const size_t inNodeId = gi % gpusPerNode;
+
+      // convert into a full global index
+      Dim3 sysIdx = partition_.sys_idx(node);
+      Dim3 nodeIdx = partition_.node_idx(inNodeId);
+      Dim3 idx = sysIdx * partition_.node_dim() + nodeIdx;
 
       // convert index to rank, gpuId, and actual device
       rank_[idx] = rank;
@@ -798,7 +806,8 @@ public:
       cuda_[idx] = cuda;
 
       if (0 == mpiTopo.rank()) {
-        std::cerr << "idx=" << idx << " size=" << partition_.subdomain_size(idx) << " rank=" << rank
+        std::cerr << "idx=" << idx << " size=" << partition_.subdomain_size(idx) << " rank=" << rank << " node=" << node
+                  << " inNodeId=" << inNodeId << " sysIdx=" << sysIdx << " nodeIdx=" << nodeIdx
                   << " subdomain=" << subdomain << " cuda=" << cuda << "\n";
       }
 

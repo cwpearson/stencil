@@ -62,11 +62,10 @@ void DistributedDomain::realize() {
     const Dim3 sdOrigin = placement_->subdomain_origin(idx);
 
     // placement algorithm should agree with me what my GPU is
-    assert(placement_->get_cuda(idx) == gpus_[domId]);
-
     const int cudaId = placement_->get_cuda(idx);
+    assert(cudaId == gpus_[domId]);
 
-    fprintf(stderr, "rank=%d gpu=%ld (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, domId, cudaId, idx.x, idx.y, idx.z);
+    LOG_DEBUG("domain=" << domId << " cuda=" << cudaId << " idx=" << idx);
 
     LocalDomain sd(sdSize, sdOrigin, cudaId);
     sd.set_radius(radius_);
