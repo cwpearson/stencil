@@ -38,6 +38,7 @@ if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
       test_cuda_mpi_distributed_domain.cu
       test_cuda_mpi_exchange.cu
       test_cuda_mpi_colocatedtx.cu
+      test_cuda_mpi_tx_ipc.cpp
       test_cuda_mpi_cudaipc.cu
       test_cuda_aware_mpi.cu
     )
