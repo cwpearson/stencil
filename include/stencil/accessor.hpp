@@ -17,9 +17,9 @@ private:
   Dim3 pitch_;  // pitch in elements, not bytes
 
 public:
-  Accessor(T *raw, 
-  const Dim3 &origin, //<! [in] the 3D point that is offset 0
-           const Dim3 &pitch //<! [in] pitch in elements of allocation
+  Accessor(T *raw,
+           const Dim3 &origin, //<! [in] the 3D point that is offset 0
+           const Dim3 &pitch   //<! [in] pitch in elements of allocation
            )
       : raw_(raw), origin_(origin), pitch_(pitch) {}
 
