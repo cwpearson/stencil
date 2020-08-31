@@ -17,6 +17,7 @@
 #include "stencil/logging.hpp"
 #include "stencil/packer.cuh"
 #include "stencil/rcstream.hpp"
+#include "stencil/tx_ipc.hpp"
 #include "tx_common.hpp"
 
 inline void print_bytes(const char *obj, size_t n) {
@@ -184,108 +185,72 @@ private:
   void *dstBuf_; // buffer on dst device in another process
   size_t bufSize_;
 
-  int dstDev_; // cuda ID
+  IpcSender ipcSender_;
 
-  cudaEvent_t event_;
   cudaIpcMemHandle_t memHandle_;
-  cudaIpcEventHandle_t evtHandle_;
 
-  MPI_Request evtReq_;
   MPI_Request memReq_;
-  MPI_Request idReq_;
-  MPI_Request notifyReq_; // notify the ColocatedHaloRecver that we have recorded the event
 
   int tagUb_; // largest tag value, if positive
-  char junk_; // one byte of junk to notify the recver
 
 public:
-  ColocatedDeviceSender() : dstBuf_(nullptr), event_(0) {}
+  ColocatedDeviceSender() : dstBuf_(nullptr) {}
   ColocatedDeviceSender(int srcRank, int srcGPU, // domain ID
                         int dstRank, int dstGPU, // domain ID
                         int srcDev)              // cuda ID
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), srcDev_(srcDev), dstBuf_(nullptr),
-        bufSize_(0), event_(0) {
+        bufSize_(0), ipcSender_(srcRank, srcGPU, dstRank, dstGPU, srcDev) {
 
-    int tag_ub = -1;
-    int flag;
-    int *tag_ub_ptr;
-    MPI_Comm_get_attr(MPI_COMM_WORLD, MPI_TAG_UB, &tag_ub_ptr, &flag);
-    assert(flag);
-    if (flag)
-      tag_ub = *tag_ub_ptr;
-    tagUb_ = tag_ub;
+    tagUb_ = mpi::tag_ub(MPI_COMM_WORLD);
   }
 
   ~ColocatedDeviceSender() {
     if (dstBuf_) {
       CUDA_RUNTIME(cudaSetDevice(srcDev_));
       CUDA_RUNTIME(cudaIpcCloseMemHandle(dstBuf_));
-    }
-    dstBuf_ = nullptr;
-    if (event_) {
-      CUDA_RUNTIME(cudaEventDestroy(event_));
+      dstBuf_ = nullptr;
     }
   }
 
   int payload() const noexcept { return ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF); }
 
   void start_prepare(size_t numBytes) {
-
-    // create an event and associated handle
-    CUDA_RUNTIME(cudaSetDevice(srcDev_));
-    CUDA_RUNTIME(cudaEventCreate(&event_, cudaEventInterprocess | cudaEventDisableTiming));
-    CUDA_RUNTIME(cudaIpcGetEventHandle(&evtHandle_, event_));
-
-    // send the event handle
-    MPI_Isend(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedEvt>(payload()),
-              MPI_COMM_WORLD, &evtReq_);
+    ipcSender_.async_prepare();
 
     // Recieve the IPC mem handle
     const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload());
     assert(memHandleTag < tagUb_);
     MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, memHandleTag, MPI_COMM_WORLD, &memReq_);
-    // Retrieve the destination device id
-    const int devTag = make_tag<MsgKind::ColocatedDev>(payload());
-    assert(devTag < tagUb_);
-    MPI_Irecv(&dstDev_, 1, MPI_INT, dstRank_, devTag, MPI_COMM_WORLD, &idReq_);
 
-    // compute the required buffer size
     bufSize_ = numBytes;
   }
 
   void finish_prepare() {
-    // block until we have recved the device ID
-    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
-
-    // wait for recv mem handle
+    // wait for recv mem handle and convert to pointer
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
-
-    // convert to a pointer
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
     CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_, cudaIpcMemLazyEnablePeerAccess));
 
-    // block until we have sent event handle
-    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
+    ipcSender_.wait_prepare();
   }
 
   void send(const void *devPtr, RcStream &stream) {
     assert(srcDev_ == stream.device());
     assert(dstBuf_);
     assert(devPtr);
-    assert(dstDev_ >= 0);
     assert(srcDev_ >= 0);
     assert(bufSize_ > 0);
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
-    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, dstDev_, devPtr, srcDev_, bufSize_, stream));
+    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, ipcSender_.dst_dev(), devPtr, srcDev_, bufSize_, stream));
     // record the event
-    CUDA_RUNTIME(cudaEventRecord(event_, stream));
-    MPI_Isend(&junk_, 1, MPI_BYTE, dstRank_, make_tag<MsgKind::ColocatedNotify>(payload()), MPI_COMM_WORLD,
-              &notifyReq_);
+    CUDA_RUNTIME(cudaEventRecord(ipcSender_.event(), stream));
+    ipcSender_.async_notify();
   }
 
   void wait() {
+    ipcSender_.wait_notify();
     CUDA_RUNTIME(cudaSetDevice(srcDev_));
-    CUDA_RUNTIME(cudaEventSynchronize(event_));
+    CUDA_RUNTIME(cudaEventSynchronize(ipcSender_.event()));
   }
 };
 
@@ -297,64 +262,55 @@ private:
   int dstGPU_; // domain ID
   int dstDev_; // cuda ID
 
-  cudaEvent_t event_;
-
   cudaIpcMemHandle_t memHandle_;
-  cudaIpcEventHandle_t evtHandle_;
   MPI_Request memReq_;
-  MPI_Request idReq_;
-  MPI_Request evtReq_;
+
+  IpcRecver ipcRecver_;
 
 public:
-  ColocatedDeviceRecver() : event_(0) {}
+  ColocatedDeviceRecver() {}
   ColocatedDeviceRecver(int srcRank, int srcGPU, int dstRank,
                         int dstGPU, // domain ID
                         int dstDev  // cuda ID
                         )
-      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), dstDev_(dstDev), event_(0) {}
-  ~ColocatedDeviceRecver() {
-    if (event_) {
-      CUDA_RUNTIME(cudaEventDestroy(event_));
-    }
-  }
+      : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), dstDev_(dstDev),
+        ipcRecver_(srcRank, srcGPU, dstRank, dstGPU, dstDev) {}
+  ~ColocatedDeviceRecver() = default;
 
   /*! prepare to recieve devPtr
    */
   void start_prepare(void *devPtr) {
+    LOG_SPEW("ColocatedDeviceRecver::start_prepare(): entry");
+    ipcRecver_.async_prepare();
+
     // fprintf(stderr, "ColoDevRecv::start_prepare: send mem on %d(%d) to
     // r%dg%d\n", dstDev_, dstGPU_, srcRank_, srcGPU_);
     assert(devPtr);
 
     int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
-    // recv the event handle
-    MPI_Irecv(&evtHandle_, sizeof(evtHandle_), MPI_BYTE, srcRank_, make_tag<MsgKind::ColocatedEvt>(payload),
-              MPI_COMM_WORLD, &evtReq_);
-
     // get an a memory handle
     CUDA_RUNTIME(cudaSetDevice(dstDev_));
     CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
 
     // Send the mem handle to the ColocatedSender
-    MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_, make_tag<MsgKind::ColocatedMem>(payload),
-              MPI_COMM_WORLD, &memReq_);
-    // Send the CUDA device id to the ColocatedSender
-    MPI_Isend(&dstDev_, 1, MPI_INT, srcRank_, make_tag<MsgKind::ColocatedDev>(payload), MPI_COMM_WORLD, &idReq_);
+    const int memTag = make_tag<MsgKind::ColocatedMem>(payload);
+    MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_, memTag, MPI_COMM_WORLD, &memReq_);
+    LOG_SPEW("ColocatedDeviceRecver::start_prepare(): exit");
   }
 
   void finish_prepare() {
-
-    // wait to recv the event
-    MPI_Wait(&evtReq_, MPI_STATUS_IGNORE);
-
-    // convert event handle to event
-    CUDA_RUNTIME(cudaSetDevice(dstDev_));
-    CUDA_RUNTIME(cudaIpcOpenEventHandle(&event_, evtHandle_));
+    ipcRecver_.wait_prepare();
 
     // wait to send the mem handle and the CUDA device ID
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
-    MPI_Wait(&idReq_, MPI_STATUS_IGNORE);
   }
+
+  // start listening for notify
+  void async_listen() { ipcRecver_.async_listen(); }
+
+  // true if we have been notified
+  bool test_listen() { return ipcRecver_.test_listen(); }
 
   /*! have stream wait for data to arrive
 
@@ -365,11 +321,11 @@ public:
      FIXME: should we wait on event instead of stream?
    */
   void wait(RcStream &stream) {
-    assert(event_);
+    assert(ipcRecver_.event());
     assert(stream.device() == dstDev_);
 
     // wait for ColocatedDeviceSender cudaMemcpyPeerAsync to be done
-    CUDA_RUNTIME(cudaStreamWaitEvent(stream, event_, 0 /*flags*/));
+    CUDA_RUNTIME(cudaStreamWaitEvent(stream, ipcRecver_.event(), 0 /*flags*/));
   }
 };
 
@@ -440,7 +396,6 @@ private:
   /* NONE: ready to recv
      WAIT_NOTIFY: waiting on Irecv from ColocatedHaloSender
      WAIT_COPY: waiting on copy
-
   */
   enum class State { NONE, WAIT_NOTIFY, WAIT_COPY };
   State state_;
@@ -467,8 +422,7 @@ public:
     assert(State::NONE == state_);
     state_ = State::WAIT_NOTIFY;
 
-    const int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
-    MPI_Irecv(&junk_, 1, MPI_BYTE, srcRank_, make_tag<MsgKind::ColocatedNotify>(payload), MPI_COMM_WORLD, &notifyReq_);
+    recver_.async_listen();
 
     assert(stream_.device() == domain_->gpu());
   }
@@ -478,13 +432,7 @@ public:
 
   bool next_ready() {
     if (State::WAIT_NOTIFY == state_) {
-      int flag;
-      MPI_Test(&notifyReq_, &flag, MPI_STATUS_IGNORE);
-      if (flag) {
-        return true;
-      } else {
-        return false;
-      }
+      return recver_.test_listen();
     } else { // should only be asked this in active() states
       LOG_FATAL("unexpected state");
     }
