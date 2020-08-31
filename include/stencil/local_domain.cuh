@@ -60,35 +60,8 @@ private:
   int dev_; // CUDA device
 
 public:
-  LocalDomain(Dim3 sz, Dim3 origin, int dev)
-      : sz_(sz), origin_(origin), dev_(dev), devCurrDataPtrs_(nullptr), devDataElemSize_(nullptr) {}
-
-  ~LocalDomain() {
-    CUDA_RUNTIME(cudaGetLastError());
-
-    // int rank;
-    // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-    // std::cerr << "dtor rank=" << rank << " ~LocalDomain(): device=" << dev_
-    // << "\n";
-    CUDA_RUNTIME(cudaSetDevice(dev_));
-    for (auto p : currDataPtrs_) {
-      // std::cerr << "rank=" << rank << " ~LocalDomain(): cudaFree " <<
-      // uintptr_t(p) << "\n";
-      if (p)
-        CUDA_RUNTIME(cudaFree(p));
-    }
-    if (devCurrDataPtrs_)
-      CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
-
-    for (auto p : nextDataPtrs_) {
-      if (p)
-        CUDA_RUNTIME(cudaFree(p));
-    }
-    if (devDataElemSize_)
-      CUDA_RUNTIME(cudaFree(devDataElemSize_));
-    CUDA_RUNTIME(cudaGetLastError());
-  }
+  LocalDomain(Dim3 sz, Dim3 origin, int dev);
+  ~LocalDomain();
 
   /* set the CUDA device for this LocalDomain
    */

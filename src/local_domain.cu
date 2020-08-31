@@ -2,6 +2,29 @@
 
 #include <nvToolsExt.h>
 
+LocalDomain::LocalDomain(Dim3 sz, Dim3 origin, int dev)
+    : sz_(sz), origin_(origin), dev_(dev), devCurrDataPtrs_(nullptr), devDataElemSize_(nullptr) {}
+
+LocalDomain::~LocalDomain() {
+  CUDA_RUNTIME(cudaGetLastError());
+
+  CUDA_RUNTIME(cudaSetDevice(dev_));
+  for (auto p : currDataPtrs_) {
+    if (p)
+      CUDA_RUNTIME(cudaFree(p));
+  }
+  if (devCurrDataPtrs_)
+    CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
+
+  for (auto p : nextDataPtrs_) {
+    if (p)
+      CUDA_RUNTIME(cudaFree(p));
+  }
+  if (devDataElemSize_)
+    CUDA_RUNTIME(cudaFree(devDataElemSize_));
+  CUDA_RUNTIME(cudaGetLastError());
+}
+
 void LocalDomain::set_device(CudaErrorsFatal fatal) {
   cudaError_t err = cudaSetDevice(dev_);
   if (CudaErrorsFatal::YES == fatal) {
@@ -95,8 +118,8 @@ Dim3 LocalDomain::halo_pos(const Dim3 &dir, const bool halo) const noexcept {
 }
 
 std::vector<unsigned char> LocalDomain::region_to_host(const Dim3 &pos, const Dim3 &ext,
-                                          const size_t qi // quantity index
-                                          ) const {
+                                                       const size_t qi // quantity index
+                                                       ) const {
 
   const size_t bytes = elem_size(qi) * ext.flatten();
 

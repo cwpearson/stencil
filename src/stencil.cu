@@ -3,6 +3,130 @@
 
 #include <vector>
 
+DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
+    : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware) {
+
+#ifdef STENCIL_SETUP_STATS
+  timeMpiTopo_ = 0;
+  timeNodeGpus_ = 0;
+  timePeerEn_ = 0;
+  timePlacement_ = 0;
+  timePlan_ = 0;
+  timeRealize_ = 0;
+  timeCreate_ = 0;
+#endif
+
+#ifdef STENCIL_EXCHANGE_STATS
+  timeExchange_ = 0;
+  timeSwap_ = 0;
+#endif
+
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
+  MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
+
+#ifdef STENCIL_SETUP_STATS
+  MPI_Barrier(MPI_COMM_WORLD);
+  double start = MPI_Wtime();
+#endif
+  mpiTopology_ = std::move(MpiTopology(MPI_COMM_WORLD));
+#ifdef STENCIL_SETUP_STATS
+  double elapsed = MPI_Wtime() - start;
+  double maxElapsed = -1;
+  MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  if (0 == rank_) {
+    timeMpiTopo_ += maxElapsed;
+  }
+#endif
+
+  std::cerr << "[" << rank_ << "] colocated with " << mpiTopology_.colocated_size() << " ranks\n";
+
+  int deviceCount;
+  CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
+  std::cerr << "[" << rank_ << "] cudaGetDeviceCount= " << deviceCount << "\n";
+
+  /*
+  cudaComputeModeDefault = 0
+  Default compute mode (Multiple threads can use cudaSetDevice() with this
+  device) cudaComputeModeExclusive = 1 Compute-exclusive-thread mode (Only one
+  thread in one process will be able to use cudaSetDevice() with this device)
+  cudaComputeModeProhibited = 2
+  Compute-prohibited mode (No threads can use cudaSetDevice() with this
+  device) cudaComputeModeExclusiveProcess = 3 Compute-exclusive-process mode
+  (Many threads in one process will be able to use cudaSetDevice() with this
+  device)
+  */
+  cudaDeviceProp prop;
+  for (int i = 0; i < deviceCount; ++i) {
+    CUDA_RUNTIME(cudaGetDeviceProperties(&prop, i));
+    std::cerr << "[" << rank_ << "] cudaDeviceProp.computeMode=" << prop.computeMode << "\n";
+  }
+
+  // Determine GPUs this DistributedDomain is reposible for
+  if (gpus_.empty()) {
+    // if fewer colocated ranks than GPUs, round-robin GPUs to ranks
+    if (mpiTopology_.colocated_size() <= deviceCount) {
+      for (int id = 0; id < deviceCount; ++id) {
+        if (id % mpiTopology_.colocated_size() == mpiTopology_.colocated_rank()) {
+          gpus_.push_back(id);
+        }
+      }
+    } else { // if more ranks, share gpus among ranks
+      gpus_.push_back(mpiTopology_.colocated_rank() % deviceCount);
+    }
+  }
+  assert(!gpus_.empty());
+
+// create a list of cuda device IDs in use by the ranks on this node
+// TODO: assumes all ranks use the same number of GPUs
+#ifdef STENCIL_SETUP_STATS
+  MPI_Barrier(MPI_COMM_WORLD);
+  start = MPI_Wtime();
+#endif
+  std::vector<int> nodeCudaIds(gpus_.size() * mpiTopology_.colocated_size());
+  MPI_Allgather(gpus_.data(), int(gpus_.size()), MPI_INT, nodeCudaIds.data(), int(gpus_.size()), MPI_INT,
+                mpiTopology_.colocated_comm());
+#ifdef STENCIL_SETUP_STATS
+  elapsed = MPI_Wtime() - start;
+  MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  if (0 == rank_) {
+    timeNodeGpus_ += maxElapsed;
+  }
+#endif
+  {
+    {
+#if STENCIL_OUTPUT_LEVEL <= 2
+      std::stringstream ss;
+      ss << "[" << rank_ << "] colocated with ranks using gpus";
+      for (auto &e : nodeCudaIds) {
+        ss << " " << e;
+      }
+      LOG_INFO(ss.str());
+#endif
+    }
+  }
+
+#ifdef STENCIL_SETUP_STATS
+  MPI_Barrier(MPI_COMM_WORLD);
+  start = MPI_Wtime();
+#endif
+  // Try to enable peer access between all GPUs
+  nvtxRangePush("peer_en");
+  for (const auto &srcGpu : gpus_) {
+    for (const auto &dstGpu : nodeCudaIds) {
+      gpu_topo::enable_peer(srcGpu, dstGpu);
+    }
+  }
+  nvtxRangePop();
+#ifdef STENCIL_SETUP_STATS
+  elapsed = MPI_Wtime() - start;
+  MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
+  if (0 == rank_) {
+    timePeerEn_ += maxElapsed;
+  }
+#endif
+  CUDA_RUNTIME(cudaGetLastError());
+}
+
 uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method) const {
   uint64_t ret = 0;
 #ifdef STENCIL_SETUP_STATS
@@ -22,6 +146,19 @@ uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method)
   (void)method;
 #endif
   return ret;
+}
+
+DistributedDomain::~DistributedDomain() {
+  for (auto &m : remoteSenders_) {
+    for (auto &kv : m) {
+      delete kv.second;
+    }
+  }
+  for (auto &m : remoteRecvers_) {
+    for (auto &kv : m) {
+      delete kv.second;
+    }
+  }
 }
 
 void DistributedDomain::realize() {
