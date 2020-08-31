@@ -1,9 +1,9 @@
 #include "catch2/catch.hpp"
 
-#include "stencil/copy.cuh"
-#include "stencil/pack_kernel.cuh"
+// #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
-#include "stencil/dim3.hpp"
+#include "stencil/pack_kernel.cuh"
+#include "stencil/unpack_kernel.cuh"
 
 TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
   Dim3 arrSz(3, 4, 5);
@@ -16,11 +16,9 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
 
   // 3*4*5 array
   INFO("alloc src");
-  CUDA_RUNTIME(
-      cudaMallocManaged(&src, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
+  CUDA_RUNTIME(cudaMallocManaged(&src, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
   INFO("alloc dst2");
-  CUDA_RUNTIME(
-      cudaMallocManaged(&dst2, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
+  CUDA_RUNTIME(cudaMallocManaged(&dst2, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
 
   /*
     z faces
@@ -56,8 +54,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
   for (size_t zi = 0; zi < arrSz.z; ++zi) {
     for (size_t yi = 0; yi < arrSz.y; ++yi) {
       for (size_t xi = 0; xi < arrSz.x; ++xi) {
-        src[zi * arrSz.y * arrSz.x + yi * arrSz.x + xi] =
-            zi * arrSz.y * arrSz.x + yi * arrSz.x + xi;
+        src[zi * arrSz.y * arrSz.x + yi * arrSz.x + xi] = zi * arrSz.y * arrSz.x + yi * arrSz.x + xi;
       }
     }
   }
@@ -70,8 +67,8 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
     std::cerr << dimGrid << " " << dimBlock << "\n";
-    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 0, arrSz.z - 1),
-                                Dim3(arrSz.x, arrSz.y, 1), sizeof(TestType));
+    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 0, arrSz.z - 1), Dim3(arrSz.x, arrSz.y, 1),
+                                       sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
     REQUIRE(dst[0] == 48);
@@ -79,10 +76,8 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     REQUIRE(dst[11] == 59);
 
     SECTION("unpack") {
-      CUDA_RUNTIME(
-          cudaMemset(dst2, 0, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
-      unpack<<<dimGrid, dimBlock>>>(dst2, arrSz, pitch, Dim3(0, 0, arrSz.z - 1),
-                                    Dim3(arrSz.x, arrSz.y, 1), dst,
+      CUDA_RUNTIME(cudaMemset(dst2, 0, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
+      unpack<<<dimGrid, dimBlock>>>(dst2, arrSz, pitch, Dim3(0, 0, arrSz.z - 1), Dim3(arrSz.x, arrSz.y, 1), dst,
                                     sizeof(TestType));
       CUDA_RUNTIME(cudaDeviceSynchronize());
       REQUIRE(dst2[48] == 48);
@@ -95,8 +90,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     CUDA_RUNTIME(cudaMallocManaged(&dst, sizeof(TestType) * arrSz.y * arrSz.z));
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
-    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 0, 0),
-                                Dim3(1, arrSz.y, arrSz.z), sizeof(TestType));
+    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 0, 0), Dim3(1, arrSz.y, arrSz.z), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
     REQUIRE(dst[0] == 0);
@@ -110,8 +104,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int) {
     CUDA_RUNTIME(cudaMallocManaged(&dst, sizeof(TestType) * arrSz.y * arrSz.z));
     dim3 dimGrid(2, 2, 2);
     dim3 dimBlock(2, 2, 2);
-    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 1, 0),
-                                Dim3(arrSz.x, 1, arrSz.z), sizeof(TestType));
+    pack_kernel<<<dimGrid, dimBlock>>>(dst, src, arrSz, Dim3(0, 1, 0), Dim3(arrSz.x, 1, arrSz.z), sizeof(TestType));
     CUDA_RUNTIME(cudaDeviceSynchronize());
 
     REQUIRE(dst[0] == 3);
@@ -131,10 +124,8 @@ TEST_CASE("real cases", "[cuda]") {
     char *buf;
     char *dst;
 
-    CUDA_RUNTIME(
-        cudaMallocManaged(&dst, elemSize * rawSz.x * rawSz.y * rawSz.z));
-    CUDA_RUNTIME(
-        cudaMallocManaged(&buf, elemSize * radius * arrSz.y * arrSz.z));
+    CUDA_RUNTIME(cudaMallocManaged(&dst, elemSize * rawSz.x * rawSz.y * rawSz.z));
+    CUDA_RUNTIME(cudaMallocManaged(&buf, elemSize * radius * arrSz.y * arrSz.z));
 
     dim3 dimGrid(20, 20, 20);
     dim3 dimBlock(32, 4, 4);
@@ -142,8 +133,7 @@ TEST_CASE("real cases", "[cuda]") {
     Dim3 haloPos(34, 4, 4);
     Dim3 haloExtent(4, 40, 50);
 
-    unpack<<<dimGrid, dimBlock>>>(dst, rawSz, 0 /*pitch*/, haloPos, haloExtent,
-                                  buf, elemSize);
+    unpack<<<dimGrid, dimBlock>>>(dst, rawSz, 0 /*pitch*/, haloPos, haloExtent, buf, elemSize);
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
 }
