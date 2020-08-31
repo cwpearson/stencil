@@ -62,11 +62,10 @@ void DistributedDomain::realize() {
     const Dim3 sdOrigin = placement_->subdomain_origin(idx);
 
     // placement algorithm should agree with me what my GPU is
-    assert(placement_->get_cuda(idx) == gpus_[domId]);
-
     const int cudaId = placement_->get_cuda(idx);
+    assert(cudaId == gpus_[domId]);
 
-    fprintf(stderr, "rank=%d gpu=%ld (cuda id=%d) => [%ld,%ld,%ld]\n", rank_, domId, cudaId, idx.x, idx.y, idx.z);
+    LOG_DEBUG("domain=" << domId << " cuda=" << cudaId << " idx=" << idx);
 
     LocalDomain sd(sdSize, sdOrigin, cudaId);
     sd.set_radius(radius_);
@@ -118,6 +117,12 @@ void DistributedDomain::realize() {
   size would be zero
   */
   nvtxRangePush("DistributedDomain::realize() plan messages");
+
+#ifdef STENCIL_SETUP_STATS
+  // rank-rank communication amount matrix
+  Mat2D<uint64_t> rankCommBytes(mpi::comm_size(MPI_COMM_WORLD), mpi::comm_size(MPI_COMM_WORLD), 0);
+#endif
+
   peerCopyOutboxes.resize(gpus_.size());
   for (auto &v : peerCopyOutboxes) {
     v.resize(gpus_.size());
@@ -160,6 +165,15 @@ void DistributedDomain::realize() {
           const int dstDev = placement_->get_cuda(dstIdx);
           Message sMsg(dir, di, dstGPU);
 
+          // TODO: move this out of the plan so that this time isn't accumulated into the statistics
+#ifdef STENCIL_SETUP_STATS
+          for (int qi = 0; qi < domains_[di].num_data(); ++qi) {
+            // send size matches size of halo that we're recving into
+            const size_t bytes = domains_[di].halo_bytes(dir * -1, qi);
+            rankCommBytes.at(rank_, dstRank) += bytes;
+          }
+#endif
+
           if (any_methods(MethodFlags::CudaKernel)) {
             if (dstRank == rank_ && myDev == dstDev) {
               peerAccessOutbox.push_back(sMsg);
@@ -167,12 +181,19 @@ void DistributedDomain::realize() {
             }
           }
           if (any_methods(MethodFlags::CudaMemcpyPeer)) {
-            LOG_DEBUG("peer " << rank_ << " " << dstRank << " peer(" << myDev << "," << dstDev << ")=" << gpu_topo::peer(myDev, dstDev));
+            LOG_DEBUG("peer " << rank_ << " " << dstRank << " peer(" << myDev << "," << dstDev
+                              << ")=" << gpu_topo::peer(myDev, dstDev));
             if (dstRank == rank_ && gpu_topo::peer(myDev, dstDev)) {
               peerCopyOutboxes[di][dstGPU].push_back(sMsg);
               goto send_planned;
             }
           }
+          /*
+          FIXME: for now, we require that all GPUs be visible to all colocated ranks.
+          This is used to detect the GPU distance.
+          Ultimately, we'd like to be able to figure this out even in the presence of CUDA_VISIBLE_DEVICES making each
+          rank have a different CUDA device 0 Then, we could restrict CPU code to run on CPUs nearby to the GPU
+          */
           if (any_methods(MethodFlags::CudaMpiColocated)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
@@ -244,6 +265,37 @@ void DistributedDomain::realize() {
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   if (0 == rank_) {
     timePlan_ += maxElapsed;
+  }
+#endif
+
+/*
+ -------------------------
+dump communication matrices
+----------------------------
+
+to be loaded with numpy.loadtxt
+*/
+#ifdef STENCIL_SETUP_STATS
+  {
+    if (0 == rank_) {
+      MPI_Reduce(MPI_IN_PLACE, rankCommBytes.data(), rankCommBytes.size(), MPI_DOUBLE, MPI_SUM, 0, MPI_COMM_WORLD);
+    } else {
+      MPI_Reduce(rankCommBytes.data(), rankCommBytes.data(), rankCommBytes.size(), MPI_DOUBLE, MPI_SUM, 0,
+                 MPI_COMM_WORLD);
+    }
+
+    if (0 == rank_) {
+
+      std::string matFileName = outputPrefix_ + "mat_npy_loadtxt" + ".txt";
+      std::ofstream matFile(matFileName, std::ofstream::out);
+
+      for (unsigned r = 0; r < rankCommBytes.shape().y; ++r) {
+        for (unsigned c = 0; c < rankCommBytes.shape().x; ++c) {
+          matFile << rankCommBytes.at(r, c) << " ";
+        }
+        matFile << std::endl;
+      }
+    }
   }
 #endif
 
@@ -937,3 +989,5 @@ void DistributedDomain::write_paraview(const std::string &prefix, bool zeroNaNs)
 
   nvtxRangePop();
 }
+
+void DistributedDomain::set_output_prefix(const std::string &prefix) { outputPrefix_ = prefix; }

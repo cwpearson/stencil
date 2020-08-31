@@ -93,13 +93,13 @@ public:
       }
     }
   }
+  Mat2D(const Mat2D &other) : Mat2D(other.shape_) { data_ = other.data_; }
+  Mat2D(Mat2D &&other) = default;
 
   ~Mat2D() {}
 
-  Mat2D(const Mat2D &other) : Mat2D(other.shape_) { data_ = other.data_; }
 
   Mat2D &operator=(const Mat2D &rhs) = default;
-  Mat2D(Mat2D &&other) = default;
   Mat2D &operator=(Mat2D &&rhs) = default;
 
   inline T &at(int64_t i, int64_t j) noexcept {
@@ -121,6 +121,13 @@ public:
   ConstRow operator[](int64_t i) const noexcept {
     assert(i < shape_.y);
     return ConstRow(&data_[i * shape_.x], shape_.x);
+  }
+
+  T* data() noexcept {
+    return data_.data();
+  }
+  const T* data() const noexcept {
+    return data_.data();
   }
 
   /* grow or shrink to [x,y], preserving top-left corner of matrix */
@@ -147,6 +154,7 @@ public:
   }
 
   inline const Shape &shape() const noexcept { return shape_; }
+  inline uint64_t size() const noexcept { return shape_.flatten(); }
 
   bool operator==(const Mat2D &rhs) const noexcept {
     if (shape_ != rhs.shape_) {

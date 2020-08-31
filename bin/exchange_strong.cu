@@ -5,6 +5,8 @@
 
 #include <nvToolsExt.h>
 
+#include "statistics.hpp"
+
 #include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
@@ -77,7 +79,6 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
- 
   MethodFlags methods = MethodFlags::None;
   if (useStaged) {
     methods = MethodFlags::CudaMpi;
@@ -137,17 +138,20 @@ int main(int argc, char **argv) {
 
     dd.realize();
 
+
+    Statistics stats;
     MPI_Barrier(MPI_COMM_WORLD);
-    double elapsed = MPI_Wtime();
 
     for (int iter = 0; iter < nIters; ++iter) {
       if (0 == rank) {
         std::cerr << "exchange " << iter << "\n";
       }
+      double elapsed = MPI_Wtime();
       dd.exchange();
+      elapsed = MPI_Wtime() - elapsed;
+      MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      stats.insert(elapsed);
     }
-    elapsed = MPI_Wtime() - elapsed;
-    MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
 #ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
@@ -180,15 +184,21 @@ int main(int argc, char **argv) {
       // clang-format off
       // same as strong.cu
       // header should be
-      // bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,exchange (S)
+      // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,sds,nodes,ranks,exchange trimean (s)
       // clang-format on
-      printf("exchange,%s,%lu,%lu,%lu,%lu," // s
-             "%lu,%lu,%lu,%lu,"             // <- exchange bytes
-             "%d,%d,%d,%d,%e\n",
-             methodStr.c_str(), x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
-             dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
-             dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);
+      printf(
+          "exchange,%s,%d,%lu,%lu,%lu,%lu," // s
+          "%lu,%lu,%lu,"                    // ldx,ldy,ldz
+          "%lu,%lu,%lu,%lu,"                // different exchange bytes
+          "%d,%d,%d,%d,%e\n",
+          methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z,
+          dd.domains()[0].size().x,
+          dd.domains()[0].size().y,
+          dd.domains()[0].size().z,
+          dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
+          dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
+          dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
+          dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, stats.trimean());
     }
 #endif // STENCIL_EXCHANGE_STATS
 

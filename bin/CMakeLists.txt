@@ -73,11 +73,11 @@ add_executable(jacobi3d-strong jacobi3d_strong.cu statistics.cpp)
 target_link_libraries(jacobi3d-strong stencil::stencil)
 add_args(jacobi3d-strong)
 
-add_executable(exchange-weak exchange_weak.cu)
+add_executable(exchange-weak exchange_weak.cu statistics.cpp)
 target_link_libraries(exchange-weak stencil::stencil)
 add_args(exchange-weak)
 
-add_executable(exchange-strong exchange_strong.cu)
+add_executable(exchange-strong exchange_strong.cu statistics.cpp)
 target_link_libraries(exchange-strong stencil::stencil)
 add_args(exchange-strong)
 
@@ -104,3 +104,7 @@ add_args(bench-alltoallv)
 add_executable(bench-pack bench_pack.cu)
 target_link_libraries(bench-pack stencil::stencil)
 add_args(bench-pack)
+
+add_executable(machine-info machine_info.cu)
+target_link_libraries(machine-info stencil::stencil)
+add_args(machine-info)

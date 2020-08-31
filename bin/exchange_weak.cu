@@ -8,6 +8,8 @@
 #include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
+#include "statistics.hpp"
+
 typedef std::chrono::duration<double> Dur;
 
 int main(int argc, char **argv) {
@@ -50,6 +52,7 @@ int main(int argc, char **argv) {
 
   int nIters = 30;
   bool useNaivePlacement = false;
+  std::string prefix;
   bool useKernel = false;
   bool usePeer = false;
   bool useColo = false;
@@ -64,6 +67,7 @@ int main(int argc, char **argv) {
   p.add_positional(y)->required();
   p.add_positional(z)->required();
   p.add_positional(nIters)->required();
+  p.add_option(prefix, "--prefix");
   p.add_flag(useKernel, "--kernel");
   p.add_flag(usePeer, "--peer");
   p.add_flag(useColo, "--colo");
@@ -72,31 +76,38 @@ int main(int argc, char **argv) {
   p.add_flag(useCudaAware, "--cuda-aware");
 #endif
   p.add_flag(useStaged, "--staged");
+  p.add_flag(useNaivePlacement, "--naive");
   if (!p.parse(argc, argv)) {
     std::cout << p.help() << "\n";
     exit(EXIT_FAILURE);
   }
 
-  /* scaling the cube with the number of GPUs caused wierd behavior
-     for certain sizes due to the partitioner.
-      Now, we'll just grow the domain by the reverse of the partitioning algorithm to keep each GPU
-      having the same aspect ratio, to keep the performance more understandable
+  /*
+  For a single node, scaling the compute domain as a cube while trying to keep gridpoints/GPU constant
+    cause weird-to-understand scaling performance for GPU kernels because the aspect ratio affects the GPU kernel
+    performance.
+  So, we just recursively mulitply the prime factors into the smallest dimensions to keep the shape constant.
 
-      The parition algorithm takes the pfs from largest to smallest, and recursively divides the longest axis
-      so, we take the pfs smallest to largest and scale the smallest axis up
+  For multiple nodes, it's generally impossible to guarantee a particular size of each subdomain due to the hierarchical
+  partitioning, so we just scale the whole compute region to keep the gridpoints / subdomain roughly constant.
   */
-  {
+  if (1 == numNodes) {
     std::vector<int64_t> pfs = prime_factors(numSubdoms);
-    for (int i = pfs.size() - 1; i >= 0; --i) {
-      if (x < y && x < z) {
-        x *= pfs[i];
-      } else if (y < z) {
-        y *= pfs[i];
+    for (auto pf : pfs) {
+      if (x <= y && x <= z) {
+        x *= pf;
+      } else if (y <= z) {
+        y *= pf;
       } else {
-        z *= pfs[i];
+        z *= pf;
       }
     }
+  } else {
+    x *= std::pow(double(numSubdoms), 1.0 / 3);
+    y *= std::pow(double(numSubdoms), 1.0 / 3);
+    z *= std::pow(double(numSubdoms), 1.0 / 3);
   }
+
   MethodFlags methods = MethodFlags::None;
   if (useStaged) {
     methods = MethodFlags::CudaMpi;
@@ -154,19 +165,25 @@ int main(int argc, char **argv) {
     dd.add_data<float>("d2");
     dd.add_data<float>("d3");
 
+    dd.set_output_prefix(prefix);
+
     dd.realize();
 
+    Statistics stats;
+
     MPI_Barrier(MPI_COMM_WORLD);
-    double elapsed = MPI_Wtime();
 
     for (int iter = 0; iter < nIters; ++iter) {
       if (0 == rank) {
         std::cerr << "exchange " << iter << "\n";
       }
+      double elapsed = MPI_Wtime();
       dd.exchange();
+      elapsed = MPI_Wtime() - elapsed;
+      MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      stats.insert(elapsed);
     }
-    elapsed = MPI_Wtime() - elapsed;
-    MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+
 
 #ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
@@ -199,15 +216,20 @@ int main(int argc, char **argv) {
       // clang-format off
       // same as strong.cu
       // header should be
-      // bin,config,x,y,z,s,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B)iters,gpus,nodes,ranks,mpi_topo,node_gpus,exchange (S)
+      // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,trimean (s)
       // clang-format on
-      printf("exchange,%s,%lu,%lu,%lu,%lu," // s
+      printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
+             "%lu,%lu,%lu," // ldx ldy ldz
              "%lu,%lu,%lu,%lu,"             // <- exchange bytes
              "%d,%d,%d,%d,%e\n",
-             methodStr.c_str(), x, y, z, x * y * z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
+             methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, 
+             dd.domains()[0].size().x,
+             dd.domains()[0].size().y,
+             dd.domains()[0].size().z,
+             dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
              dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, elapsed);
+             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, stats.trimean());
     }
 #endif // STENCIL_SETUP_STATS
 

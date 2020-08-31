@@ -103,6 +103,9 @@ private:
   std::vector<std::map<Dim3, ColocatedHaloSender>> coloSenders_; // vec[domain][dstIdx] = sender
   std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
 
+  // prefix for any generated output files
+  std::string outputPrefix_;
+
 #ifdef STENCIL_SETUP_STATS
   // count of how many bytes are sent through various methods in each exchange
   uint64_t numBytesCudaMpi_;
@@ -351,4 +354,8 @@ public:
      subdomain `zero_nans` causes nans to be replaced with 0.0
   */
   void write_paraview(const std::string &prefix, bool zeroNaNs = false);
+
+  /* Set the output prefix for the MPI communication matrix
+  */
+  void set_output_prefix(const std::string &prefix);
 };
