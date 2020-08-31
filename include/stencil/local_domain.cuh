@@ -199,49 +199,6 @@ public:
     return Rect3(lo, hi);
   }
 
-#if 0
-  // return the position of the halo relative to get_data() in direction `dir`
-  Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept {
-    Dim3 ret;
-    assert(dir.all_gt(-2));
-    assert(dir.all_lt(2));
-
-    // +xhalo is the left edge + -x radius + the interior
-    // +x interior is just the left edge + interior size
-    if (1 == dir.x) {
-      ret.x = sz_.x + (halo ? radius_.x(-1) : 0);
-    } else if (-1 == dir.x) {
-      ret.x = halo ? 0 : radius_.x(-1);
-    } else if (0 == dir.x) {
-      ret.x = radius_.x(-1);
-    } else {
-      __builtin_unreachable();
-    }
-
-    if (1 == dir.y) {
-      ret.y = sz_.y + (halo ? radius_.y(-1) : 0);
-    } else if (-1 == dir.y) {
-      ret.y = halo ? 0 : radius_.y(-1);
-    } else if (0 == dir.y) {
-      ret.y = radius_.y(-1);
-    } else {
-      __builtin_unreachable();
-    }
-
-    if (1 == dir.z) {
-      ret.z = sz_.z + (halo ? radius_.z(-1) : 0);
-    } else if (-1 == dir.z) {
-      ret.z = halo ? 0 : radius_.z(-1);
-    } else if (0 == dir.z) {
-      ret.z = radius_.z(-1);
-    } else {
-      __builtin_unreachable();
-    }
-
-    return ret;
-  }
-#endif
-
   // return the position of the halo relative to get_data() on the `dir` side of the
   // LocalDomain (e.g., dir [1,0,0] returns the position of the region on the +x side)
   // dir = [0,0,0] returns the entire region (without the halo), ignoring the `halo` argument
@@ -292,7 +249,7 @@ public:
   void swap() noexcept;
 
   /* return the bytes making up
-  */
+   */
   std::vector<unsigned char> region_to_host(const Dim3 &pos, const Dim3 &ext,
                                             const size_t qi // quantity index
                                             ) const;
