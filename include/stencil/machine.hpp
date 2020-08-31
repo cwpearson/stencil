@@ -56,10 +56,7 @@ struct UUID {
   }
 };
 
-std::ostream &operator<<(std::ostream &os, const UUID &uuid) {
-  os << std::string(uuid);
-  return os;
-}
+
 
 class GPU {
 public:

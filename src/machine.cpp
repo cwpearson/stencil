@@ -8,6 +8,11 @@
 #include <set>
 #include <map>
 
+std::ostream &operator<<(std::ostream &os, const UUID &uuid) {
+  os << std::string(uuid);
+  return os;
+}
+
 typedef Machine::Distance Distance;
 
 #if STENCIL_USE_MPI == 1
