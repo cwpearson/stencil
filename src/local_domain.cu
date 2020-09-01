@@ -76,7 +76,7 @@ void LocalDomain::swap() noexcept {
   nvtxRangePop();
 }
 
-Dim3 LocalDomain::halo_pos(const Dim3 &dir, const bool halo) const noexcept {
+Dim3 LocalDomain::halo_pos(const Dim3 &dir, const Dim3 &sz, const Radius &radius, const bool halo) noexcept {
   assert(dir.all_gt(-2));
   assert(dir.all_lt(2));
 
@@ -85,36 +85,40 @@ Dim3 LocalDomain::halo_pos(const Dim3 &dir, const bool halo) const noexcept {
   // +xhalo is the left edge + -x radius + the interior
   // +x interior is just the left edge + interior size
   if (1 == dir.x) {
-    ret.x = sz_.x + (halo ? radius_.x(-1) : 0);
+    ret.x = sz.x + (halo ? radius.x(-1) : 0);
   } else if (-1 == dir.x) {
-    ret.x = halo ? 0 : radius_.x(-1);
+    ret.x = halo ? 0 : radius.x(-1);
   } else if (0 == dir.x) {
-    ret.x = radius_.x(-1);
+    ret.x = radius.x(-1);
   } else {
     LOG_FATAL("unreachable");
   }
 
   if (1 == dir.y) {
-    ret.y = sz_.y + (halo ? radius_.y(-1) : 0);
+    ret.y = sz.y + (halo ? radius.y(-1) : 0);
   } else if (-1 == dir.y) {
-    ret.y = halo ? 0 : radius_.y(-1);
+    ret.y = halo ? 0 : radius.y(-1);
   } else if (0 == dir.y) {
-    ret.y = radius_.y(-1);
+    ret.y = radius.y(-1);
   } else {
     LOG_FATAL("unreachable");
   }
 
   if (1 == dir.z) {
-    ret.z = sz_.z + (halo ? radius_.z(-1) : 0);
+    ret.z = sz.z + (halo ? radius.z(-1) : 0);
   } else if (-1 == dir.z) {
-    ret.z = halo ? 0 : radius_.z(-1);
+    ret.z = halo ? 0 : radius.z(-1);
   } else if (0 == dir.z) {
-    ret.z = radius_.z(-1);
+    ret.z = radius.z(-1);
   } else {
     LOG_FATAL("unreachable");
   }
 
   return ret;
+}
+
+Dim3 LocalDomain::halo_pos(const Dim3 &dir, const bool halo) const noexcept {
+  return halo_pos(dir, sz_, radius_, halo);
 }
 
 std::vector<unsigned char> LocalDomain::region_to_host(const Dim3 &pos, const Dim3 &ext,

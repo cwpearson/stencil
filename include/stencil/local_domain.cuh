@@ -206,6 +206,12 @@ public:
   // return the position of the halo relative to get_data() on the `dir` side of the
   // LocalDomain (e.g., dir [1,0,0] returns the position of the region on the +x side)
   // dir = [0,0,0] returns the entire region (without the halo), ignoring the `halo` argument
+  // sz is the size of the allocated data, and radius is the stencil radius
+  static Dim3 halo_pos(const Dim3 &dir, const Dim3 &sz, const Radius &radius, const bool halo) noexcept;
+
+  // return the position of the halo relative to get_data() on the `dir` side of the
+  // LocalDomain (e.g., dir [1,0,0] returns the position of the region on the +x side)
+  // dir = [0,0,0] returns the entire region (without the halo), ignoring the `halo` argument
   Dim3 halo_pos(const Dim3 &dir, const bool halo) const noexcept;
 
   /* return the coordinates of the halo region on side `dir`.
