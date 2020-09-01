@@ -10,9 +10,8 @@
 #include "stencil/stencil.hpp"
 
 template <typename T>
-__global__ void
-init_kernel(Accessor<T> dst, //<! [out] region to fill
-            Rect3 dstExt     //<! [in] the extent of the region to initialize
+__global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
+                            Rect3 dstExt     //<! [in] the extent of the region to initialize
 ) {
   const T ripple[4] = {0, 0.25, 0, -0.25};
   const size_t period = sizeof(ripple) / sizeof(ripple[0]);
@@ -21,16 +20,12 @@ init_kernel(Accessor<T> dst, //<! [out] region to fill
   const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
   const size_t tix = blockDim.x * blockIdx.x + threadIdx.x;
 
-  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z;
-       z += gridDim.z * blockDim.z) {
-    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y;
-         y += gridDim.y * blockDim.y) {
-      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x;
-           x += gridDim.x * blockDim.x) {
+  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z; z += gridDim.z * blockDim.z) {
+    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y; y += gridDim.y * blockDim.y) {
+      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
 
         Dim3 p(x, y, z);
-        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z +
-                ripple[p.z % period];
+        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period];
         dst[p] = val;
       }
     }
@@ -38,7 +33,7 @@ init_kernel(Accessor<T> dst, //<! [out] region to fill
 }
 
 /* check an exchange that supports the given kernel radius
-*/
+ */
 static void check_exchange(const Radius &radius) {
 
   int rank;
@@ -113,9 +108,7 @@ static void check_exchange(const Radius &radius) {
             const Q1 ripple[4] = {0, 0.25, 0, -0.25};
             const size_t period = sizeof(ripple) / sizeof(ripple[0]);
             Q1 val = acc[p];
-            REQUIRE(val == p.x + ripple[p.x % period] + p.y +
-                               ripple[p.y % period] + p.z +
-                               ripple[p.z % period]);
+            REQUIRE(val == p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period]);
           }
         }
       }
@@ -189,9 +182,7 @@ static void check_exchange(const Radius &radius) {
 
             // std::cerr << "->" << p << "\n";
 
-            REQUIRE(val == p.x + ripple[p.x % period] + p.y +
-                               ripple[p.y % period] + p.z +
-                               ripple[p.z % period]);
+            REQUIRE(val == p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period]);
           }
         }
       }
@@ -201,35 +192,28 @@ static void check_exchange(const Radius &radius) {
 
 TEST_CASE("exchange2") {
 
-  SECTION("r=0") {
-    check_exchange(Radius::constant(0));
-  }
+  SECTION("r=0") { check_exchange(Radius::constant(0)); }
 
-  SECTION("r=1") {
-    check_exchange(Radius::constant(1));
-  }
+  SECTION("r=1") { check_exchange(Radius::constant(1)); }
 
-  SECTION("r=2") {
-    check_exchange(Radius::constant(2));
-  }
+  SECTION("r=2") { check_exchange(Radius::constant(2)); }
 
   SECTION("+x=2") {
     Radius r = Radius::constant(0);
-    r.dir(1,0,0) = 2;
+    r.dir(1, 0, 0) = 2;
     check_exchange(r);
   }
 
   SECTION("mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
-    r.dir(-1,0,0) = 1;
+    r.dir(-1, 0, 0) = 1;
     check_exchange(r);
   }
 
   SECTION("+x=2, mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
-    r.dir(1,0,0) = 2;
-    r.dir(-1,0,0) = 1;
+    r.dir(1, 0, 0) = 2;
+    r.dir(-1, 0, 0) = 1;
     check_exchange(r);
   }
-
 }
