@@ -1,6 +1,7 @@
 #pragma once
 
 #include "stencil/local_domain.cuh"
+#include "stencil/partition.hpp"
 #include "stencil/rcstream.hpp"
 #include "stencil/tx_common.hpp"
 #include "stencil/tx_ipc.hpp"
@@ -11,26 +12,26 @@ private:
   int srcDom_, dstDom_;
 
   LocalDomain *domain_;
+  Placement *placement_;
   RcStream stream_;
   IpcSender ipcSender_;
 
   /* one memory handle per quantity
-  */
+   */
   MPI_Request memReq_;
   std::vector<cudaIpcMemHandle_t> handles_;
-  std::vector<void*> bufs_;
 
-  std::vector<Message> outbox_;
+  // pointers to the destination domain buffers
+  std::vector<void *> dstDomCurrDatas_;
+  void **dstDomCurrDatasDev_;
 
 public:
-  ColocatedDirectAccessSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain);
-
-  void start_prepare(const std::vector<Message> &outbox);
-
+  ColocatedDirectAccessSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
+                              Placement *placement);
+  ~ColocatedDirectAccessSender();
+  void start_prepare();
   void finish_prepare();
-
   void send();
-
   void wait();
 };
 
@@ -45,7 +46,7 @@ private:
   RcStream stream_;
 
   IpcRecver ipcRecver_;
-  
+
   // send destination buffers to host
   MPI_Request memReq_;
   std::vector<cudaIpcMemHandle_t> handles_;
@@ -62,14 +63,15 @@ private:
 public:
   ColocatedDirectAccessRecver(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain);
 
-  void start_prepare(const std::vector<Message> &inbox);
+  ~ColocatedDirectAccessRecver();
+  
+  void start_prepare();
 
   void finish_prepare();
 
   void recv();
 
-  // once we are in the WAIT_KERNEL state, there's nothing else we need to do
-  bool active() { return state_ == State::WAIT_NOTIFY; }
+  bool active();
 
   bool next_ready();
 
