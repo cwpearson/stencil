@@ -20,6 +20,8 @@ private:
   std::vector<cudaIpcMemHandle_t> handles_;
   std::vector<void*> bufs_;
 
+  std::vector<Message> outbox_;
+
 public:
   ColocatedDirectAccessSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain);
 

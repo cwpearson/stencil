@@ -1,11 +1,17 @@
 #include "stencil/tx_colocated_direct_access.cuh"
 
+#include <nvToolsExt.h>
+
+#include <algorithm>
+
 ColocatedDirectAccessSender::ColocatedDirectAccessSender(int srcRank, int srcDom, int dstRank, int dstDom,
                                                          LocalDomain &domain)
     : srcRank_(srcRank), dstRank_(dstRank), srcDom_(srcDom), dstDom_(dstDom), domain_(&domain),
       stream_(domain.gpu(), RcStream::Priority::HIGH), ipcSender_(srcRank, srcDom, dstRank, dstDom, domain.gpu()) {}
 
 void ColocatedDirectAccessSender::start_prepare(const std::vector<Message> &outbox) {
+  outbox_ = outbox;
+  std::sort(outbox_.begin(), outbox_.end());
   if (0 == outbox.size()) {
     LOG_WARN("0-size ColocatedDirectAccessSender was created\n");
   }
@@ -24,7 +30,7 @@ void ColocatedDirectAccessSender::finish_prepare() {
   MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
 
   // convert to pointers
-  for (auto cudaIpcMemHandle_t &handle : handles_) {
+  for (cudaIpcMemHandle_t &handle : handles_) {
     void *ptr;
     CUDA_RUNTIME(cudaIpcOpenMemHandle(&ptr, handle, cudaIpcMemLazyEnablePeerAccess));
     bufs_.push_back(ptr);
@@ -35,40 +41,43 @@ void ColocatedDirectAccessSender::finish_prepare() {
 
 void ColocatedDirectAccessSender::send() {
 
-    nvtxRangePush("PeerSender::send");
+  nvtxRangePush("PeerSender::send");
 
-    // translate data with kernel
-    for (auto &msg : outbox_) {
-      const LocalDomain *srcDomain = domains_[msg.srcGPU_];
-      const LocalDomain *dstDomain = domains_[msg.dstGPU_];
-      const Dim3 dstSz = dstDomain->raw_size();
-      const Dim3 srcSz = srcDomain->raw_size();
-      const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
-      const Dim3 dstPos = dstDomain->halo_pos(msg.dir_ * -1, true /*exterior*/);
-      const Dim3 extent = srcDomain->halo_extent(msg.dir_);
-      RcStream &stream = streams_[srcDomain->gpu()];
-      const dim3 dimBlock = Dim3::make_block_dim(extent, 512 /*threads per block*/);
-      const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      assert(stream.device() == srcDomain->gpu());
-      CUDA_RUNTIME(cudaSetDevice(stream.device()));
-      assert(srcDomain->num_data() == dstDomain->num_data());
-      LOG_SPEW("multi_translate grid=" << dimGrid << " block=" << dimBlock);
-      multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos, dstSz,
-                                                        srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
-                                                        srcDomain->dev_elem_sizes(), srcDomain->num_data());
-      CUDA_RUNTIME(cudaGetLastError());
-    }
+  // translate data with kernel
+  for (auto &msg : outbox_) {
 
-    nvtxRangePop(); // PeerSender::send
+    // get the source index
+
+    // compute the dst index
+
+    // determine the size of the destination
+
+#if 0
+    const LocalDomain *srcDomain = domains_[msg.srcGPU_];
+    const LocalDomain *dstDomain = domains_[msg.dstGPU_];
+    const Dim3 srcSz = srcDomain->raw_size();
+    const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
+    const Dim3 dstSz = dstDomain->raw_size();
+    const Dim3 dstPos = dstDomain->halo_pos(msg.dir_ * -1, true /*exterior*/);
+    const Dim3 extent = srcDomain->halo_extent(msg.dir_);
+    RcStream &stream = streams_[srcDomain->gpu()];
+    const dim3 dimBlock = Dim3::make_block_dim(extent, 512 /*threads per block*/);
+    const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+    assert(stream.device() == srcDomain->gpu());
+    CUDA_RUNTIME(cudaSetDevice(stream.device()));
+    assert(srcDomain->num_data() == dstDomain->num_data());
+    LOG_SPEW("multi_translate grid=" << dimGrid << " block=" << dimBlock);
+    multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos, dstSz,
+                                                      srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
+                                                      srcDomain->dev_elem_sizes(), srcDomain->num_data());
+    CUDA_RUNTIME(cudaGetLastError());
+#endif
   }
 
-  void ColocatedDirectAccessSender::wait() {
+  nvtxRangePop(); // PeerSender::send
+}
 
-    for (auto &kv : streams_) {
-      CUDA_RUNTIME(cudaSetDevice(kv.second.device()));
-      CUDA_RUNTIME(cudaStreamSynchronize(kv.second));
-    }
-  }
+void ColocatedDirectAccessSender::wait() {}
 
 ColocatedDirectAccessRecver::ColocatedDirectAccessRecver(int srcRank, int srcDom, int dstRank, int dstDom,
                                                          LocalDomain &domain)
