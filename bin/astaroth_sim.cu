@@ -159,7 +159,7 @@ int main(int argc, char **argv) {
     methods |= MethodFlags::CudaAwareMpi;
   }
   if (result["colocated"].as<bool>()) {
-    methods |= MethodFlags::CudaMpiColocated;
+    methods |= MethodFlags::ColoPackMemcpyUnpack;
   }
   if (result["peer"].as<bool>()) {
     methods |= MethodFlags::CudaMemcpyPeer;

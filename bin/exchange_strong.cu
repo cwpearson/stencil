@@ -89,7 +89,7 @@ int main(int argc, char **argv) {
   }
 #endif
   if (useColo) {
-    methods |= MethodFlags::CudaMpiColocated;
+    methods |= MethodFlags::ColoPackMemcpyUnpack;
   }
   if (usePeer) {
     methods |= MethodFlags::CudaMemcpyPeer;
@@ -164,7 +164,7 @@ int main(int argc, char **argv) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "cuda-aware";
       }
-      if (methods && MethodFlags::CudaMpiColocated) {
+      if (methods && MethodFlags::ColoPackMemcpyUnpack) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "colo";
       }
@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
           dd.domains()[0].size().y,
           dd.domains()[0].size().z,
           dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
-          dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated),
+          dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack),
           dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
           dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, stats.trimean());
     }

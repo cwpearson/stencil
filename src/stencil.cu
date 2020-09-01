@@ -133,8 +133,8 @@ uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method)
   if ((method && MethodFlags::CudaMpi) || (method && MethodFlags::CudaAwareMpi)) {
     ret += numBytesCudaMpi_;
   }
-  if (method && MethodFlags::CudaMpiColocated) {
-    ret += numBytesCudaMpiColocated_;
+  if (method && MethodFlags::ColoPackMemcpyUnpack) {
+    ret += numBytesColoPackMemcpyUnpack_;
   }
   if (method && MethodFlags::CudaMemcpyPeer) {
     ret += numBytesCudaMemcpyPeer_;
@@ -331,7 +331,7 @@ void DistributedDomain::realize() {
           Ultimately, we'd like to be able to figure this out even in the presence of CUDA_VISIBLE_DEVICES making each
           rank have a different CUDA device 0 Then, we could restrict CPU code to run on CPUs nearby to the GPU
           */
-          if (any_methods(MethodFlags::CudaMpiColocated)) {
+          if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
               coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
@@ -372,7 +372,7 @@ void DistributedDomain::realize() {
               goto recv_planned;
             }
           }
-          if (any_methods(MethodFlags::CudaMpiColocated)) {
+          if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
             if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) && gpu_topo::peer(srcDev, myDev)) {
               assert(di < coloInboxes.size());
               coloInboxes[di].emplace(srcIdx, std::vector<Message>());
@@ -448,7 +448,7 @@ to be loaded with numpy.loadtxt
   {
 #ifdef STENCIL_SETUP_STATS
     numBytesCudaMpi_ = 0;
-    numBytesCudaMpiColocated_ = 0;
+    numBytesColoPackMemcpyUnpack_ = 0;
     numBytesCudaMemcpyPeer_ = 0;
     numBytesCudaKernel_ = 0;
 #endif
@@ -513,7 +513,7 @@ to be loaded with numpy.loadtxt
 #ifdef STENCIL_SETUP_STATS
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
-            numBytesCudaMpiColocated_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
+            numBytesColoPackMemcpyUnpack_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
           }
 #endif
         }
@@ -545,14 +545,14 @@ to be loaded with numpy.loadtxt
 #ifdef STENCIL_SETUP_STATS
     nvtxRangePush("allreduce communication stats");
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMpi_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
-    MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMpiColocated_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &numBytesColoPackMemcpyUnpack_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMemcpyPeer_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaKernel_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
     nvtxRangePop();
 
     if (rank_ == 0) {
       LOG_INFO(numBytesCudaMpi_ << "B CudaMpi / exchange");
-      LOG_INFO(numBytesCudaMpiColocated_ << "B CudaMpiColocated / exchange");
+      LOG_INFO(numBytesColoPackMemcpyUnpack_ << "B ColoPackMemcpyUnpack / exchange");
       LOG_INFO(numBytesCudaMemcpyPeer_ << "B CudaMemcpyPeer / exchange");
       LOG_INFO(numBytesCudaKernel_ << "B CudaKernel / exchange");
     }

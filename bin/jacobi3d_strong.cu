@@ -175,7 +175,7 @@ if (parser.need_help()) {
     methods |= MethodFlags::CudaAwareMpi;
   }
   if (useColo) {
-    methods |= MethodFlags::CudaMpiColocated;
+    methods |= MethodFlags::ColoPackMemcpyUnpack;
   }
   if (useMemcpyPeer) {
     methods |= MethodFlags::CudaMemcpyPeer;
@@ -354,7 +354,7 @@ if (parser.need_help()) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "cuda-aware";
       }
-      if (methods && MethodFlags::CudaMpiColocated) {
+      if (methods && MethodFlags::ColoPackMemcpyUnpack) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "colo";
       }
@@ -369,7 +369,7 @@ if (parser.need_help()) {
 
       std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
                 << dd.exchange_bytes_for_method(MethodFlags::CudaMpi) << ","
-                << dd.exchange_bytes_for_method(MethodFlags::CudaMpiColocated) << ","
+                << dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack) << ","
                 << dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer) << ","
                 << dd.exchange_bytes_for_method(MethodFlags::CudaKernel) << "," << iterTime.min() << ","
                 << iterTime.trimean() << "\n";

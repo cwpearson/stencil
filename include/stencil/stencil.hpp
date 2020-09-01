@@ -30,13 +30,14 @@ enum class MethodFlags {
   None = 0,
   CudaMpi = 1,
   CudaAwareMpi = 2,
-  CudaMpiColocated = 4,
-  CudaMemcpyPeer = 8,
-  CudaKernel = 16,
+  ColoPackMemcpyUnpack = 4,
+  ColoDirectAccess = 8,
+  CudaMemcpyPeer = 16,
+  CudaKernel = 32,
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
-  All = 1 + 2 + 4 + 8 + 16
+  All = 1 + 2 + 4 + 8 + 16 + 32
 #else
-  All = 1 + 4 + 8 + 16
+  All = 1 + 4 + 8 + 16 + 32
 #endif
 };
 static_assert(sizeof(MethodFlags) == sizeof(int), "int");
@@ -109,7 +110,7 @@ private:
 #ifdef STENCIL_SETUP_STATS
   // count of how many bytes are sent through various methods in each exchange
   uint64_t numBytesCudaMpi_;
-  uint64_t numBytesCudaMpiColocated_;
+  uint64_t numBytesColoPackMemcpyUnpack_;
   uint64_t numBytesCudaMemcpyPeer_;
   uint64_t numBytesCudaKernel_;
 #endif

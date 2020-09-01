@@ -25,7 +25,7 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const size_t nQuants,
   }
   MethodFlags methods = MethodFlags::None;
   methods |= MethodFlags::CudaMpi;
-  methods |= MethodFlags::CudaMpiColocated;
+  methods |= MethodFlags::ColoPackMemcpyUnpack;
   methods |= MethodFlags::CudaMemcpyPeer;
   methods |= MethodFlags::CudaKernel;
   dd.set_methods(methods);

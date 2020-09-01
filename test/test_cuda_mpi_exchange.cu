@@ -34,7 +34,7 @@ __global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
 
 /* check an exchange that supports the given kernel radius
  */
-static void check_exchange(const Radius &radius) {
+static void check_exchange(const Radius &radius, const MethodFlags methods) {
 
   int rank;
   int size;
@@ -50,7 +50,7 @@ static void check_exchange(const Radius &radius) {
 
   dd.set_radius(radius);
   auto dh1 = dd.add_data<Q1>("d0");
-  dd.set_methods(MethodFlags::CudaMpi);
+  dd.set_methods(methods);
 
   INFO("realize");
   dd.realize();
@@ -192,28 +192,28 @@ static void check_exchange(const Radius &radius) {
 
 TEST_CASE("exchange2") {
 
-  SECTION("r=0") { check_exchange(Radius::constant(0)); }
+  SECTION("r=0") { check_exchange(Radius::constant(0), MethodFlags::CudaMpi); }
 
-  SECTION("r=1") { check_exchange(Radius::constant(1)); }
+  SECTION("r=1") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi); }
 
-  SECTION("r=2") { check_exchange(Radius::constant(2)); }
+  SECTION("r=2") { check_exchange(Radius::constant(2), MethodFlags::CudaMpi); }
 
   SECTION("+x=2") {
     Radius r = Radius::constant(0);
     r.dir(1, 0, 0) = 2;
-    check_exchange(r);
+    check_exchange(r, MethodFlags::CudaMpi);
   }
 
   SECTION("mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
     r.dir(-1, 0, 0) = 1;
-    check_exchange(r);
+    check_exchange(r, MethodFlags::CudaMpi);
   }
 
   SECTION("+x=2, mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
     r.dir(1, 0, 0) = 2;
     r.dir(-1, 0, 0) = 1;
-    check_exchange(r);
+    check_exchange(r, MethodFlags::CudaMpi);
   }
 }
