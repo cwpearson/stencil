@@ -136,6 +136,10 @@ public:
     return currDataPtrs_[idx];
   }
 
+  const std::vector<void*> &curr_datas() const noexcept {
+    return currDataPtrs_;
+  }
+
   void **dev_curr_datas() const { return devCurrDataPtrs_; }
 
   void *next_data(size_t idx) const {
