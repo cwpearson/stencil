@@ -6,12 +6,6 @@
 
 #include <cassert>
 
-int ipc_tag_payload(int a, int b) noexcept {
-  assert(a >= 0 && a <= 0xFF);
-  assert(b >= 0 && b <= 0xFF);
-  return ((a & 0xFF) << 8) | (b & 0xFF);
-}
-
 IpcSender::IpcSender() : event_(0) {}
 IpcSender::IpcSender(int srcRank, int srcDom, int dstRank, int dstDom, int srcDev)
     : srcRank_(srcRank), dstRank_(dstRank), srcDom_(srcDom), dstDom_(dstDom), srcDev_(srcDev), dstDev_(-1), event_(0) {}
