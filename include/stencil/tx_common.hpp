@@ -2,8 +2,13 @@
 
 #include "stencil/dim3.hpp"
 
+#include <cassert>
 #include <climits>
 #include <iostream>
+
+/* construct a payload that can fit in an MPI tag
+ */
+inline uint16_t ipc_tag_payload(uint8_t a, uint8_t b) noexcept { return (uint16_t(a) << 8) | uint16_t(b); }
 
 class Message {
 private:
@@ -11,8 +16,7 @@ public:
   Dim3 dir_;
   int srcGPU_;
   int dstGPU_;
-  Message(Dim3 dir, int srcGPU, int dstGPU)
-      : dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
+  Message(Dim3 dir, int srcGPU, int dstGPU) : dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
 
   bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
   bool operator==(const Message &rhs) const noexcept {
@@ -33,8 +37,7 @@ enum class MsgKind {
   We have observed systems where the max tag value is 1 << 23, so we only use
   23 bits here.
 */
-template <MsgKind kind>
-inline int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
+template <MsgKind kind> inline int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
   int ret = 0;
 
   // bit 31 is 0
@@ -82,8 +85,7 @@ inline int make_tag(int gpu, int idx, Dim3 dir) {
   constexpr int GPU_BITS = 8;
   constexpr int DIR_BITS = 7;
 
-  static_assert(DIR_BITS + GPU_BITS + IDX_BITS < sizeof(int) * CHAR_BIT,
-                "too many bits");
+  static_assert(DIR_BITS + GPU_BITS + IDX_BITS < sizeof(int) * CHAR_BIT, "too many bits");
   static_assert(DIR_BITS >= 6, "not enough bits");
   assert(gpu < (1 << GPU_BITS));
   assert(idx < (1 << IDX_BITS));
