@@ -11,6 +11,7 @@ project(stencil LANGUAGES CXX VERSION 0.1.0.0)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 include(CheckLanguage)
+include(CheckCXXCompilerFlag)
 message(STATUS "Build type: " ${CMAKE_BUILD_TYPE})
 
 option(USE_MPI "compile with MPI support" ON)
@@ -127,7 +128,8 @@ $<$<COMPILE_LANGUAGE:CUDA>:
 >
 )
 
-
+check_cxx_compiler_flag(-march=native CXX_HAS_MARCH)
+check_cxx_compiler_flag(-mcpu=native CXX_HAS_MCPU)
 if (CMAKE_BUILD_TYPE MATCHES Debug)
   target_compile_options(
     stencil
@@ -147,6 +149,31 @@ elseif (CMAKE_BUILD_TYPE MATCHES Release)
     INTERFACE
     $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
   )
+# always apply mtune
+  target_compile_options(
+    stencil
+    PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mtune=native>
+    $<$<COMPILE_LANGUAGE:CXX>:-mtune=native>
+  )
+  # prefer march=native, but fallback to mcpu=native
+  if (CXX_HAS_MARCH)
+    message(STATUS "-march=native detected")
+    target_compile_options(
+      stencil
+      PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-march=native>
+      $<$<COMPILE_LANGUAGE:CXX>:-march=native>
+    )
+  elseif (CXX_HAS_MCPU)
+    message(STATUS "-mcpu=native instead of -march=native")
+    target_compile_options(
+      stencil
+      PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mcpu=native>
+      $<$<COMPILE_LANGUAGE:CXX>:-mcpu=native>
+    )
+  endif()
 endif()
 
 if (USE_CUDA_AWARE_MPI)
