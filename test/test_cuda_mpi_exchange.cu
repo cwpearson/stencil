@@ -217,3 +217,15 @@ TEST_CASE("exchange2") {
     check_exchange(r, MethodFlags::CudaMpi);
   }
 }
+
+#if 0
+TEST_CASE("exchange3") {
+
+  SECTION("+x=2, mx=1") { // -x doesnt work as a section on CLI
+    Radius r = Radius::constant(0);
+    r.dir(1, 0, 0) = 2;
+    r.dir(-1, 0, 0) = 1;
+    check_exchange(r, MethodFlags::ColoDirectAccess);
+  }
+}
+#endif

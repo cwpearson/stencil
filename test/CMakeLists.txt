@@ -26,6 +26,7 @@ if (CMAKE_CUDA_COMPILER)
       test_cuda_packer.cu
       test_cuda_rcstream.cu
       test_cuda_translate.cu
+      test_cuda_translate_kernel.cu
     )
     target_include_directories(test_cuda SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda stencil)
