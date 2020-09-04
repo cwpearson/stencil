@@ -84,8 +84,11 @@ else()
   message(FATAL_ERROR "unrecognized value of STENCIL_OUTPUT_LEVEL: "  ${STENCIL_OUTPUT_LEVEL}  ", must be one of SPEW DEBUG INFO WARN ERROR FATAL")
 endif()
 
-target_compile_features(stencil PUBLIC cxx_std_11)
-target_compile_features(stencil PUBLIC cuda_std_11)
+set_property(TARGET stencil PROPERTY CXX_STANDARD 11)
+set_property(TARGET stencil PROPERTY CXX_EXTENSIONS OFF)
+set_property(TARGET stencil PROPERTY CXX_STANDARD_REQUIRED ON)
+set_property(TARGET stencil PROPERTY CUDA_STANDARD 11)
+set_property(TARGET stencil PROPERTY CUDA_STANDARD_REQUIRED ON)
 
 target_compile_options(stencil PRIVATE
 $<$<COMPILE_LANGUAGE:CXX>:
@@ -149,14 +152,14 @@ elseif (CMAKE_BUILD_TYPE MATCHES Release)
     INTERFACE
     $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo>
   )
-# always apply mtune
+  # always apply mtune
   target_compile_options(
     stencil
     PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mtune=native>
     $<$<COMPILE_LANGUAGE:CXX>:-mtune=native>
   )
-  # prefer march=native, but fallback to mcpu=native
+  # prefer march=native, but fallback to mcpu=native if needed
   if (CXX_HAS_MARCH)
     message(STATUS "-march=native detected")
     target_compile_options(
