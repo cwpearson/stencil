@@ -8,56 +8,38 @@
 
 #include "stencil/stencil.hpp"
 
-/*! set dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
-and halo to -10
-*/
+/*! set compute region to dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
+ */
 template <typename T>
-__global__ void init_kernel(T *dst,             //<! [out] pointer to beginning of allocation
-                            const Dim3 origin,  //<! [in] origin of compute region
-                            const Dim3 rawSz,   //<! [in] 3D size of the allocation
-                            const double period //<! sin wave period
+__global__ void init_kernel(Accessor<T> dst,    //<! [out] pointer to beginning of allocation
+                            const Rect3 cr,     //<! [in] compute region
+                            const double period //<! [in] sine wave period
 ) {
 
   constexpr size_t radius = 3;
-  const Dim3 domSz = rawSz - Dim3(2 * radius, 2 * radius, 2 * radius);
 
-  const size_t gdz = gridDim.z;
-  const size_t biz = blockIdx.z;
-  const size_t bdz = blockDim.z;
-  const size_t tiz = threadIdx.z;
+  const int gdz = gridDim.z;
+  const int biz = blockIdx.z;
+  const int bdz = blockDim.z;
+  const int tiz = threadIdx.z;
 
-  const size_t gdy = gridDim.y;
-  const size_t biy = blockIdx.y;
-  const size_t bdy = blockDim.y;
-  const size_t tiy = threadIdx.y;
+  const int gdy = gridDim.y;
+  const int biy = blockIdx.y;
+  const int bdy = blockDim.y;
+  const int tiy = threadIdx.y;
 
-  const size_t gdx = gridDim.x;
-  const size_t bix = blockIdx.x;
-  const size_t bdx = blockDim.x;
-  const size_t tix = threadIdx.x;
+  const int gdx = gridDim.x;
+  const int bix = blockIdx.x;
+  const int bdx = blockDim.x;
+  const int tix = threadIdx.x;
 
-#ifndef _at
-#define _at(arr, _x, _y, _z) arr[_z * rawSz.y * rawSz.x + _y * rawSz.x + _x]
-#else
-#error "_at already defined"
-#endif
-  for (size_t z = biz * bdz + tiz; z < rawSz.z; z += gdz * bdz) {
-    for (size_t y = biy * bdy + tiy; y < rawSz.y; y += gdy * bdy) {
-      for (size_t x = bix * bdx + tix; x < rawSz.x; x += gdx * bdx) {
-
-        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius && y < rawSz.y - radius &&
-            x < rawSz.x - radius) {
-          _at(dst, x, y, z) = sin(2 * 3.14159 / period * (origin.x + x) + 2 * 3.14159 / period * (origin.y + y) +
-                                  2 * 3.14159 / period * (origin.z + z));
-
-        } else {
-          _at(dst, x, y, z) = -10;
-        }
+  for (int64_t z = cr.lo.z + biz * bdz + tiz; z < cr.hi.z; z += gdz * bdz) {
+    for (int64_t y = cr.lo.y + biy * bdy + tiy; y < cr.hi.y; y += gdy * bdy) {
+      for (int64_t x = cr.lo.x + bix * bdx + tix; x < cr.hi.x; x += gdx * bdx) {
+        dst[Dim3(x, y, z)] = sin(2 * 3.14159 / period * x + 2 * 3.14159 / period * y + 2 * 3.14159 / period * z);
       }
     }
   }
-
-#undef _at
 }
 
 /* Apply the stencil to the coordinates in `reg`
@@ -210,7 +192,7 @@ int main(int argc, char **argv) {
       d.set_device();
       dim3 dimBlock = Dim3::make_block_dim(d.raw_size(), 512);
       dim3 dimGrid = ((d.raw_size()) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      init_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(d.get_curr(dh0), d.origin(), d.raw_size(), 10);
+      init_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(d.get_curr_accessor(dh0), d.get_compute_region(), 10);
       CUDA_RUNTIME(cudaDeviceSynchronize());
     }
 
