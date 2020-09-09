@@ -51,6 +51,10 @@ TEST_CASE("derivative") {
   auto dh1 = dd.add_data<Q1>("d0");
   dd.set_methods(MethodFlags::CudaMpi);
 
+  // only use GPU 0 on a multi-GPU machine
+  // otherwise, modify the expected sizes below
+  dd.set_gpus({0});
+
   INFO("realize");
   dd.realize();
 
@@ -77,8 +81,6 @@ TEST_CASE("derivative") {
     std::cout << "init extent " << ext << "\n";
 
     d.set_device();
-    dimGrid = 1;
-    dimBlock = 1;
     init_kernel<<<dimGrid, dimBlock>>>(acc, ext);
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
@@ -108,6 +110,7 @@ TEST_CASE("derivative") {
       Rect3 rect = d.get_compute_region();
       std::cerr << "compute region =" << rect << "\n";
 
+#if 0
       const int64_t z = 3;
       for (int64_t y = rect.lo.y; y < rect.hi.y; ++y) {
         for (int64_t x = rect.lo.x; x < rect.hi.x; ++x) {
@@ -118,12 +121,11 @@ TEST_CASE("derivative") {
         }
         std::cerr << "\n";
       }
-
+#endif
       for (int64_t z = rect.lo.z; z < rect.hi.z; ++z) {
         for (int64_t y = rect.lo.y; y < rect.hi.y; ++y) {
           for (int64_t x = rect.lo.x; x < rect.hi.x; ++x) {
             Dim3 p(x, y, z);
-            std::cerr << p << "\n";
             const Q1 ripple[4] = {0, 0.25, 0, -0.25};
             const size_t period = sizeof(ripple) / sizeof(ripple[0]);
             Q1 val = acc[p];
