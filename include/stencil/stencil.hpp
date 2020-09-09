@@ -26,6 +26,7 @@
 #include "stencil/tx.hpp"
 #include "stencil/tx_colocated_direct_access.cuh"
 #include "stencil/tx_cuda.cuh"
+#include "stencil/pitched_ptr.hpp"
 
 enum class MethodFlags {
   None = 0,
