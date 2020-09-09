@@ -48,6 +48,14 @@ To run specific tests
 test/test_cpu "<case name>" -c "<section name>"
 ```
 
+It may be useful to run tests under `cuda-memcheck`.
+`cuda-memcheck` may report spurious errors from `cudaDeviceEnablePeerAccess`, so we disable reporting API errors.
+All API calls are checked at runtime at all optimization levels, so errors will always surface.
+
+```
+cuda-memcheck --report-api-errors no test/test_cuda
+```
+
 Some tests are tagged:
 
 MPI tests only

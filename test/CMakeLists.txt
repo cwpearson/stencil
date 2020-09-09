@@ -15,7 +15,6 @@ add_test(NAME test_cpu COMMAND ${MPIEXEC_EXECUTABLE} -n 1 test_cpu -a)
 
 if (CMAKE_CUDA_COMPILER)
     add_executable(test_cuda test_cuda_main.cu 
-
       test_cuda_align.cu
       test_cuda_allocator.cu
       test_cuda_array.cu 
@@ -32,7 +31,7 @@ if (CMAKE_CUDA_COMPILER)
     target_include_directories(test_cuda SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda stencil)
     set_property(TARGET test_cuda PROPERTY CUDA_SEPARABLE_COMPILATION ON)
-    add_test(NAME test_cuda COMMAND ${MPIEXEC_EXECUTABLE} -n 1 cuda-memcheck test_cuda -a)
+    add_test(NAME test_cuda COMMAND ${MPIEXEC_EXECUTABLE} -n 1 cuda-memcheck --report-api-errors no test_cuda -a)
 endif()
 
 if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
@@ -47,7 +46,7 @@ if (CMAKE_CUDA_COMPILER AND MPI_FOUND)
     target_include_directories(test_cuda_mpi SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
     target_link_libraries(test_cuda_mpi stencil)
     set_property(TARGET test_cuda_mpi PROPERTY CUDA_SEPARABLE_COMPILATION ON)
-    add_test(NAME test_cuda_mpi COMMAND ${MPIEXEC_EXECUTABLE} -n 2 cuda-memcheck test_cuda_mpi -a)
+    add_test(NAME test_cuda_mpi COMMAND ${MPIEXEC_EXECUTABLE} -n 2 cuda-memcheck --report-api-errors no test_cuda_mpi -a)
 endif()
 
 
