@@ -75,8 +75,6 @@ public:
     for (auto &msg : outbox_) {
       const LocalDomain *srcDomain = domains_[msg.srcGPU_];
       const LocalDomain *dstDomain = domains_[msg.dstGPU_];
-      const Dim3 dstSz = dstDomain->raw_size();
-      const Dim3 srcSz = srcDomain->raw_size();
       const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
       const Dim3 dstPos = dstDomain->halo_pos(msg.dir_ * -1, true /*exterior*/);
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
@@ -87,8 +85,8 @@ public:
       CUDA_RUNTIME(cudaSetDevice(stream.device()));
       assert(srcDomain->num_data() == dstDomain->num_data());
       LOG_SPEW("multi_translate grid=" << dimGrid << " block=" << dimBlock);
-      multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos, dstSz,
-                                                        srcDomain->dev_curr_datas(), srcPos, srcSz, extent,
+      multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos,
+                                                        srcDomain->dev_curr_datas(), srcPos, extent,
                                                         srcDomain->dev_elem_sizes(), srcDomain->num_data());
       CUDA_RUNTIME(cudaGetLastError());
     }
@@ -341,7 +339,7 @@ public:
    Pros: the recver does not need an event to wait on.
    Cons: this send has to complete before we can start issuing recvs
 */
-class ColocatedHaloSender {
+class ColocatedHaloSender : public StatefulSender {
 private:
   LocalDomain *domain_;
   int srcRank_;
@@ -355,7 +353,7 @@ public:
       : domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), packer_(stream_),
         sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
 
-  void start_prepare(const std::vector<Message> &outbox) {
+  void start_prepare(const std::vector<Message> &outbox) override {
     packer_.prepare(domain_, outbox);
     if (0 == packer_.size()) {
       std::cerr << "WARN: 0-size ColocatedHaloSender was created\n";
@@ -363,14 +361,19 @@ public:
     sender_.start_prepare(packer_.size());
   }
 
-  void finish_prepare() { sender_.finish_prepare(); }
+  void finish_prepare() override { sender_.finish_prepare(); }
 
-  void send() noexcept {
+  void send() noexcept override {
     packer_.pack();
     sender_.send(packer_.data(), stream_);
   }
 
-  void wait() noexcept { sender_.wait(); }
+  void wait() noexcept override { sender_.wait(); }
+
+  // unused, but filling StatefulSender interface
+  bool active() override { return false; }
+  bool next_ready() override { return false; }
+  void next() override{};
 };
 
 /* The receiver is stateful because it can't start to wait on the
@@ -378,7 +381,7 @@ public:
    So, we wait on a message saying the event has been recorded,
    then we can transition to waiting on the event itself
 */
-class ColocatedHaloRecver {
+class ColocatedHaloRecver : public StatefulRecver {
 private:
   int srcRank_;
   int srcGPU_;
@@ -408,7 +411,7 @@ public:
         stream_(domain.gpu(), RcStream::Priority::HIGH), recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
         unpacker_(stream_), state_(State::NONE) {}
 
-  void start_prepare(const std::vector<Message> &inbox) {
+  void start_prepare(const std::vector<Message> &inbox) override {
     unpacker_.prepare(domain_, inbox);
     if (0 == unpacker_.size()) {
       std::cerr << "WARN: a 0-size ColocatedHaloRecver was created\n";
@@ -416,9 +419,9 @@ public:
     recver_.start_prepare(unpacker_.data());
   }
 
-  void finish_prepare() { recver_.finish_prepare(); }
+  void finish_prepare() override { recver_.finish_prepare(); }
 
-  void recv() {
+  void recv() override {
     assert(State::NONE == state_);
     state_ = State::WAIT_NOTIFY;
 
@@ -428,9 +431,9 @@ public:
   }
 
   // once we are in the wait_copy state, there's nothing else we need to do
-  bool active() { return state_ == State::WAIT_NOTIFY; }
+  bool active() override { return state_ == State::WAIT_NOTIFY; }
 
-  bool next_ready() {
+  bool next_ready() override {
     if (State::WAIT_NOTIFY == state_) {
       return recver_.test_listen();
     } else { // should only be asked this in active() states
@@ -438,7 +441,7 @@ public:
     }
   }
 
-  void next() {
+  void next() override {
     if (State::WAIT_NOTIFY == state_) {
       // have device recver wait on its stream, and then unpack the data.
       // The device recver knows how to exchange with the
@@ -448,7 +451,7 @@ public:
     }
   }
 
-  void wait() noexcept {
+  void wait() noexcept override {
     // wait on unpacker
     assert(stream_.device() == domain_->gpu());
     CUDA_RUNTIME(cudaSetDevice(stream_.device()));
@@ -491,7 +494,7 @@ public:
 
    If the outbox is empty, the packer may be size 0
    */
-  virtual void prepare(std::vector<Message> &outbox) override {
+  void start_prepare(const std::vector<Message> &outbox) override {
 
     LOG_INFO(outbox.size() << "-size outbox provided to RemoteSender "
                            << "r" << srcRank_ << "d" << srcGPU_ << "->"
@@ -510,6 +513,10 @@ public:
       CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, packer_.size(), cudaHostAllocDefault));
       assert(hostBuf_);
     }
+  }
+
+  void finish_prepare() override {
+    // no-op
   }
 
   virtual void send() override {
@@ -633,7 +640,7 @@ public:
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
    */
-  virtual void prepare(std::vector<Message> &inbox) override {
+  virtual void start_prepare(const std::vector<Message> &inbox) override {
     unpacker_.prepare(domain_, inbox);
     if (0 == unpacker_.size()) {
       LOG_INFO("0-size RemoteRecver was prepared");
@@ -644,6 +651,10 @@ public:
       CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, unpacker_.size(), cudaHostAllocDefault));
       assert(hostBuf_);
     }
+  }
+
+  virtual void finish_prepare() override {
+    // no-op
   }
 
   virtual void recv() override {
@@ -751,11 +762,15 @@ public:
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain),
         stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), packer_(stream_) {}
 
-  virtual void prepare(std::vector<Message> &outbox) override {
+  virtual void start_prepare(const std::vector<Message> &outbox) override {
     packer_.prepare(domain_, outbox);
     if (0 == packer_.size()) {
       LOG_FATAL("a 0-size CudaAwareMpiSender was prepared");
     }
+  }
+
+  virtual void finish_prepare() override {
+    // no-op
   }
 
   virtual void send() override {
@@ -853,11 +868,15 @@ public:
   /*! Prepare to send a set of messages whose direction vectors are store in
    * outbox
    */
-  void prepare(std::vector<Message> &inbox) {
+  void start_prepare(const std::vector<Message> &inbox) override {
     unpacker_.prepare(domain_, inbox);
     if (0 == unpacker_.size()) {
       LOG_FATAL("a 0-size CudaAwareMpiRecver was created");
     }
+  }
+
+  void finish_prepare() override {
+    // no-op
   }
 
   virtual void recv() override {

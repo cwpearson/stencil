@@ -12,7 +12,6 @@ set(STENCIL_SOURCES ${STENCIL_SOURCES}
   ${CMAKE_CURRENT_LIST_DIR}/translate.cu
   ${CMAKE_CURRENT_LIST_DIR}/tx_colocated_direct_access.cu
   ${CMAKE_CURRENT_LIST_DIR}/tx_ipc.cpp
-  ${CMAKE_CURRENT_LIST_DIR}/unpack_kernel.cu
 )
 
 set(STENCIL_SOURCES 

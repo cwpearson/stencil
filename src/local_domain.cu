@@ -10,15 +10,15 @@ LocalDomain::~LocalDomain() {
 
   CUDA_RUNTIME(cudaSetDevice(dev_));
   for (auto p : currDataPtrs_) {
-    if (p)
-      CUDA_RUNTIME(cudaFree(p));
+    if (p.ptr)
+      CUDA_RUNTIME(cudaFree(p.ptr));
   }
   if (devCurrDataPtrs_)
     CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
 
   for (auto p : nextDataPtrs_) {
-    if (p)
-      CUDA_RUNTIME(cudaFree(p));
+    if (p.ptr)
+      CUDA_RUNTIME(cudaFree(p.ptr));
   }
   if (devDataElemSize_)
     CUDA_RUNTIME(cudaFree(devDataElemSize_));
@@ -127,20 +127,22 @@ std::vector<unsigned char> LocalDomain::region_to_host(const Dim3 &pos, const Di
 
   const size_t bytes = elem_size(qi) * ext.flatten();
 
-  // pack quantity
+  // pack quantity into device buffer
   CUDA_RUNTIME(cudaSetDevice(gpu()));
   void *devBuf = nullptr;
   CUDA_RUNTIME(cudaMalloc(&devBuf, bytes));
-  const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
-  const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-  pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr_data(qi), raw_size(), pos, ext, elem_size(qi));
+  dim3 dimBlock = Dim3::make_block_dim(ext, 512);
+  dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+  const cudaPitchedPtr curr = curr_data(qi);
+  LOG_SPEW("region_to_host: packing pos=" << pos << " ext=" << ext << " pitch=" << curr.pitch << " xsize=" << curr.xsize);
+  dimGrid = 1;
+  dimBlock = 1;
+  pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr, pos, ext, elem_size(qi));
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
   // copy quantity to host
   std::vector<unsigned char> hostBuf(bytes);
   CUDA_RUNTIME(cudaMemcpy(hostBuf.data(), devBuf, hostBuf.size(), cudaMemcpyDefault));
-
-  float *ptr = reinterpret_cast<float *>(hostBuf.data());
 
   // free device buffer
   CUDA_RUNTIME(cudaFree(devBuf));
@@ -158,9 +160,6 @@ void LocalDomain::realize() {
 
   // allocate each data region
   CUDA_RUNTIME(cudaSetDevice(dev_));
-  // int rank;
-  // MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  // std::cerr << "r" << rank << " dev=" << dev_ << "\n";
   for (int64_t i = 0; i < num_data(); ++i) {
     assert(i < dataElemSize_.size());
     int64_t elemSz = dataElemSize_[i];
@@ -172,16 +171,16 @@ void LocalDomain::realize() {
     LOG_SPEW("radius +z=" << radius_.z(1));
     LOG_SPEW("radius -z=" << radius_.z(-1));
 
-    int64_t elemBytes = ((sz_.x + radius_.x(-1) + radius_.x(1)) * (sz_.y + radius_.y(-1) + radius_.y(1)) *
-                         (sz_.z + radius_.z(-1) + radius_.z(1))) *
-                        elemSz;
-    LOG_SPEW("allocate " << elemBytes << " bytes");
-    char *c = nullptr;
-    char *n = nullptr;
-    CUDA_RUNTIME(cudaMalloc(&c, elemBytes));
-    CUDA_RUNTIME(cudaMalloc(&n, elemBytes));
-    assert(uintptr_t(c) % elemSz == 0 && "allocation should be aligned");
-    assert(uintptr_t(n) % elemSz == 0 && "allocation should be aligned");
+    cudaExtent extent = make_cudaExtent(
+      extent.width = (sz_.x + radius_.x(-1) + radius_.x(1)) * elemSz,
+      extent.height = sz_.y + radius_.y(-1) + radius_.y(1),
+      extent.depth = sz_.z + radius_.z(-1) + radius_.z(1)
+    );
+
+    cudaPitchedPtr c = {}; // current
+    cudaPitchedPtr n = {}; // next
+    CUDA_RUNTIME(cudaMalloc3D(&c, extent));
+    CUDA_RUNTIME(cudaMalloc3D(&n, extent));
     currDataPtrs_[i] = c;
     nextDataPtrs_[i] = n;
   }

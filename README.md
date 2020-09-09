@@ -43,6 +43,11 @@ Install MPI and CUDA, then
 make && make test
 ```
 
+To run specific tests
+```
+test/test_cpu "<case name>" -c "<section name>"
+```
+
 Some tests are tagged:
 
 MPI tests only
@@ -198,17 +203,19 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
     * [x] Control which GPUs a distributed domain should use
       * `DistributedDomain::use_gpus(const std::vector<int> &gpus)` 
     * [x] Control which exchange method should be used
-  * v2
+  * v2 (next publication)
     * [x] ParaView output files `DistributedDomain::write_paraview(const std::string &prefix)`
     * [x] support uneven radius (branch=`feature/multi-radius`)
     * [x] "Accessor Object" for data
       * [x] Index according to point in compute domain
     * [x] Support overlapped computation and communication
       * interface for extracting interior/exterior of compute region for kernel invocations
+    * [ ] `cudaMemcpy3D`
+    * [ ] CUDA runtime timer
+    * [x] pitched allocation
   * v3
     * [ ] allow a manual partition before placement
       * constrain to single subdomain per GPU
-
   * future work
     * [ ] Autodetect CUDA-Aware MPI support
       * testing at build time with `ompi_info`
@@ -218,27 +225,22 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
     * [ ] selectable halo multiplier
       * fewer, larger messages and less frequent barriers
       * larger halo allocations
-    * [ ] pitched arrays
-      * hide in accessor
     * [ ] factor out placement solver code
 
-
+    
 * needs info
   * mesh refinement
     * we would rely on the user to specify the conditions
     * inferface for asking for refinement?
     * how to rebalance load and communication
-  * [ ] Remove requirement of CUDA (HPCG)
+
     * would require test machine with non-homogeneous intra-node communication
   * mapping multiple subdomains to each GPU
-
 * wontfix
-  * `cudaMemcpy3D`
-    * pros: good for up to 3D, supports pitched allocations
-    * cons: 4D will become a bunch of 3D transfers.
-    * fix: we will always pack/unpack into 1D buffer
   * [ ] Non-rectangular regions
     * probably getting to close to a general task-based runtime at that point (like Legion)
+  * [ ] Remove requirement of CUDA (HPCG)
+    * research vehicle for CUDA + MPI
 
 
 ## Interesting Things

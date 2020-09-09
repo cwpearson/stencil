@@ -3,39 +3,53 @@
 #include "stencil/local_domain.cuh"
 #include "stencil/partition.hpp"
 #include "stencil/rcstream.hpp"
+#include "stencil/translate.cuh"
 #include "stencil/tx_common.hpp"
 #include "stencil/tx_ipc.hpp"
 
-class ColocatedDirectAccessSender {
+class ColoDirectAccessHaloSender : public StatefulSender {
 private:
   int srcRank_, dstRank_;
   int srcDom_, dstDom_;
 
-  LocalDomain *domain_;
+  const LocalDomain *domain_;
   Placement *placement_;
   RcStream stream_;
   IpcSender ipcSender_;
+  Translate translate_;
 
   /* one memory handle per quantity
    */
   MPI_Request memReq_;
-  std::vector<cudaIpcMemHandle_t> handles_;
+  std::vector<cudaIpcMemHandle_t> memHandles_;
+
+  /* pitch information about quantities
+  */
+  MPI_Request ptrReq_;
+
+  std::vector<Message> outbox_;
 
   // pointers to the destination domain buffers
-  std::vector<void *> dstDomCurrDatas_;
-  void **dstDomCurrDatasDev_;
+  std::vector<cudaPitchedPtr> dstDomCurrDatas_;
+  cudaPitchedPtr *dstDomCurrDatasDev_;
 
 public:
-  ColocatedDirectAccessSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
-                              Placement *placement);
-  ~ColocatedDirectAccessSender();
-  void start_prepare();
-  void finish_prepare();
-  void send();
-  void wait();
+  ColoDirectAccessHaloSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
+                             Placement *placement);
+  ~ColoDirectAccessHaloSender();
+
+  void start_prepare(const std::vector<Message> &outbox) override;
+  void finish_prepare() override;
+  void send() override;
+  void wait() override;
+
+  // unused, but filling StatefulSender interface
+  bool active() override { return false; }
+  bool next_ready() override { return false; }
+  void next() override{};
 };
 
-class ColocatedDirectAccessRecver {
+class ColoDirectAccessHaloRecver : public StatefulRecver {
 private:
   int srcRank_;
   int srcDom_;
@@ -51,9 +65,12 @@ private:
   MPI_Request memReq_;
   std::vector<cudaIpcMemHandle_t> handles_;
 
+  // pitch information about quantities
+  MPI_Request ptrReq_;
+
   enum class State {
     NONE,        // ready to recv
-    WAIT_NOTIFY, // waiting on Irecv from ColocatedDirectAccessSender
+    WAIT_NOTIFY, // waiting on Irecv from ColoDirectAccessHaloSender
     WAIT_KERNEL  // waiting on sender kernel to complete
   };
   State state_;
@@ -61,21 +78,15 @@ private:
   char junk_; // to recv data into
 
 public:
-  ColocatedDirectAccessRecver(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain);
+  ColoDirectAccessHaloRecver(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain);
 
-  ~ColocatedDirectAccessRecver();
-  
-  void start_prepare();
+  ~ColoDirectAccessHaloRecver();
 
-  void finish_prepare();
-
+  void start_prepare(const std::vector<Message> &inbox) override;
+  void finish_prepare() override;
   void recv();
-
   bool active();
-
   bool next_ready();
-
   void next();
-
   void wait();
 };

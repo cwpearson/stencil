@@ -1,5 +1,7 @@
-#include "stencil/logging.hpp"
 #include "stencil/stencil.hpp"
+
+#include "stencil/logging.hpp"
+#include "stencil/tx_colocated_direct_access.cuh"
 
 #include <vector>
 
@@ -159,6 +161,23 @@ DistributedDomain::~DistributedDomain() {
       delete kv.second;
     }
   }
+  for (auto &m : coloSenders_) {
+    for (auto &kv : m) {
+      delete kv.second;
+    }
+  }
+  for (auto &m : coloRecvers_) {
+    for (auto &kv : m) {
+      delete kv.second;
+    }
+  }
+}
+
+void DistributedDomain::set_methods(MethodFlags flags) noexcept {
+  if ((flags && MethodFlags::ColoDirectAccess) && (flags && MethodFlags::ColoPackMemcpyUnpack)) {
+    LOG_FATAL("can't use Direct Access and Pack-Memcpy-Unpack for colocated ranks");
+  }
+  flags_ = flags;
 }
 
 void DistributedDomain::realize() {
@@ -240,7 +259,7 @@ void DistributedDomain::realize() {
   // one outbox for each co-located domain
   std::vector<std::map<Dim3, std::vector<Message>>> coloOutboxes;
   std::vector<std::map<Dim3, std::vector<Message>>> coloInboxes;
-  // coloOutboxed[di][dstRank] = messages
+  // coloOutboxes[di][dstRank] = messages
 
   // inbox for each remote domain my domains recv from
   std::vector<std::map<Dim3, std::vector<Message>>> remoteInboxes; // remoteOutboxes_[domain][srcIdx] = messages
@@ -331,12 +350,12 @@ void DistributedDomain::realize() {
           Ultimately, we'd like to be able to figure this out even in the presence of CUDA_VISIBLE_DEVICES making each
           rank have a different CUDA device 0 Then, we could restrict CPU code to run on CPUs nearby to the GPU
           */
-          if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
+          if (any_methods(MethodFlags::ColoPackMemcpyUnpack | MethodFlags::ColoDirectAccess)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
               coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
               coloOutboxes[di][dstIdx].push_back(sMsg);
-              LOG_DEBUG("mpi-colocated for Mesage dir=" << sMsg.dir_);
+              LOG_DEBUG("Plan send colocated for Mesage dir=" << sMsg.dir_);
               goto send_planned;
             }
           }
@@ -372,11 +391,13 @@ void DistributedDomain::realize() {
               goto recv_planned;
             }
           }
-          if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
+          if (any_methods(MethodFlags::ColoPackMemcpyUnpack | MethodFlags::ColoDirectAccess)) {
             if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) && gpu_topo::peer(srcDev, myDev)) {
               assert(di < coloInboxes.size());
               coloInboxes[di].emplace(srcIdx, std::vector<Message>());
               coloInboxes[di][srcIdx].push_back(sMsg);
+              LOG_SPEW("Plan recv <colo> " << srcIdx << "->" << myIdx << " (dir=" << dir << "): r" << dir * -1 << "="
+                                           << radius_.dir(dir * -1));
               goto recv_planned;
             }
           }
@@ -452,6 +473,7 @@ to be loaded with numpy.loadtxt
     numBytesCudaMemcpyPeer_ = 0;
     numBytesCudaKernel_ = 0;
 #endif
+    // FIXME: add outputPrefix_
     std::string planFileName = "plan_" + std::to_string(rank_) + ".txt";
     std::ofstream planFile(planFileName, std::ofstream::out);
 
@@ -564,7 +586,7 @@ to be loaded with numpy.loadtxt
   start = MPI_Wtime();
 #endif
   // create remote sender/recvers
-  std::cerr << "create remote\n";
+  LOG_DEBUG("create remote");
   nvtxRangePush("DistributedDomain::realize: create remote");
   // per-domain senders and messages
   remoteSenders_.resize(gpus_.size());
@@ -615,20 +637,30 @@ to be loaded with numpy.loadtxt
   // create all required colocated senders/recvers
   for (size_t di = 0; di < domains_.size(); ++di) {
     for (auto &kv : coloOutboxes[di]) {
+      StatefulSender *sender = nullptr;
       const Dim3 dstIdx = kv.first;
       const int dstRank = placement_->get_rank(dstIdx);
       const int dstGPU = placement_->get_subdomain_id(dstIdx);
-      std::cerr << "rank " << rank_ << " create ColoSender to " << dstIdx << " on " << dstRank << " (" << dstGPU
-                << ")\n";
-      coloSenders_[di].emplace(dstIdx, ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]));
+      LOG_DEBUG("create ColoSender to " << dstIdx << " on " << dstRank << " (" << dstGPU << ")");
+      if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
+        sender = new ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]);
+      } else if (any_methods(MethodFlags::ColoDirectAccess)) {
+        sender = new ColoDirectAccessHaloSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
+      }
+      coloSenders_[di].emplace(dstIdx, sender);
     }
     for (auto &kv : coloInboxes[di]) {
+      StatefulRecver *recver;
       const Dim3 srcIdx = kv.first;
       const int srcRank = placement_->get_rank(srcIdx);
       const int srcGPU = placement_->get_subdomain_id(srcIdx);
-      std::cerr << "rank " << rank_ << " create ColoRecver from " << srcIdx << " on " << srcRank << " (" << srcGPU
-                << ")\n";
-      coloRecvers_[di].emplace(srcIdx, ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]));
+      LOG_DEBUG("create ColoRecver from " << srcIdx << " on " << srcRank << " (" << srcGPU << ")");
+      if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
+        recver = new ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+      } else if (any_methods(MethodFlags::ColoDirectAccess)) {
+        recver = new ColoDirectAccessHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+      }
+      coloRecvers_[di].emplace(srcIdx, recver);
     }
   }
   nvtxRangePop(); // create colocated
@@ -665,42 +697,42 @@ to be loaded with numpy.loadtxt
   }
   nvtxRangePop();
   std::cerr << "DistributedDomain::realize: start_prepare "
-               "ColocatedHaloSender/ColocatedHaloRecver\n";
+               "ColocatedSender/ColocatedRecver\n";
   nvtxRangePush("DistributedDomain::realize: prep colocated");
   assert(coloSenders_.size() == coloRecvers_.size());
   for (size_t di = 0; di < coloSenders_.size(); ++di) {
     for (auto &kv : coloSenders_[di]) {
       const Dim3 dstIdx = kv.first;
       const int dstRank = placement_->get_rank(dstIdx);
-      auto &sender = kv.second;
+      StatefulSender *sender = kv.second;
       LOG_DEBUG(" colo sender.start_prepare " << placement_->get_idx(rank_, di) << "->" << dstIdx << "(rank " << dstRank
                                               << ")");
-      sender.start_prepare(coloOutboxes[di][dstIdx]);
+      sender->start_prepare(coloOutboxes[di][dstIdx]);
     }
     for (auto &kv : coloRecvers_[di]) {
       const Dim3 srcIdx = kv.first;
-      auto &recver = kv.second;
+      StatefulRecver *recver = kv.second;
       LOG_DEBUG(" colo recver.start_prepare " << srcIdx << "->" << placement_->get_idx(rank_, di));
-      recver.start_prepare(coloInboxes[di][srcIdx]);
+      recver->start_prepare(coloInboxes[di][srcIdx]);
     }
   }
-  LOG_DEBUG("DistributedDomain::realize: finish_prepare ColocatedHaloSender/ColocatedHaloRecver");
+  LOG_DEBUG("DistributedDomain::realize: finish_prepare ColocatedSender/ColocatedRecver");
   for (size_t di = 0; di < coloSenders_.size(); ++di) {
     for (auto &kv : coloSenders_[di]) {
       const Dim3 dstIdx = kv.first;
-      auto &sender = kv.second;
+      StatefulSender *sender = kv.second;
       const int srcDev = domains_[di].gpu();
       const int dstDev = placement_->get_cuda(dstIdx);
       LOG_DEBUG("colo sender.finish_prepare " << placement_->get_idx(rank_, di) << " -> " << dstIdx);
-      sender.finish_prepare();
+      sender->finish_prepare();
     }
     for (auto &kv : coloRecvers_[di]) {
-      auto &recver = kv.second;
+      StatefulRecver *recver = kv.second;
       LOG_DEBUG("colo recver.finish_prepare for colo from " << kv.first);
-      recver.finish_prepare();
+      recver->finish_prepare();
     }
   }
-  nvtxRangePop(); // prep colocated
+  nvtxRangePop(); // prep remote
   LOG_DEBUG("DistributedDomain::realize: prepare RemoteSender/RemoteRecver");
   nvtxRangePush("DistributedDomain::realize: prep remote");
   assert(remoteSenders_.size() == remoteRecvers_.size());
@@ -708,12 +740,24 @@ to be loaded with numpy.loadtxt
     for (auto &kv : remoteSenders_[di]) {
       const Dim3 dstIdx = kv.first;
       auto &sender = kv.second;
-      sender->prepare(remoteOutboxes[di][dstIdx]);
+      sender->start_prepare(remoteOutboxes[di][dstIdx]);
     }
     for (auto &kv : remoteRecvers_[di]) {
       const Dim3 srcIdx = kv.first;
       auto &recver = kv.second;
-      recver->prepare(remoteInboxes[di][srcIdx]);
+      recver->start_prepare(remoteInboxes[di][srcIdx]);
+    }
+  }
+  for (size_t di = 0; di < remoteSenders_.size(); ++di) {
+    for (auto &kv : remoteSenders_[di]) {
+      // const Dim3 dstIdx = kv.first;
+      StatefulSender *sender = kv.second;
+      sender->finish_prepare();
+    }
+    for (auto &kv : remoteRecvers_[di]) {
+      // const Dim3 srcIdx = kv.first;
+      StatefulRecver *recver = kv.second;
+      recver->finish_prepare();
     }
   }
   nvtxRangePop(); // prep remote
@@ -898,8 +942,8 @@ void DistributedDomain::exchange() {
   nvtxRangePush("DD::exchange: colo send");
   for (auto &domSenders : coloSenders_) {
     for (auto &kv : domSenders) {
-      ColocatedHaloSender &sender = kv.second;
-      sender.send();
+      StatefulSender *sender = kv.second;
+      sender->send();
     }
   }
   nvtxRangePop();
@@ -915,8 +959,8 @@ void DistributedDomain::exchange() {
   nvtxRangePush("DD::exchange: colo recv");
   for (auto &domRecvers : coloRecvers_) {
     for (auto &kv : domRecvers) {
-      ColocatedHaloRecver &recver = kv.second;
-      recver.recv();
+      StatefulRecver *recver = kv.second;
+      recver->recv();
     }
   }
   nvtxRangePop();
@@ -964,24 +1008,25 @@ void DistributedDomain::exchange() {
           pending = true;
           if (sender->next_ready()) {
             sender->next();
-            goto colo; // try to overlap sends and recvs
+            goto colorecver; // try to overlap sends and recvs
           }
         }
       }
     }
-  colo:
+  colorecver:
     for (auto &domRecvers : coloRecvers_) {
       for (auto &kv : domRecvers) {
-        ColocatedHaloRecver &recver = kv.second;
-        if (recver.active()) {
+        StatefulRecver *recver = kv.second;
+        if (recver->active()) {
           pending = true;
-          if (recver.next_ready()) {
-            recver.next();
+          if (recver->next_ready()) {
+            recver->next();
             goto recvers; // try to overlap sends and recvs
           }
         }
       }
     }
+    // colosender: none of them are stateful, so we do not check them
   }
   nvtxRangePop(); // DD::exchange: poll
 
@@ -1005,15 +1050,15 @@ void DistributedDomain::exchange() {
   for (auto &domSenders : coloSenders_) {
     for (auto &kv : domSenders) {
       LOG_SPEW("domain=" << kv.first << " wait colocated sender");
-      ColocatedHaloSender &sender = kv.second;
-      sender.wait();
+      StatefulSender *sender = kv.second;
+      sender->wait();
     }
   }
   for (auto &domRecvers : coloRecvers_) {
     for (auto &kv : domRecvers) {
       LOG_SPEW("domain=" << kv.first << " wait colocated recver");
-      ColocatedHaloRecver &recver = kv.second;
-      recver.wait();
+      StatefulRecver *recver = kv.second;
+      recver->wait();
     }
   }
   nvtxRangePop(); // colocated wait

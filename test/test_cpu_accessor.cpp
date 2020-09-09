@@ -7,9 +7,10 @@
 TEMPLATE_TEST_CASE("accessor", "[template]", int, double) {
   Dim3 extent(10, 11, 12);
   TestType *data = new TestType[extent.x * extent.y * extent.z];
+  PitchedPtr<TestType> ptr(extent.x * sizeof(TestType), data, extent.x * sizeof(TestType), extent.y);
   {
     Dim3 origin(0, 0, 0);
-    Accessor<TestType> acc(data, origin, extent);
+    Accessor<TestType> acc(ptr, origin);
     acc[Dim3(0, 0, 0)] = 10;
     REQUIRE(acc[Dim3(0, 0, 0)] == 10);
     REQUIRE(data[0] == 10);

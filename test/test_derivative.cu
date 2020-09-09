@@ -26,29 +26,7 @@ __global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
 
         Dim3 p(x, y, z);
         T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period];
-        dst[p] = val;
-      }
-    }
-  }
-}
-
-template <typename T>
-__global__ void check_init_kernel(Accessor<T> dst, //<! [in] region to check
-                                  Rect3 dstExt     //<! [in] the extent of the region to check
-) {
-  const T ripple[4] = {0, 0.25, 0, -0.25};
-  const size_t period = sizeof(ripple) / sizeof(ripple[0]);
-
-  const size_t tiz = blockDim.z * blockIdx.z + threadIdx.z;
-  const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
-  const size_t tix = blockDim.x * blockIdx.x + threadIdx.x;
-
-  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z; z += gridDim.z * blockDim.z) {
-    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y; y += gridDim.y * blockDim.y) {
-      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
-
-        Dim3 p(x, y, z);
-        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period];
+        printf("%f -> %ld %ld %ld\n", val, p.x, p.y, p.z);
         dst[p] = val;
       }
     }
@@ -89,16 +67,18 @@ TEST_CASE("derivative") {
   dim3 dimGrid(10, 10, 10);
   dim3 dimBlock(8, 8, 8);
   for (auto &d : dd.domains()) {
-    REQUIRE(d.get_curr(dh1) != nullptr);
+    REQUIRE(d.get_curr(dh1) != PitchedPtr<Q1>());
     CUDA_RUNTIME(cudaSetDevice(d.gpu()));
     auto acc = d.get_curr_accessor(dh1);
 
-    std::cerr << acc.origin() << "\n";
-    std::cerr << acc.pitch() << "\n";
+    std::cerr << "acc origin=" << acc.origin() << "\n";
+
     Rect3 ext = d.get_compute_region();
-    std::cout << "extent " << ext << "\n";
+    std::cout << "init extent " << ext << "\n";
 
     d.set_device();
+    dimGrid = 1;
+    dimBlock = 1;
     init_kernel<<<dimGrid, dimBlock>>>(acc, ext);
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
@@ -112,20 +92,32 @@ TEST_CASE("derivative") {
 
     // get the size of the interior
     const Dim3 ext = d.halo_extent(Dim3(0, 0, 0));
-    std::cerr << ext << "\n";
-
+    std::cerr << "interior ext=" << ext << "\n";
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
       auto vec = d.interior_to_host(qi);
+      REQUIRE(vec.size() == 10 * 10 * 10 * sizeof(Q1));
 
       // make sure we can access data as a Q1
       std::vector<Q1> interior(ext.flatten());
-      REQUIRE(vec.size() == interior.size() * sizeof(Q1));
+      REQUIRE(interior.size() == 10 * 10 * 10);
       std::memcpy(interior.data(), vec.data(), vec.size());
 
       // create an accessor for the CPU data
       Accessor<Q1> acc(interior.data(), origin, ext);
       Rect3 rect = d.get_compute_region();
+      std::cerr << "compute region =" << rect << "\n";
+
+      const int64_t z = 3;
+      for (int64_t y = rect.lo.y; y < rect.hi.y; ++y) {
+        for (int64_t x = rect.lo.x; x < rect.hi.x; ++x) {
+          Dim3 p(x, y, z);
+          Q1 val = acc[p];
+          // std::cerr << val << " ";
+          std::cerr << interior[z * 10 * 10 + y * 10 + x] << " ";
+        }
+        std::cerr << "\n";
+      }
 
       for (int64_t z = rect.lo.z; z < rect.hi.z; ++z) {
         for (int64_t y = rect.lo.y; y < rect.hi.y; ++y) {

@@ -5,7 +5,6 @@
 
 #include "align.cuh"
 #include "local_domain.cuh"
-#include "pack_kernel.cuh"
 #include "stencil/logging.hpp"
 #include "tx_common.hpp"
 

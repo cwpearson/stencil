@@ -29,7 +29,8 @@ enum class MsgKind {
   ColocatedMem = 1,
   ColocatedDev = 2,
   ColocatedNotify = 3,
-  Other = 4,
+  ColocatedPtr = 4,
+  Other = 5,
 };
 
 /*!
@@ -38,17 +39,16 @@ enum class MsgKind {
   23 bits here.
 */
 template <MsgKind kind> inline int make_tag(const int payload, const Dim3 dir = Dim3(0, 0, 0)) {
+  // bit 31 is 0
   int ret = 0;
 
-  // bit 31 is 0
-
-  // bits 0-1 encode message kind
+  // bits 0-2 encode message kind
   int kindInt = static_cast<int>(kind);
-  assert(kindInt <= 0b11);
-  assert(kindInt >= 0b00);
+  assert(kindInt <= 0b111);
+  assert(kindInt >= 0b000);
   ret |= kindInt;
 
-  // bits 2-7 encode direction vector
+  // bits 3-8 encode direction vector
   assert(dir.x >= -1 && dir.x <= 1);
   assert(dir.y >= -1 && dir.y <= 1);
   assert(dir.z >= -1 && dir.z <= 1);
@@ -56,11 +56,11 @@ template <MsgKind kind> inline int make_tag(const int payload, const Dim3 dir = 
   dirBits |= dir.x == 0 ? 0b00 : (dir.x == 1 ? 0b01 : 0b10);
   dirBits |= (dir.y == 0 ? 0b00 : (dir.y == 1 ? 0b01 : 0b10)) << 2;
   dirBits |= (dir.z == 0 ? 0b00 : (dir.z == 1 ? 0b01 : 0b10)) << 4;
-  ret |= (dirBits << 2);
+  ret |= (dirBits << 3);
 
-  // bits 8-23 are the payload
-  assert(payload < (1 << 16));
-  ret |= (payload & 0xFFFF) << 8;
+  // bits 9-23 are the payload
+  assert(payload < (1 << 15));
+  ret |= (payload & 0x7FFF) << 9;
 
   assert(ret >= 0);
   return ret;
@@ -121,10 +121,12 @@ inline int make_tag(int gpu, int idx, Dim3 dir) {
 class StatefulSender {
 public:
   /*! prepare sender to send these messages
+      preparation may involve coordination with recver, so allow for two phases
    */
-  virtual void prepare(std::vector<Message> &outbox) = 0;
+  virtual void start_prepare(const std::vector<Message> &outbox) = 0;
+  virtual void finish_prepare() = 0;
 
-  /*! start a send
+  /*! initiate an async send
    */
   virtual void send() = 0;
 
@@ -132,7 +134,7 @@ public:
    */
   virtual bool active() = 0;
 
-  /*! call next() to continue with the send
+  /*! valid to call next() to continue with the send
    */
   virtual bool next_ready() = 0;
 
@@ -150,9 +152,10 @@ public:
 
 class StatefulRecver {
 public:
-  /*! prepare reciever to send these messages
+  /*! prepare reciever to recv these messages
    */
-  virtual void prepare(std::vector<Message> &outbox) = 0;
+  virtual void start_prepare(const std::vector<Message> &inbox) = 0;
+  virtual void finish_prepare() = 0;
 
   /*! start a recv
    */

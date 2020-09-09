@@ -1,83 +1,43 @@
 #include "stencil/packer.cuh"
 
-#include <algorithm>
+#include "stencil/pack_kernel.cuh"
 
+#include <algorithm>
 
 /*! pack all quantities in a single domain into dst
  */
-__global__ void dev_packer_pack_domain(void *dst,            // buffer to pack into
-                                       void **srcs,          // raw pointer to each quanitity
-                                       size_t *elemSizes,    // element size for each quantity
-                                       const size_t nQuants, // number of quantities
-                                       const Dim3 rawSz,     // domain size (elements)
-                                       const Dim3 pos,       // halo position
-                                       const Dim3 ext        // halo extent
+__global__ void dev_packer_pack_domain(void *dst,               // buffer to pack into
+                                       cudaPitchedPtr *srcs,    // pointer to each quantity
+                                       const size_t *elemSizes, // element size for each quantity
+                                       const size_t nQuants,    // number of quantities
+                                       const Dim3 pos,          // halo position
+                                       const Dim3 ext           // halo extent
 ) {
   size_t offset = 0;
   for (size_t qi = 0; qi < nQuants; ++qi) {
     const size_t elemSz = elemSizes[qi];
     offset = next_align_of(offset, elemSz);
-    void *src = srcs[qi];
+    cudaPitchedPtr src = srcs[qi];
     void *dstp = &((char *)dst)[offset];
-    grid_pack(dstp, src, rawSz, pos, ext, elemSz);
+    grid_pack(dstp, src, pos, ext, elemSz);
     offset += elemSz * ext.flatten();
   }
 }
 
-inline __device__ void dev_unpacker_grid_unpack(void *__restrict__ dst, const Dim3 dstSize, const Dim3 dstPos,
-                                                const Dim3 dstExtent, const void *__restrict__ src,
-                                                const size_t elemSize) {
-
-  const unsigned int tz = blockDim.z * blockIdx.z + threadIdx.z;
-  const unsigned int ty = blockDim.y * blockIdx.y + threadIdx.y;
-  const unsigned int tx = blockDim.x * blockIdx.x + threadIdx.x;
-
-  assert(dstExtent.z >= 0);
-  assert(dstExtent.y >= 0);
-  assert(dstExtent.x >= 0);
-
-  for (unsigned int zi = tz; zi < dstExtent.z; zi += blockDim.z * gridDim.z) {
-    unsigned int zo = zi + dstPos.z;
-    for (unsigned int yi = ty; yi < dstExtent.y; yi += blockDim.y * gridDim.y) {
-      unsigned int yo = yi + dstPos.y;
-      for (unsigned int xi = tx; xi < dstExtent.x; xi += blockDim.x * gridDim.x) {
-        unsigned int xo = xi + dstPos.x;
-        unsigned int oi = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
-        unsigned int ii = zi * dstExtent.y * dstExtent.x + yi * dstExtent.x + xi;
-        if (4 == elemSize) {
-          uint32_t *pDst = reinterpret_cast<uint32_t *>(dst);
-          const uint32_t *pSrc = reinterpret_cast<const uint32_t *>(src);
-          uint32_t v = pSrc[ii];
-          pDst[oi] = v;
-        } else if (8 == elemSize) {
-          uint64_t *pDst = reinterpret_cast<uint64_t *>(dst);
-          const uint64_t *pSrc = reinterpret_cast<const uint64_t *>(src);
-          pDst[oi] = pSrc[ii];
-        } else {
-          char *pDst = reinterpret_cast<char *>(dst);
-          const char *pSrc = reinterpret_cast<const char *>(src);
-          memcpy(&pDst[oi * elemSize], &pSrc[ii * elemSize], elemSize);
-        }
-      }
-    }
-  }
-}
-
-__global__ void dev_unpacker_unpack_domain(void **dsts,          // buffer to pack into
-                                           void *src,            // raw pointer to each quanitity
-                                           size_t *elemSizes,    // element size for each quantity
-                                           const size_t nQuants, // number of quantities
-                                           const Dim3 rawSz,     // domain size (elements)
-                                           const Dim3 pos,       // halo position
-                                           const Dim3 ext        // halo extent
+__global__ void dev_unpacker_unpack_domain(cudaPitchedPtr *dsts,    // buffers to unpack into
+                                           const void *src,         // raw pointer to each quanitity
+                                           const size_t *elemSizes, // element size for each quantity
+                                           const size_t nQuants,    // number of quantities
+                                           const Dim3 pos,          // halo position
+                                           const Dim3 ext           // halo extent
 ) {
   size_t offset = 0;
   for (unsigned int qi = 0; qi < nQuants; ++qi) {
-    void *dst = dsts[qi];
+    cudaPitchedPtr dst = dsts[qi];
     const size_t elemSz = elemSizes[qi];
     offset = next_align_of(offset, elemSz);
     void *srcp = &((char *)src)[offset];
-    dev_unpacker_grid_unpack(dst, rawSz, pos, ext, srcp, elemSz);
+    grid_unpack(dst, srcp, pos, ext, elemSz);
     offset += elemSz * ext.flatten();
   }
 }
@@ -148,8 +108,7 @@ void DevicePacker::launch_pack_kernels() {
 
     LOG_SPEW("dev_packer_pack_domain grid=" << dimGrid << " block=" << dimBlock);
     dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[offset], domain_->dev_curr_datas(),
-                                                              domain_->dev_elem_sizes(), domain_->num_data(),
-                                                              domain_->raw_size(), pos, ext);
+                                                              domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
 #if STENCIL_USE_CUDA_GRAPH == 0
     // 900: not allowed while stream is capturing
     CUDA_RUNTIME(cudaGetLastError());
@@ -220,9 +179,8 @@ void DeviceUnpacker::launch_unpack_kernels() {
 
     const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
     const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-    dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream_>>>(domain_->dev_curr_datas(), &devBuf_[offset],
-                                                                  domain_->dev_elem_sizes(), domain_->num_data(),
-                                                                  domain_->raw_size(), pos, ext);
+    dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream_>>>(
+        domain_->dev_curr_datas(), &devBuf_[offset], domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
 #if STENCIL_USE_CUDA_GRAPH == 0
     // 900: operation not permitted while stream is capturing
     CUDA_RUNTIME(cudaGetLastError());

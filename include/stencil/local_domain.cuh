@@ -11,6 +11,7 @@
 #include "stencil/pack_kernel.cuh"
 #include "stencil/radius.hpp"
 #include "stencil/rect3.hpp"
+#include "stencil/pitched_ptr.hpp"
 
 class DistributedDomain;
 
@@ -47,14 +48,14 @@ private:
 
   //!< backing info for the actual data I have
   // host versions
-  std::vector<void *> currDataPtrs_;
-  std::vector<void *> nextDataPtrs_;
-  std::vector<int64_t> dataElemSize_;
+  std::vector<cudaPitchedPtr> currDataPtrs_;
+  std::vector<cudaPitchedPtr> nextDataPtrs_;
+  std::vector<size_t> dataElemSize_;
   std::vector<std::string> dataName_;
   /* device versions of the pointers (the pointers already point to device data)
    used in the packers
    */
-  void **devCurrDataPtrs_;
+  cudaPitchedPtr *devCurrDataPtrs_;
   size_t *devDataElemSize_;
 
   int dev_; // CUDA device
@@ -84,8 +85,8 @@ public:
   int64_t add_data(size_t n, const std::string &name = "") {
     dataName_.push_back(name);
     dataElemSize_.push_back(n);
-    currDataPtrs_.push_back(nullptr);
-    nextDataPtrs_.push_back(nullptr);
+    currDataPtrs_.push_back({});
+    nextDataPtrs_.push_back({});
     return int64_t(dataElemSize_.size()) - 1;
   }
 
@@ -106,22 +107,23 @@ public:
 
   /*! \brief retrieve a pointer to current domain values (to read in stencil)
    */
-  template <typename T> T *get_curr(const DataHandle<T> handle) const {
+  template <typename T> PitchedPtr<T> get_curr(const DataHandle<T> handle) const {
     assert(dataElemSize_.size() > handle.id_);
     assert(currDataPtrs_.size() > handle.id_);
-    void *ptr = currDataPtrs_[handle.id_];
+    cudaPitchedPtr p = currDataPtrs_[handle.id_];
     assert(sizeof(T) == dataElemSize_[handle.id_]);
-    return static_cast<T *>(ptr);
+    assert(p.ptr);
+    return PitchedPtr<T>(p);
   }
 
   /*! \brief retrieve a pointer to next domain values (to set in stencil)
    */
-  template <typename T> T *get_next(const DataHandle<T> handle) const {
+  template <typename T> PitchedPtr<T>get_next(const DataHandle<T> handle) const {
     assert(dataElemSize_.size() > handle.id_);
     assert(nextDataPtrs_.size() > handle.id_);
-    void *ptr = nextDataPtrs_[handle.id_];
+    cudaPitchedPtr p = nextDataPtrs_[handle.id_];
     assert(sizeof(T) == dataElemSize_[handle.id_]);
-    return static_cast<T *>(ptr);
+    return PitchedPtr<T>(p);
   }
 
   size_t elem_size(const size_t idx) const {
@@ -129,27 +131,24 @@ public:
     return dataElemSize_[idx];
   }
 
-  size_t *dev_elem_sizes() const { return devDataElemSize_; }
+  const std::vector<size_t> &elem_sizes() const { return dataElemSize_; }
+  const size_t *dev_elem_sizes() const { return devDataElemSize_; }
 
-  void *curr_data(size_t idx) const {
+  cudaPitchedPtr curr_data(size_t idx) const {
     assert(idx < currDataPtrs_.size());
     return currDataPtrs_[idx];
   }
 
-  const std::vector<void*> &curr_datas() const noexcept {
-    return currDataPtrs_;
-  }
+  const std::vector<cudaPitchedPtr> &curr_datas() const noexcept { return currDataPtrs_; }
 
-  void **dev_curr_datas() const { return devCurrDataPtrs_; }
+  cudaPitchedPtr *dev_curr_datas() const { return devCurrDataPtrs_; }
 
-  void *next_data(size_t idx) const {
+  cudaPitchedPtr next_data(size_t idx) const {
     assert(idx < nextDataPtrs_.size());
     return nextDataPtrs_[idx];
   }
 
   template <typename T> Accessor<T> get_curr_accessor(const DataHandle<T> &dh) const noexcept {
-    T *raw = get_curr(dh);
-
     // the origin stored in the localdomain does not include the halo,
     // but the accessor needs to know how to skip the halo region
     Dim3 org = origin();
@@ -157,18 +156,10 @@ public:
     org.y -= radius_.y(-1);
     org.z -= radius_.z(-1);
 
-    // the total allocation size, for indexing in the accessor
-    Dim3 pitch = sz_;
-    pitch.x += radius_.x(-1) + radius_.x(1);
-    pitch.y += radius_.y(-1) + radius_.y(1);
-    pitch.z += radius_.z(-1) + radius_.z(1);
-
-    return Accessor<T>(raw, org, pitch);
+    return Accessor<T>(get_curr(dh), org);
   }
 
   template <typename T> Accessor<T> get_next_accessor(const DataHandle<T> &dh) const noexcept {
-    T *raw = get_next(dh);
-
     // the origin stored in the localdomain does not include the halo,
     // but the accessor needs to know how to skip the halo region
     Dim3 org = origin();
@@ -176,13 +167,7 @@ public:
     org.y -= radius_.y(-1);
     org.z -= radius_.z(-1);
 
-    // the total allocation size, for indexing in the accessor
-    Dim3 pitch = sz_;
-    pitch.x += radius_.x(-1) + radius_.x(1);
-    pitch.y += radius_.y(-1) + radius_.y(1);
-    pitch.z += radius_.z(-1) + radius_.z(1);
-
-    return Accessor<T>(raw, org, pitch);
+    return Accessor<T>(get_next(dh), org);
   }
 
   /* return the coordinates of the compute region (not including the halo)
@@ -258,7 +243,7 @@ public:
    */
   void swap() noexcept;
 
-  /* return the bytes making up
+  /* return the bytes making up the logical region
    */
   std::vector<unsigned char> region_to_host(const Dim3 &pos, const Dim3 &ext,
                                             const size_t qi // quantity index

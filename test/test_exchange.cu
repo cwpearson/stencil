@@ -10,9 +10,8 @@
 #include "stencil/stencil.hpp"
 
 template <typename T>
-__global__ void
-init_kernel(Accessor<T> dst, //<! [out] region to fill
-            Rect3 dstExt     //<! [in] the extent of the region to initialize
+__global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
+                            Rect3 dstExt     //<! [in] the extent of the region to initialize
 ) {
   const T ripple[4] = {0, 0.25, 0, -0.25};
   const size_t period = sizeof(ripple) / sizeof(ripple[0]);
@@ -21,16 +20,12 @@ init_kernel(Accessor<T> dst, //<! [out] region to fill
   const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
   const size_t tix = blockDim.x * blockIdx.x + threadIdx.x;
 
-  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z;
-       z += gridDim.z * blockDim.z) {
-    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y;
-         y += gridDim.y * blockDim.y) {
-      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x;
-           x += gridDim.x * blockDim.x) {
+  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z; z += gridDim.z * blockDim.z) {
+    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y; y += gridDim.y * blockDim.y) {
+      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
 
         Dim3 p(x, y, z);
-        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z +
-                ripple[p.z % period];
+        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period];
         dst[p] = val;
       }
     }
@@ -38,7 +33,7 @@ init_kernel(Accessor<T> dst, //<! [out] region to fill
 }
 
 /* check an exchange that supports the given kernel radius
-*/
+ */
 static void check_exchange(const Radius &radius) {
 
   int rank;
@@ -76,12 +71,10 @@ static void check_exchange(const Radius &radius) {
   dim3 dimGrid(10, 10, 10);
   dim3 dimBlock(8, 8, 8);
   for (auto &d : dd.domains()) {
-    REQUIRE(d.get_curr(dh1) != nullptr);
+    REQUIRE(d.get_curr(dh1) != PitchedPtr<Q1>());
     CUDA_RUNTIME(cudaSetDevice(d.gpu()));
     auto acc = d.get_curr_accessor(dh1);
 
-    std::cerr << "origin" << acc.origin() << "\n";
-    std::cerr << "pitch " << acc.pitch() << "\n";
     Rect3 ext = d.get_compute_region();
     std::cout << "compute region " << ext << "\n";
 
@@ -106,7 +99,7 @@ static void check_exchange(const Radius &radius) {
       std::memcpy(interior.data(), vec.data(), vec.size());
 
       // create an accessor for the CPU data
-      Accessor<Q1> acc(interior.data(), origin, ext);
+      Accessor<Q1> acc(PitchedPtr<Q1>(ext.x * sizeof(Q1), interior.data(), ext.x * sizeof(Q1), ext.y), origin);
       Rect3 rect = d.get_compute_region();
 
       for (int64_t z = rect.lo.z; z < rect.hi.z; ++z) {
@@ -116,9 +109,7 @@ static void check_exchange(const Radius &radius) {
             const Q1 ripple[4] = {0, 0.25, 0, -0.25};
             const size_t period = sizeof(ripple) / sizeof(ripple[0]);
             Q1 val = acc[p];
-            REQUIRE(val == p.x + ripple[p.x % period] + p.y +
-                               ripple[p.y % period] + p.z +
-                               ripple[p.z % period]);
+            REQUIRE(val == p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period]);
           }
         }
       }
@@ -192,9 +183,7 @@ static void check_exchange(const Radius &radius) {
 
             // std::cerr << "->" << p << "\n";
 
-            REQUIRE(val == p.x + ripple[p.x % period] + p.y +
-                               ripple[p.y % period] + p.z +
-                               ripple[p.z % period]);
+            REQUIRE(val == p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period]);
           }
         }
       }
@@ -204,35 +193,28 @@ static void check_exchange(const Radius &radius) {
 
 TEST_CASE("exchange") {
 
-  SECTION("r=0") {
-    check_exchange(Radius::constant(0));
-  }
+  SECTION("r=0") { check_exchange(Radius::constant(0)); }
 
-  SECTION("r=1") {
-    check_exchange(Radius::constant(1));
-  }
+  SECTION("r=1") { check_exchange(Radius::constant(1)); }
 
-  SECTION("r=2") {
-    check_exchange(Radius::constant(2));
-  }
+  SECTION("r=2") { check_exchange(Radius::constant(2)); }
 
   SECTION("+x=2") {
     Radius r = Radius::constant(0);
-    r.dir(1,0,0) = 2;
+    r.dir(1, 0, 0) = 2;
     check_exchange(r);
   }
 
   SECTION("mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
-    r.dir(-1,0,0) = 1;
+    r.dir(-1, 0, 0) = 1;
     check_exchange(r);
   }
 
   SECTION("+x=2, mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
-    r.dir(1,0,0) = 2;
-    r.dir(-1,0,0) = 1;
+    r.dir(1, 0, 0) = 2;
+    r.dir(-1, 0, 0) = 1;
     check_exchange(r);
   }
-
 }

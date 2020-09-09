@@ -10,17 +10,17 @@
 Translate::Translate() {}
 
 void Translate::prepare(const std::vector<Params> &params) {
+
+  LOG_SPEW("params.size()=" << params.size());
+
   // convert all Params into individual 3D copies
   for (const Params &ps : params) {
+    LOG_SPEW("ps.n=" << ps.n);
+    assert(ps.dsts);
+    assert(ps.srcs);
+    assert(ps.elemSizes);
     for (int64_t i = 0; i < ps.n; ++i) {
-      Param p{.dstPtr = ps.dsts[i],
-              .dstPos = ps.dstPos,
-              .dstSize = ps.dstSize,
-              .srcPtr = ps.srcs[i],
-              .srcPos = ps.srcPos,
-              .srcSize = ps.srcSize,
-              .extent = ps.extent,
-              .elemSize = ps.elemSizes[i]};
+      Param p(ps.dsts[i], ps.dstPos, ps.srcs[i], ps.srcPos, ps.extent, ps.elemSizes[i]);
       params_.push_back(p);
     }
   }
@@ -44,17 +44,18 @@ void Translate::memcpy_3d_async(const Param &param, cudaStream_t stream) {
 
   const uint64_t es = param.elemSize;
 
+  // "offset into the src/dst objs in units of unsigned char"
   p.srcPos = make_cudaPos(param.srcPos.x * es, param.srcPos.y, param.srcPos.z);
-  p.srcPtr.pitch = param.srcSize.x * es;
-  p.srcPtr.ptr = param.srcPtr;
-  p.srcPtr.xsize = param.srcSize.x * es;
-  p.srcPtr.ysize = param.srcSize.y;
   p.dstPos = make_cudaPos(param.dstPos.x * es, param.dstPos.y, param.dstPos.z);
-  p.dstPtr.pitch = param.dstSize.x * es;
-  p.dstPtr.ptr = param.dstPtr;
-  p.dstPtr.xsize = param.dstSize.x * es;
-  p.dstPtr.ysize = param.dstSize.y;
+
+  // "dimension of the transferred area in elements of unsigned char"
   p.extent = make_cudaExtent(param.extent.x * es, param.extent.y, param.extent.z);
+
+  // we mark our srcPtr as `const void*` since we will not modify data through it, but the cuda pitchedPtr is just
+  // `void*`
+  p.srcPtr = param.srcPtr;
+  p.dstPtr = param.dstPtr;
+
   p.kind = cudaMemcpyDeviceToDevice;
   LOG_SPEW("srcPtr.pitch " << p.srcPtr.pitch);
   LOG_SPEW("srcPtr.ptr " << p.srcPtr.ptr);
@@ -62,6 +63,7 @@ void Translate::memcpy_3d_async(const Param &param, cudaStream_t stream) {
   LOG_SPEW("dstPtr.pitch " << p.dstPtr.pitch);
   LOG_SPEW("dstPtr.ptr " << p.dstPtr.ptr);
   LOG_SPEW("dstPos  [" << p.dstPos.x << "," << p.dstPos.y << "," << p.dstPos.z << "]");
+  LOG_SPEW("extent [dhw] = [" << p.extent.depth << "," << p.extent.height << "," << p.extent.width << "]");
   CUDA_RUNTIME(cudaMemcpy3DAsync(&p, stream));
 }
 
@@ -70,6 +72,5 @@ void Translate::kernel(const Param &p, const int device, cudaStream_t stream) {
   const dim3 dimGrid = (p.extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
   CUDA_RUNTIME(cudaSetDevice(device));
   LOG_SPEW("translate dev=" << device << " grid=" << dimGrid << " block=" << dimBlock);
-  translate<<<dimGrid, dimBlock, 0, stream>>>(p.dstPtr, p.dstPos, p.dstSize, p.srcPtr, p.srcPos, p.srcSize, p.extent,
-                                              p.elemSize);
+  translate<<<dimGrid, dimBlock, 0, stream>>>(p.dstPtr, p.dstPos, p.srcPtr, p.srcPos, p.extent, p.elemSize);
 }

@@ -10,8 +10,8 @@
 #include "stencil/stencil.hpp"
 
 template <typename T>
-__global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
-                            Rect3 dstExt     //<! [in] the extent of the region to initialize
+static __global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
+                                   Rect3 dstExt     //<! [in] the extent of the region to initialize
 ) {
   const T ripple[4] = {0, 0.25, 0, -0.25};
   const size_t period = sizeof(ripple) / sizeof(ripple[0]);
@@ -68,16 +68,13 @@ static void check_exchange(const Radius &radius, const MethodFlags methods) {
   dim3 dimGrid(10, 10, 10);
   dim3 dimBlock(8, 8, 8);
   for (auto &d : dd.domains()) {
-    REQUIRE(d.get_curr(dh1) != nullptr);
+    REQUIRE(d.get_curr(dh1) != PitchedPtr<Q1>());
     CUDA_RUNTIME(cudaSetDevice(d.gpu()));
     auto acc = d.get_curr_accessor(dh1);
 
-    std::cerr << "origin" << acc.origin() << "\n";
-    std::cerr << "pitch " << acc.pitch() << "\n";
-    Rect3 ext = d.get_compute_region();
-    std::cout << "compute region " << ext << "\n";
+    Rect3 crRect = d.get_compute_region();
 
-    init_kernel<<<dimGrid, dimBlock>>>(acc, ext);
+    init_kernel<<<dimGrid, dimBlock>>>(acc, crRect);
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
 
@@ -192,9 +189,18 @@ static void check_exchange(const Radius &radius, const MethodFlags methods) {
 
 TEST_CASE("exchange2") {
 
-  SECTION("r=0") { check_exchange(Radius::constant(0), MethodFlags::CudaMpi); }
+  // no transfers, anything should work
+  SECTION("r=0,cmpi") { check_exchange(Radius::constant(0), MethodFlags::CudaMpi); }
+  SECTION("r=0,pmu") { check_exchange(Radius::constant(0), MethodFlags::ColoPackMemcpyUnpack); }
+  SECTION("r=0,da") { check_exchange(Radius::constant(0), MethodFlags::ColoDirectAccess); }
+  SECTION("r=0,cmp") { check_exchange(Radius::constant(0), MethodFlags::CudaMemcpyPeer); }
+  SECTION("r=0,k") { check_exchange(Radius::constant(0), MethodFlags::CudaKernel); }
 
-  SECTION("r=1") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi); }
+  // CudaMpi works for all cases
+  SECTION("r=1,cmpi") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi); }
+  SECTION("r=1,pmu") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi | MethodFlags::ColoPackMemcpyUnpack); }
+  SECTION("r=1,da") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi | MethodFlags::ColoDirectAccess); }
+  SECTION("r=1,cmp") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi | MethodFlags::CudaMemcpyPeer); }
 
   SECTION("r=2") { check_exchange(Radius::constant(2), MethodFlags::CudaMpi); }
 

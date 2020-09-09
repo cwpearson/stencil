@@ -3,8 +3,8 @@
 #include "stencil/local_domain.cuh"
 
 TEST_CASE("case1", "[cuda]") {
-  Dim3 arrSz(3,4,5);
-  Dim3 origin(0,0,0);
+  Dim3 arrSz(3, 4, 5);
+  Dim3 origin(0, 0, 0);
   LocalDomain ld(arrSz, origin, 0);
   Radius radius = Radius::constant(0);
   radius.dir(1, 0, 0) = 2;
@@ -13,7 +13,22 @@ TEST_CASE("case1", "[cuda]") {
   ld.realize();
 
   // +x send is size of -x side halo
-  REQUIRE(ld.halo_extent(Dim3(1,0,0) * -1) == Dim3(1,4,5));
+  REQUIRE(ld.halo_extent(Dim3(1, 0, 0) * -1) == Dim3(1, 4, 5));
+}
+
+TEST_CASE("curr!=next", "[cuda]") {
+  Dim3 arrSz(3, 4, 5);
+  Dim3 origin(0, 0, 0);
+  LocalDomain ld(arrSz, origin, 0);
+  auto h = ld.add_data<float>();
+  Radius radius = Radius::constant(0);
+  radius.dir(1, 0, 0) = 2;
+  radius.dir(-1, 0, 0) = 1;
+  ld.set_radius(radius);
+  ld.realize();
+
+  // cur and next pointers should be different
+  REQUIRE(ld.get_curr(h).ptr != ld.get_next(h).ptr);
 }
 
 TEMPLATE_TEST_CASE("symmetric radius", "[cuda][template]", int, double) {
@@ -28,8 +43,8 @@ TEMPLATE_TEST_CASE("symmetric radius", "[cuda][template]", int, double) {
   auto handle = d0.add_data<TestType>();
 
   d0.realize();
-  TestType *p = d0.get_curr(handle);
-  REQUIRE(p != nullptr);
+  PitchedPtr<TestType> p = d0.get_curr(handle);
+  REQUIRE(p != PitchedPtr<TestType>());
 
   SECTION("face position in halo") {
     bool isHalo = true;
@@ -174,9 +189,7 @@ TEMPLATE_TEST_CASE("symmetric radius", "[cuda][template]", int, double) {
     REQUIRE(Dim3(30, 40, 50) == d0.halo_pos(Dim3(1, 1, 1), false)); // +x +y +z
   }
 
-  SECTION("corner extent") {
-    REQUIRE(Dim3(4, 4, 4) == d0.halo_extent(Dim3(1, 1, 1)));
-  }
+  SECTION("corner extent") { REQUIRE(Dim3(4, 4, 4) == d0.halo_extent(Dim3(1, 1, 1))); }
 }
 
 TEMPLATE_TEST_CASE("x-leaning radius", "[cuda][template]", int, double) {
@@ -193,8 +206,8 @@ TEMPLATE_TEST_CASE("x-leaning radius", "[cuda][template]", int, double) {
   auto handle = d0.add_data<TestType>();
 
   d0.realize();
-  TestType *p = d0.get_curr(handle);
-  REQUIRE(p != nullptr);
+  PitchedPtr<TestType> p = d0.get_curr(handle);
+  REQUIRE(p != PitchedPtr<TestType>());
 
   SECTION("face position in halo") {
     bool isHalo = true;
@@ -228,9 +241,8 @@ TEMPLATE_TEST_CASE("x-leaning radius", "[cuda][template]", int, double) {
 }
 
 template <typename T>
-__global__ void init_kernel(
-    T *__restrict__ dst, //<! [out] pointer to beginning of dst allocation
-    const Dim3 rawSz     //<! [in] 3D size of the dst and src allocations
+__global__ void init_kernel(PitchedPtr<T> dst, //<! [out] pointer to beginning of dst allocation
+                            const Dim3 rawSz   //<! [in] logical extent of the dst allocation
 ) {
 
   constexpr size_t radius = 1;
@@ -251,70 +263,57 @@ __global__ void init_kernel(
   const size_t bdx = blockDim.x;
   const size_t tix = threadIdx.x;
 
-#define _at(arr, _x, _y, _z) arr[_z * rawSz.y * rawSz.x + _y * rawSz.x + _x]
-
   // initialize the compute domain
   for (size_t z = biz * bdz + tiz; z < rawSz.z; z += gdz * bdz) {
     for (size_t y = biy * bdy + tiy; y < rawSz.y; y += gdy * bdy) {
       for (size_t x = bix * bdx + tix; x < rawSz.x; x += gdx * bdx) {
 
-        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius &&
-            y < rawSz.y - radius && x < rawSz.x - radius) {
-          _at(dst, x, y, z) = 1.0;
+        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius && y < rawSz.y - radius &&
+            x < rawSz.x - radius) {
+          dst.at(x, y, z) = 1.0;
         } else {
-          _at(dst, x, y, z) = 0.0;
+          dst.at(x, y, z) = 0.0;
         }
       }
     }
   }
-
-#undef _at
 }
 
 template <typename T>
-__global__ void
-stencil_kernel(T *__restrict__ dst,       //<! [out] beginning of dst allocation
-               const T *__restrict__ src, //<! [in] beginning of src allooation
-               const Dim3 rawSz //<! [in] 3D size of the dst allocations
+__global__ void stencil_kernel(PitchedPtr<T> dst,       //<! [out] beginning of dst allocation
+                               const PitchedPtr<T> src, //<! [in] beginning of src allooation
+                               const Dim3 rawSz         //<! [in] 3D size of the dst allocations
 ) {
 
   constexpr size_t radius = 1;
   const Dim3 domSz = rawSz - Dim3(2 * radius, 2 * radius, 2 * radius);
 
-// assume arr is the beginning of the allocation, not the beginning of the
-// compute domain
-#define _at(arr, _x, _y, _z)                                                   \
-  arr[(_z + radius) * rawSz.y * rawSz.x + (_y + radius) * rawSz.x + _x + radius]
+  // assume arr is the beginning of the allocation, not the beginning of the compute domain
 
-  for (size_t z = blockIdx.z * blockDim.z + threadIdx.z; z < domSz.z;
-       z += gridDim.z * blockDim.z) {
-    for (size_t y = blockIdx.y * blockDim.y + threadIdx.y; y < domSz.y;
-         y += gridDim.y * blockDim.y) {
-      for (size_t x = blockIdx.x * blockDim.x + threadIdx.x; x < domSz.x;
-           x += gridDim.x * blockDim.x) {
+  for (int64_t z = blockIdx.z * blockDim.z + threadIdx.z; z < domSz.z; z += gridDim.z * blockDim.z) {
+    for (int64_t y = blockIdx.y * blockDim.y + threadIdx.y; y < domSz.y; y += gridDim.y * blockDim.y) {
+      for (int64_t x = blockIdx.x * blockDim.x + threadIdx.x; x < domSz.x; x += gridDim.x * blockDim.x) {
 
         T acc = 0;
         for (int dz = -1; dz <= 1; dz += 1) {
           for (int dy = -1; dy <= 1; dy += 1) {
             for (int dx = -1; dx <= 1; dx += 1) {
-              size_t srcX = x + dx;
-              size_t srcY = y + dy;
-              size_t srcZ = z + dz;
+              int64_t srcX = x + dx;
+              int64_t srcY = y + dy;
+              int64_t srcZ = z + dz;
 
-              T inc = _at(src, srcX, srcY, srcZ);
+              T inc = src.at(srcX + radius, srcY + radius, srcZ + radius);
               acc += inc;
             }
           }
         }
-        _at(dst, x, y, z) = acc;
+        dst.at(x + radius, y + radius, z + radius) = acc;
       }
     }
   }
-
-#undef _at
 }
 
-TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int, double) {
+TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int) {
 
   // TODO: why does this test fail without this
   // test passes if run alone
@@ -353,25 +352,48 @@ TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int, double) {
   REQUIRE(at_host(9, 0, 9) == 1);
   REQUIRE(at_host(9, 9, 0) == 1);
   REQUIRE(at_host(9, 9, 9) == 1);
+  REQUIRE(at_host(10, 10, 10) == 0);
 #undef at_host
 
   INFO("apply stencil");
-  stencil_kernel<<<dimGrid, dimBlock>>>(ld.get_next(h), ld.get_curr(h),
-                                        ld.raw_size());
+  stencil_kernel<<<dimGrid, dimBlock>>>(ld.get_next(h), ld.get_curr(h), ld.raw_size());
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
-  // check the results
-  CUDA_RUNTIME(cudaMemcpy(host, ld.get_next(h),
-                          ld.raw_size().flatten() * sizeof(TestType),
-                          cudaMemcpyDeviceToHost));
+  /* swap so we can copy the stencil results to the host
+   */
+  INFO("swap");
+  ld.swap();
+
+  INFO("d2h");
+  vec.clear();
+  vec = ld.quantity_to_host(0);
+  REQUIRE(vec.size() == 12 * 12 * 12 * sizeof(TestType));
+  host = reinterpret_cast<TestType *>(vec.data());
+
+  // // check the results
+  // CUDA_RUNTIME(
+  //     cudaMemcpy(host, ld.get_next(h).ptr, ld.raw_size().flatten() * sizeof(TestType), cudaMemcpyDeviceToHost));
 
   INFO("check results");
 #define at_host(_x, _y, _z) host[(_z + 1) * 12 * 12 + (_y + 1) * 12 + (_x + 1)]
   INFO("halo unchanged");
-  REQUIRE(0 == at_host(-1, -1, 0));
   REQUIRE(0 == at_host(-1, -1, -1));
+  REQUIRE(0 == at_host(-1, -1, 0));
+  REQUIRE(0 == at_host(-1, 0, 0));
+  REQUIRE(0 == at_host(-1, 6, 3));
   REQUIRE(0 == at_host(10, 10, 10));
+
   INFO("corners have 8 nbrs");
+
+#if 0
+  for (int y = -1; y < 11; ++y) {
+    for (int x = -1; x < 11; ++x) {
+      std::cerr << at_host(x, y, 1) << " ";
+    }
+    std::cerr << "\n";
+  }
+#endif
+
   REQUIRE(at_host(0, 0, 0) == 8);
   REQUIRE(at_host(0, 0, 9) == 8);
   REQUIRE(at_host(0, 9, 0) == 8);
@@ -380,11 +402,14 @@ TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int, double) {
   REQUIRE(at_host(9, 0, 9) == 8);
   REQUIRE(at_host(9, 9, 0) == 8);
   REQUIRE(at_host(9, 9, 9) == 8);
-  // edges have 12 nbrs
+
+  INFO("edges have 12 nbrs");
   REQUIRE(at_host(0, 0, 4) == 12);
-  // faces have 18 ones
+
+  INFO("faces have 18 nbrs");
   REQUIRE(at_host(0, 4, 4) == 18);
-  // center has 27 ones
+
+  INFO("center has 27 nbrs");
   REQUIRE(at_host(1, 1, 1) == 27);
 #undef at_host
 }

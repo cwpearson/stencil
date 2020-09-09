@@ -24,6 +24,7 @@
 #include "stencil/partition.hpp"
 #include "stencil/radius.hpp"
 #include "stencil/tx.hpp"
+#include "stencil/tx_colocated_direct_access.cuh"
 #include "stencil/tx_cuda.cuh"
 
 enum class MethodFlags {
@@ -101,8 +102,11 @@ private:
   // kernel sender for same-domain sends
   PeerAccessSender peerAccessSender_;
 
-  std::vector<std::map<Dim3, ColocatedHaloSender>> coloSenders_; // vec[domain][dstIdx] = sender
-  std::vector<std::map<Dim3, ColocatedHaloRecver>> coloRecvers_;
+
+  // Colocated Senders
+  std::vector<std::map<Dim3, StatefulSender *>> coloSenders_; // vec[domain][dstIdx] = sender
+  std::vector<std::map<Dim3, StatefulRecver *>> coloRecvers_;
+
 
   // prefix for any generated output files
   std::string outputPrefix_;
@@ -159,7 +163,7 @@ public:
     d.set_methods(MethodFlags::Any);
     d.set_methods(MethodFlags::CudaAwareMpi | MethodFlags::Kernel);
   */
-  void set_methods(MethodFlags flags) noexcept { flags_ = flags; }
+  void set_methods(MethodFlags flags) noexcept;
 
   /* set the placement method.
 

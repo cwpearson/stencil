@@ -1,7 +1,7 @@
 #include "stencil/copy.cuh"
 #include "stencil/pack_kernel.cuh"
-#include "stencil/unpack_kernel.cuh"
 
+#if 0
 __global__ void multi_pack(void *__restrict__ dst,                      // dst buffer
                            const size_t *__restrict__ offsets,          // offsets into dst
                            void *__restrict__ *__restrict__ const srcs, // n src pointers
@@ -22,14 +22,15 @@ __global__ void multi_unpack(void **__restrict__ dsts, const Dim3 dstSize, const
     grid_unpack(dsts[i], dstSize, dstPos, dstExtent, srcp, elemSizes[i]);
   }
 }
+#endif
 
-inline __device__ void translate_grid(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize,
-                                      const void *__restrict__ src, const Dim3 srcPos, const Dim3 srcSize,
+inline __device__ void translate_grid(cudaPitchedPtr dst, const Dim3 dstPos, const cudaPitchedPtr src,
+                                      const Dim3 srcPos,
                                       const Dim3 extent, // the extent of the region to be copied
                                       const size_t elemSize) {
 
-  char *cDst = reinterpret_cast<char *>(dst);
-  const char *cSrc = reinterpret_cast<const char *>(src);
+  char * __restrict__ cDst = reinterpret_cast<char *>(dst.ptr);
+  const char * __restrict__ cSrc = reinterpret_cast<const char *>(src.ptr);
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -40,39 +41,38 @@ inline __device__ void translate_grid(void *__restrict__ dst, const Dim3 dstPos,
   for (size_t z = tz; z < extent.z; z += blockDim.z * gridDim.z) {
     for (size_t y = ty; y < extent.y; y += blockDim.y * gridDim.y) {
       for (size_t x = tx; x < extent.x; x += blockDim.x * gridDim.x) {
-        // input coorindates
-        size_t zi = z + srcPos.z;
-        size_t yi = y + srcPos.y;
-        size_t xi = x + srcPos.x;
+        // input coordinates
+        unsigned int zi = z + srcPos.z;
+        unsigned int yi = y + srcPos.y;
+        unsigned int xi = x + srcPos.x;
         // output coordinates
-        size_t zo = z + dstPos.z;
-        size_t yo = y + dstPos.y;
-        size_t xo = x + dstPos.x;
-        // linearized
-        size_t lo = zo * dstSize.y * dstSize.x + yo * dstSize.x + xo;
-        size_t li = zi * srcSize.y * srcSize.x + yi * srcSize.x + xi;
+        unsigned int zo = z + dstPos.z;
+        unsigned int yo = y + dstPos.y;
+        unsigned int xo = x + dstPos.x;
+        // linearized byte offset
+        size_t lo = zo * dst.ysize * dst.pitch + yo * dst.pitch + xo * elemSize;
+        size_t li = zi * src.ysize * src.pitch + yi * src.pitch + xi * elemSize;
         // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
         // xo,
         //        yo, zo, oi);
-        memcpy(&cDst[lo * elemSize], &cSrc[li * elemSize], elemSize);
+        memcpy(cDst + lo, cSrc + li, elemSize);
       }
     }
   }
 }
 
-__global__ void translate(void *__restrict__ dst, const Dim3 dstPos, const Dim3 dstSize, const void *__restrict__ src,
-                          const Dim3 srcPos, const Dim3 srcSize,
+__global__ void translate(cudaPitchedPtr dst, const Dim3 dstPos, cudaPitchedPtr src, const Dim3 srcPos,
                           const Dim3 extent, // the extent of the region to be copied
                           const size_t elemSize) {
 
-  translate_grid(dst, dstPos, dstSize, src, srcPos, srcSize, extent, elemSize);
+  translate_grid(dst, dstPos, src, srcPos, extent, elemSize);
 }
 
-__global__ void multi_translate(void *__restrict__ *__restrict__ dsts, const Dim3 dstPos, const Dim3 dstSize,
-                                void *__restrict__ *__restrict__ const srcs, const Dim3 srcPos, const Dim3 srcSize,
+__global__ void multi_translate(cudaPitchedPtr *dsts, const Dim3 dstPos,
+                                cudaPitchedPtr *const srcs, const Dim3 srcPos,
                                 const Dim3 extent, // the extent of the region to be copied
-                                size_t *const __restrict__ elemSizes, const size_t n) {
+                                const size_t *__restrict__ elemSizes, const size_t n) {
   for (size_t i = 0; i < n; ++i) {
-    translate_grid(dsts[i], dstPos, dstSize, srcs[i], srcPos, srcSize, extent, elemSizes[i]);
+    translate_grid(dsts[i], dstPos, srcs[i], srcPos, extent, elemSizes[i]);
   }
 }

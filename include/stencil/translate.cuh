@@ -16,15 +16,13 @@ public:
   /* parameters for the same logical transfer across multiple allocations of different sizes
    */
   struct Params {
-    void **dsts;  // pointers to destination allocations
-    Dim3 dstPos;  // position within the allocation (element size)
-    Dim3 dstSize; // size of the destination allocation (elements)
-    void **srcs;  // pointers to source allocations
+    cudaPitchedPtr *dsts;       // pointers to destination allocations
+    Dim3 dstPos;                // position within the allocation (element size)
+    const cudaPitchedPtr *srcs; // pointers to source allocations
     Dim3 srcPos;
-    Dim3 srcSize;
-    Dim3 extent;       // the extent of the region to be copied
-    size_t *elemSizes; // the size of the elements to copy
-    int64_t n;          // the number of copies
+    Dim3 extent;             // the extent of the region to be copied
+    const size_t *elemSizes; // the size of the elements to copy
+    int64_t n;               // the number of copies
 
     // nice to keep this an aggregate class for designated initializers
     Params() = default;
@@ -50,14 +48,16 @@ private:
   /* Common parameters format for all 3D transfers
    */
   struct Param {
-    void *dstPtr; // dst allocation
-    Dim3 dstPos;  // position within the allocation (element size)
-    Dim3 dstSize; // size of the destination allocation (elements)
-    void *srcPtr; // source allocation
+    cudaPitchedPtr dstPtr; // dst allocation
+    Dim3 dstPos;           // position within the allocation (element size)
+    cudaPitchedPtr srcPtr; // source allocation
     Dim3 srcPos;
-    Dim3 srcSize;
     Dim3 extent;     // the extent of the region to be copied
     size_t elemSize; // the size of the elements to copy
+
+    Param(const cudaPitchedPtr &_dstPtr, const Dim3 &_dstPos, const cudaPitchedPtr &_srcPtr, const Dim3 &_srcPos,
+          const Dim3 &_extent, const size_t _elemSize)
+        : dstPtr(_dstPtr), dstPos(_dstPos), srcPtr(_srcPtr), srcPos(_srcPos), extent(_extent), elemSize(_elemSize) {}
   };
 
   // initiate a 3D transfer using cudaMemcpy3DAsync (not Peer because we may not see both devices)

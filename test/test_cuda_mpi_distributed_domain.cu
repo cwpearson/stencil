@@ -5,6 +5,7 @@
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
+#include "stencil/rect3.hpp"
 #include "stencil/stencil.hpp"
 
 __device__ int pack_xyz(int x, int y, int z) {
@@ -21,56 +22,47 @@ int unpack_y(int a) { return (a >> 10) & 0x3FF; }
 
 int unpack_z(int a) { return (a >> 20) & 0x3FF; }
 
-/*! set dst[x,y,z] = origin + [x,y,z] in interior
-and halo to -1
-*/
+/*! Set the compute region to a packed version of the logical coordinate, and the halo to -1
+ */
 template <typename T>
-__global__ void
-init_kernel(T *dst,            //<! [out] pointer to beginning of dst allocation
-            const Dim3 origin, //<! [in]
-            const Dim3 rawSz   //<! [in] 3D size of the dst and src allocations
+static __global__ void init_kernel(Accessor<T> dst, //<! [out] pointer to beginning of dst allocation
+                                   Rect3 crExt      //<! coordinates of the compute region
+                                                    //,
+                                                    // bool loud
 ) {
-  constexpr size_t radius = 1;
-  const Dim3 domSz = rawSz - Dim3(2 * radius, 2 * radius, 2 * radius);
+  constexpr int64_t radius = 1;
 
-  const size_t gdz = gridDim.z;
-  const size_t biz = blockIdx.z;
-  const size_t bdz = blockDim.z;
-  const size_t tiz = threadIdx.z;
+  const int gdz = gridDim.z;
+  const int biz = blockIdx.z;
+  const int bdz = blockDim.z;
+  const int tiz = threadIdx.z;
 
-  const size_t gdy = gridDim.y;
-  const size_t biy = blockIdx.y;
-  const size_t bdy = blockDim.y;
-  const size_t tiy = threadIdx.y;
+  const int gdy = gridDim.y;
+  const int biy = blockIdx.y;
+  const int bdy = blockDim.y;
+  const int tiy = threadIdx.y;
 
-  const size_t gdx = gridDim.x;
-  const size_t bix = blockIdx.x;
-  const size_t bdx = blockDim.x;
-  const size_t tix = threadIdx.x;
+  const int gdx = gridDim.x;
+  const int bix = blockIdx.x;
+  const int bdx = blockDim.x;
+  const int tix = threadIdx.x;
 
-#ifndef _at
-#define _at(arr, _x, _y, _z) arr[_z * rawSz.y * rawSz.x + _y * rawSz.x + _x]
-#else
-#error "_at already defined"
-#endif
+  for (int64_t z = crExt.lo.z - radius + biz * bdz + tiz; z < crExt.hi.z + radius; z += gdz * bdz) {
+    for (int64_t y = crExt.lo.y - radius + biy * bdy + tiy; y < crExt.hi.y + radius; y += gdy * bdy) {
+      for (int64_t x = crExt.lo.x - radius + bix * bdx + tix; x < crExt.hi.x + radius; x += gdx * bdx) {
 
-  for (size_t z = biz * bdz + tiz; z < rawSz.z; z += gdz * bdz) {
-    for (size_t y = biy * bdy + tiy; y < rawSz.y; y += gdy * bdy) {
-      for (size_t x = bix * bdx + tix; x < rawSz.x; x += gdx * bdx) {
+        Dim3 p(x, y, z);
 
-        if (z >= radius && x >= radius && y >= radius && z < rawSz.z - radius &&
-            y < rawSz.y - radius && x < rawSz.x - radius) {
-          _at(dst, x, y, z) =
-              pack_xyz(origin.x + x - radius, origin.y + y - radius,
-                       origin.z + z - radius);
+        if (z >= crExt.lo.z && y >= crExt.lo.y && x >= crExt.lo.x && z < crExt.hi.z && y < crExt.hi.y &&
+            x < crExt.hi.x) {
+          int val = pack_xyz(x, y, z);
+          dst[p] = val;
         } else {
-          _at(dst, x, y, z) = -1;
+          dst[p] = -1;
         }
       }
     }
   }
-
-#undef _at
 }
 
 TEST_CASE("exchange1") {
@@ -108,18 +100,21 @@ TEST_CASE("exchange1") {
   dim3 dimBlock(8, 8, 8);
   for (size_t di = 0; di < dd.domains().size(); ++di) {
     auto &d = dd.domains()[di];
-    REQUIRE(d.get_curr(dh1) != nullptr);
-    std::cerr << d.raw_size() << "\n";
+    REQUIRE(d.get_curr(dh1) != PitchedPtr<Q1>());
+
+    std::cerr << "org=" << d.get_curr_accessor(dh1).origin() << " cr=" << d.get_compute_region() << "\n";
+    std::cerr << "xsize=" << d.get_curr_accessor(dh1).ptr().xsize << " pitch=" << d.get_curr_accessor(dh1).ptr().pitch
+              << "\n";
     CUDA_RUNTIME(cudaSetDevice(d.gpu()));
-    init_kernel<<<dimGrid, dimBlock>>>(d.get_curr(dh1), d.origin(),
-                                       d.raw_size());
+    init_kernel<<<dimGrid, dimBlock>>>(d.get_curr_accessor(dh1), d.get_compute_region() /*, mpi::world_rank() == 0*/);
     CUDA_RUNTIME(cudaDeviceSynchronize());
   }
 
+  INFO("barrier");
   MPI_Barrier(MPI_COMM_WORLD);
 
   // test initialization
-  INFO("test init interior");
+  INFO("test compute region");
   for (size_t di = 0; di < dd.domains().size(); ++di) {
     auto &d = dd.domains()[di];
     const Dim3 origin = d.origin();
@@ -216,7 +211,6 @@ TEST_CASE("exchange1") {
   }
 }
 
-
 TEST_CASE("swap") {
   int rank;
   int size;
@@ -246,5 +240,6 @@ TEST_CASE("swap") {
   INFO("barrier");
   MPI_Barrier(MPI_COMM_WORLD);
 
+  INFO("swap");
   dd.swap();
 }

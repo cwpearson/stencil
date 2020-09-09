@@ -3,6 +3,7 @@
 #include <cassert>
 
 #include "stencil/dim3.hpp"
+#include "stencil/pitched_ptr.hpp"
 
 #ifdef __CUDACC__
 #define CUDA_CALLABLE_MEMBER __host__ __device__
@@ -12,35 +13,39 @@
 
 template <typename T> class Accessor {
 private:
-  T *raw_;
+  PitchedPtr<T> ptr_;
   Dim3 origin_; // the 3D point in the space represented by offset 0
-  Dim3 pitch_;  // pitch in elements, not bytes
 
 public:
-  Accessor(T *raw,
-           const Dim3 &origin, //<! [in] the 3D point that is offset 0
-           const Dim3 &pitch   //<! [in] pitch in elements of allocation
+  Accessor(const PitchedPtr<T> &ptr,
+           const Dim3 &origin //<! [in] the 3D point that is offset 0
            )
-      : raw_(raw), origin_(origin), pitch_(pitch) {}
+      : ptr_(ptr), origin_(origin) {}
+
+  // pre PitchedPtr constructor, for compatibility with tests. Do not use
+  Accessor(T *raw, const Dim3 &origin, const Dim3 &elemPitch // pitch in elements, not bytes
+           )
+      : ptr_(elemPitch.x * sizeof(T), raw, elemPitch.x * sizeof(T), elemPitch.y), origin_(origin) {}
 
   //<! access point p
   CUDA_CALLABLE_MEMBER __forceinline__ T &operator[](const Dim3 &p) noexcept {
     const Dim3 off = p - origin_;
-#ifndef NDEBUG
     assert(off.x >= 0);
     assert(off.y >= 0);
     assert(off.z >= 0);
-#endif
-    return raw_[off.z * pitch_.y * pitch_.x + off.y * pitch_.x + off.x];
+    return ptr_.at(off.x, off.y, off.z);
   }
 
   CUDA_CALLABLE_MEMBER __forceinline__ const T &operator[](const Dim3 &p) const noexcept {
     const Dim3 off = p - origin_;
-    return raw_[off.z * pitch_.y * pitch_.x + off.y * pitch_.x + off.x];
+    assert(off.x >= 0);
+    assert(off.y >= 0);
+    assert(off.z >= 0);
+    return ptr_.at(off.x, off.y, off.z);
   }
 
   const Dim3 &origin() const noexcept { return origin_; }
-  const Dim3 &pitch() const noexcept { return pitch_; }
+  const PitchedPtr<T> &ptr() const noexcept { return ptr_; }
 };
 
 #undef CUDA_CALLABLE_MEMBER

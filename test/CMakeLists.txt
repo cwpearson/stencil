@@ -1,4 +1,5 @@
 add_executable(test_cpu test_cpu_main.cpp
+  test_cpu_accessor.cpp
   test_cpu_array.cpp
   test_cpu_mat2d.cpp
   test_cpu_numeric.cpp
@@ -14,7 +15,7 @@ add_test(NAME test_cpu COMMAND ${MPIEXEC_EXECUTABLE} -n 1 test_cpu -a)
 
 if (CMAKE_CUDA_COMPILER)
     add_executable(test_cuda test_cuda_main.cu 
-      test_cuda_accessor.cu
+
       test_cuda_align.cu
       test_cuda_allocator.cu
       test_cuda_array.cu 
