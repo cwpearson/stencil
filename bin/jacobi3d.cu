@@ -424,5 +424,7 @@ if (parser.need_help()) {
 
   MPI_Finalize();
 
+  std::cerr << timers::cudaRuntime.get_elapsed() << "\n";
+
   return 0;
 }

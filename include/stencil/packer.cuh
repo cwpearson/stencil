@@ -46,7 +46,6 @@ public:
   virtual ~Unpacker() {}
 };
 
-
 class DevicePacker : public Packer {
 private:
   LocalDomain *domain_;
@@ -79,14 +78,7 @@ public:
 
   virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages);
 
-  virtual void pack() {
-    assert(size_);
-#if STENCIL_USE_CUDA_GRAPH == 1
-    CUDA_RUNTIME(cudaGraphLaunch(instance_, stream_));
-#else
-    launch_pack_kernels();
-#endif
-  }
+  virtual void pack() override;
 
   virtual int64_t size() { return size_; }
 
@@ -125,14 +117,7 @@ public:
 
   virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages) override;
 
-  virtual void unpack() override {
-    assert(size_);
-#if STENCIL_USE_CUDA_GRAPH == 1
-    CUDA_RUNTIME(cudaGraphLaunch(instance_, stream_));
-#else
-    launch_unpack_kernels();
-#endif
-  }
+  virtual void unpack() override;
 
   virtual int64_t size() override { return size_; }
 

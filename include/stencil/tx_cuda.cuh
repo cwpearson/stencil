@@ -17,8 +17,11 @@
 #include "stencil/logging.hpp"
 #include "stencil/packer.cuh"
 #include "stencil/rcstream.hpp"
+#include "stencil/timer.hpp"
+#include "stencil/tx_common.hpp"
 #include "stencil/tx_ipc.hpp"
-#include "tx_common.hpp"
+
+#include "stencil/rt.hpp"
 
 inline void print_bytes(const char *obj, size_t n) {
   std::cerr << std::hex << std::setfill('0'); // needs to be set only once
@@ -82,12 +85,16 @@ public:
       const dim3 dimBlock = Dim3::make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream.device() == srcDomain->gpu());
-      CUDA_RUNTIME(cudaSetDevice(stream.device()));
       assert(srcDomain->num_data() == dstDomain->num_data());
       LOG_SPEW("multi_translate grid=" << dimGrid << " block=" << dimBlock);
+      CUDA_RUNTIME(rt::time(cudaSetDevice, stream.device()));
+#if 0
       multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos,
                                                         srcDomain->dev_curr_datas(), srcPos, extent,
                                                         srcDomain->dev_elem_sizes(), srcDomain->num_data());
+#endif
+      rt::launch(multi_translate, dimGrid, dimBlock, 0, stream, dstDomain->dev_curr_datas(), dstPos,
+                 srcDomain->dev_curr_datas(), srcPos, extent, srcDomain->dev_elem_sizes(), srcDomain->num_data());
       CUDA_RUNTIME(cudaGetLastError());
     }
 
@@ -150,12 +157,13 @@ public:
     // copy from src device to dst device
     const int dstDev = dstDomain_->gpu();
     const int srcDev = srcDomain_->gpu();
-    CUDA_RUNTIME(cudaMemcpyPeerAsync(unpacker_.data(), dstDev, packer_.data(), srcDev, packer_.size(), srcStream_));
+    CUDA_RUNTIME(
+        rt::time(cudaMemcpyPeerAsync, unpacker_.data(), dstDev, packer_.data(), srcDev, packer_.size(), srcStream_));
 
     // sync src and dst streams
-    CUDA_RUNTIME(cudaEventRecord(event_, srcStream_));
-    CUDA_RUNTIME(cudaSetDevice(dstDomain_->gpu()));
-    CUDA_RUNTIME(cudaStreamWaitEvent(dstStream_, event_, 0 /*flags*/));
+    CUDA_RUNTIME(rt::time(cudaEventRecord, event_, srcStream_));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, dstDomain_->gpu()));
+    CUDA_RUNTIME(rt::time(cudaStreamWaitEvent, dstStream_, event_, 0 /*flags*/));
 
     unpacker_.unpack();
     nvtxRangePop(); // PeerCopySender::send
@@ -204,7 +212,7 @@ public:
 
   ~ColocatedDeviceSender() {
     if (dstBuf_) {
-      CUDA_RUNTIME(cudaSetDevice(srcDev_));
+      CUDA_RUNTIME(rt::time(cudaSetDevice, srcDev_));
       CUDA_RUNTIME(cudaIpcCloseMemHandle(dstBuf_));
       dstBuf_ = nullptr;
     }
@@ -226,7 +234,7 @@ public:
   void finish_prepare() {
     // wait for recv mem handle and convert to pointer
     MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
-    CUDA_RUNTIME(cudaSetDevice(srcDev_));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, srcDev_));
     CUDA_RUNTIME(cudaIpcOpenMemHandle(&dstBuf_, memHandle_, cudaIpcMemLazyEnablePeerAccess));
 
     ipcSender_.wait_prepare();
@@ -238,10 +246,10 @@ public:
     assert(devPtr);
     assert(srcDev_ >= 0);
     assert(bufSize_ > 0);
-    CUDA_RUNTIME(cudaSetDevice(srcDev_));
-    CUDA_RUNTIME(cudaMemcpyPeerAsync(dstBuf_, ipcSender_.dst_dev(), devPtr, srcDev_, bufSize_, stream));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, srcDev_));
+    CUDA_RUNTIME(rt::time(cudaMemcpyPeerAsync, dstBuf_, ipcSender_.dst_dev(), devPtr, srcDev_, bufSize_, stream));
     // record the event
-    CUDA_RUNTIME(cudaEventRecord(ipcSender_.event(), stream));
+    CUDA_RUNTIME(rt::time(cudaEventRecord, ipcSender_.event(), stream));
     ipcSender_.async_notify();
   }
 
@@ -288,7 +296,7 @@ public:
     int payload = ((srcGPU_ & 0xFF) << 8) | (dstGPU_ & 0xFF);
 
     // get an a memory handle
-    CUDA_RUNTIME(cudaSetDevice(dstDev_));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, dstDev_));
     CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
 
     // Send the mem handle to the ColocatedSender
@@ -315,8 +323,6 @@ public:
      If this gets called before the associated ColocatedDeviceSender starts the copy, then it will
      not work, of course.
      Rely on whoever owns us to handle that case.
-
-     FIXME: should we wait on event instead of stream?
    */
   void wait(RcStream &stream) {
     assert(ipcRecver_.event());
@@ -566,7 +572,7 @@ public:
 
       // copy to host buffer
       assert(hostBuf_);
-      CUDA_RUNTIME(cudaMemcpyAsync(hostBuf_, packer_.data(), packer_.size(), cudaMemcpyDefault, stream_));
+      CUDA_RUNTIME(rt::time(cudaMemcpyAsync, hostBuf_, packer_.data(), packer_.size(), cudaMemcpyDefault, stream_));
 
       nvtxRangePop(); // RemoteSender::send_d2h
     }
@@ -577,7 +583,7 @@ public:
   bool d2h_done() {
     assert(State::D2H == state_);
     if (packer_.size()) {
-      cudaError_t err = cudaStreamQuery(stream_);
+      cudaError_t err = rt::time(cudaStreamQuery, stream_);
       if (cudaSuccess == err) {
         return true;
       } else if (cudaErrorNotReady == err) {
@@ -632,7 +638,7 @@ public:
   RemoteRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain), hostBuf_(nullptr),
         stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), unpacker_(stream_) {
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
   }
 
   ~RemoteRecver() { CUDA_RUNTIME(cudaFreeHost(hostBuf_)); }
@@ -645,7 +651,7 @@ public:
     if (0 == unpacker_.size()) {
       LOG_INFO("0-size RemoteRecver was prepared");
     } else {
-      CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+      CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
 
       // allocate device & host buffers
       CUDA_RUNTIME(cudaHostAlloc(&hostBuf_, unpacker_.size(), cudaHostAllocDefault));
@@ -693,7 +699,7 @@ public:
     if (unpacker_.size()) {
       nvtxRangePush("RemoteRecver::recv_h2d");
       // copy to device buffer
-      CUDA_RUNTIME(cudaMemcpyAsync(unpacker_.data(), hostBuf_, unpacker_.size(), cudaMemcpyDefault, stream_));
+      CUDA_RUNTIME(rt::time(cudaMemcpyAsync, unpacker_.data(), hostBuf_, unpacker_.size(), cudaMemcpyDefault, stream_));
       unpacker_.unpack();
       nvtxRangePop(); // RemoteRecver::recv_h2d
     }
@@ -797,7 +803,7 @@ public:
 
   virtual void wait() override {
     assert(State::Send == state_);
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
     MPI_Wait(&req_, MPI_STATUS_IGNORE);
   }
 
@@ -812,7 +818,7 @@ public:
 
   bool pack_done() {
     assert(packer_.size());
-    cudaError_t err = cudaStreamQuery(stream_);
+    cudaError_t err = rt::time(cudaStreamQuery, stream_);
     if (cudaSuccess == err) {
       return true;
     } else if (cudaErrorNotReady == err) {
@@ -829,7 +835,7 @@ public:
     assert(packer_.data());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     size_t numBytes = packer_.size();
     assert(numBytes <= std::numeric_limits<int>::max());
@@ -919,7 +925,7 @@ public:
   bool d2d_done() {
     assert(unpacker_.size());
     int flag;
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
     MPI_Test(&req_, &flag, MPI_STATUS_IGNORE);
     if (flag) {
       return true;
@@ -934,7 +940,7 @@ public:
     assert(unpacker_.data());
     assert(srcGPU_ < 8);
     assert(dstGPU_ < 8);
-    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
     const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
     MPI_Irecv(unpacker_.data(), int(unpacker_.size()), MPI_BYTE, srcRank_, tag, MPI_COMM_WORLD, &req_);
     nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d

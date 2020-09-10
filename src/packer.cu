@@ -1,6 +1,7 @@
 #include "stencil/packer.cuh"
 
 #include "stencil/pack_kernel.cuh"
+#include "stencil/rt.hpp"
 
 #include <algorithm>
 
@@ -88,7 +89,7 @@ void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &mess
 
 void DevicePacker::launch_pack_kernels() {
   // record packing operations
-  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+  CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
 
   int64_t offset = 0;
   for (const auto &msg : dirs_) {
@@ -107,11 +108,15 @@ void DevicePacker::launch_pack_kernels() {
     assert(offset < size_);
 
     LOG_SPEW("dev_packer_pack_domain grid=" << dimGrid << " block=" << dimBlock);
+#if 0
     dev_packer_pack_domain<<<dimGrid, dimBlock, 0, stream_>>>(&devBuf_[offset], domain_->dev_curr_datas(),
                                                               domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
+#endif
+    rt::launch(dev_packer_pack_domain, dimGrid, dimBlock, 0, stream_, &devBuf_[offset], domain_->dev_curr_datas(),
+               domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
 #if STENCIL_USE_CUDA_GRAPH == 0
     // 900: not allowed while stream is capturing
-    CUDA_RUNTIME(cudaGetLastError());
+    CUDA_RUNTIME(rt::time(cudaGetLastError()));
 #endif
     for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
       offset = next_align_of(offset, domain_->elem_size(qi));
@@ -119,6 +124,15 @@ void DevicePacker::launch_pack_kernels() {
       offset += domain_->halo_bytes(msg.dir_ * -1, qi);
     }
   }
+}
+
+void DevicePacker::pack() {
+  assert(size_);
+#if STENCIL_USE_CUDA_GRAPH == 1
+  CUDA_RUNTIME(rt::time(cudaGraphLaunch, instance_, stream_));
+#else
+  launch_pack_kernels();
+#endif
 }
 
 void DeviceUnpacker::prepare(LocalDomain *domain, const std::vector<Message> &messages) {
@@ -166,7 +180,7 @@ void DeviceUnpacker::prepare(LocalDomain *domain, const std::vector<Message> &me
 }
 
 void DeviceUnpacker::launch_unpack_kernels() {
-  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+  CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
 
   int64_t offset = 0;
   for (const auto &msg : dirs_) {
@@ -179,15 +193,28 @@ void DeviceUnpacker::launch_unpack_kernels() {
 
     const dim3 dimBlock = Dim3::make_block_dim(ext, 512);
     const dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+#if 0
     dev_unpacker_unpack_domain<<<dimGrid, dimBlock, 0, stream_>>>(
         domain_->dev_curr_datas(), &devBuf_[offset], domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
+#endif
+    rt::launch(dev_unpacker_unpack_domain, dimGrid, dimBlock, 0, stream_, domain_->dev_curr_datas(), &devBuf_[offset],
+               domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
 #if STENCIL_USE_CUDA_GRAPH == 0
     // 900: operation not permitted while stream is capturing
-    CUDA_RUNTIME(cudaGetLastError());
+    CUDA_RUNTIME(rt::time(cudaGetLastError()));
 #endif
     for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
       offset = next_align_of(offset, domain_->elem_size(qi));
       offset += domain_->halo_bytes(dir, qi);
     }
   }
+}
+
+void DeviceUnpacker::unpack() {
+  assert(size_);
+#if STENCIL_USE_CUDA_GRAPH == 1
+  CUDA_RUNTIME(rt::time(cudaGraphLaunch, instance_, stream_));
+#else
+  launch_unpack_kernels();
+#endif
 }

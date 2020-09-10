@@ -3,6 +3,7 @@
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/logging.hpp"
+#include "stencil/rt.hpp"
 
 #ifdef STENCIL_USE_CUDA_GRAPH
 #endif
@@ -64,7 +65,7 @@ void Translate::memcpy_3d_async(const Param &param, cudaStream_t stream) {
   LOG_SPEW("dstPtr.ptr " << p.dstPtr.ptr);
   LOG_SPEW("dstPos  [" << p.dstPos.x << "," << p.dstPos.y << "," << p.dstPos.z << "]");
   LOG_SPEW("extent [dhw] = [" << p.extent.depth << "," << p.extent.height << "," << p.extent.width << "]");
-  CUDA_RUNTIME(cudaMemcpy3DAsync(&p, stream));
+  CUDA_RUNTIME(rt::time(cudaMemcpy3DAsync, &p, stream));
 }
 
 void Translate::kernel(const Param &p, const int device, cudaStream_t stream) {
@@ -72,5 +73,5 @@ void Translate::kernel(const Param &p, const int device, cudaStream_t stream) {
   const dim3 dimGrid = (p.extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
   CUDA_RUNTIME(cudaSetDevice(device));
   LOG_SPEW("translate dev=" << device << " grid=" << dimGrid << " block=" << dimBlock);
-  translate<<<dimGrid, dimBlock, 0, stream>>>(p.dstPtr, p.dstPos, p.srcPtr, p.srcPos, p.extent, p.elemSize);
+  rt::launch(translate, dimGrid, dimBlock, 0, stream, p.dstPtr, p.dstPos, p.srcPtr, p.srcPos, p.extent, p.elemSize);
 }
