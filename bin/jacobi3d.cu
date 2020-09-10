@@ -143,20 +143,17 @@ if (parser.need_help()) {
 
   MPI_Init(&argc, &argv);
 
-  int size;
-  int rank;
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  const int size = mpi::world_size();
+  const int rank = mpi::world_rank();
 
   if (0 == rank) {
 #ifndef NDEBUG
-    std::cout << "ERR: not release mode\n";
-    std::cerr << "ERR: not release mode\n";
-    exit(-1);
+    std::cout << "WARN: not release mode\n";
+    std::cerr << "WARN: not release mode\n";
 #endif
 #ifdef STENCIL_EXCHANGE_STATS
-    std::cout << "ERR: STENCIL_EXCHANGE_STATS\n";
-    std::cerr << "ERR: STENCIL_EXCHANGE_STATS\n";
+    std::cout << "ERR: STENCIL_EXCHANGE_STATS defined\n";
+    std::cerr << "ERR: STENCIL_EXCHANGE_STATS defined\n";
     exit(-1);
 #endif
   }
@@ -384,7 +381,7 @@ if (parser.need_help()) {
       MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
       iterTime.insert(elapsed);
 
-      if (paraview && (iter % checkpointPeriod == 0)) {
+      if (paraview && (checkpointPeriod > 0) && (iter % checkpointPeriod == 0)) {
         dd.write_paraview(prefix + "jacobi3d_" + std::to_string(iter));
       }
     }

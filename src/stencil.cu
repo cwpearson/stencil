@@ -1098,20 +1098,19 @@ void DistributedDomain::exchange() {
 }
 
 void DistributedDomain::write_paraview(const std::string &prefix, bool zeroNaNs) {
-
   const char delim[] = ",";
 
   nvtxRangePush("write_paraview");
 
-  int rank, size;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  MPI_Comm_size(MPI_COMM_WORLD, &size);
+  const int rank = mpi::world_rank();
+  const int size = mpi::world_size();
 
   int64_t num = rank * domains_.size();
 
   for (size_t di = 0; di < domains_.size(); ++di) {
     int64_t id = rank * domains_.size() + di;
     const std::string path = prefix + "_" + std::to_string(id) + ".txt";
+    LOG_INFO("write paraview file " << path);
 
     LocalDomain &domain = domains_[di];
 
@@ -1121,8 +1120,12 @@ void DistributedDomain::write_paraview(const std::string &prefix, bool zeroNaNs)
       quantities.push_back(domain.interior_to_host(qi));
     }
 
-    LOG_INFO("open " << path);
+    LOG_DEBUG("open " << path);
     FILE *outf = fopen(path.c_str(), "w");
+    if (!outf) {
+      LOG_ERROR("unable to open \"" << path << "\" for writing");
+      return;
+    }
 
     // column headers
     fprintf(outf, "Z%sY%sX", delim, delim);

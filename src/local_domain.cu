@@ -63,6 +63,7 @@ Rect3 LocalDomain::get_compute_region() const noexcept {
 
 void LocalDomain::swap() noexcept {
   nvtxRangePush("swap");
+  LOG_SPEW("enter swap()");
 
   // swap the host copy of the pointers
   assert(currDataPtrs_.size() == nextDataPtrs_.size());
@@ -73,6 +74,7 @@ void LocalDomain::swap() noexcept {
   // update the device version of the pointers
   CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(), currDataPtrs_.size() * sizeof(currDataPtrs_[0]),
                           cudaMemcpyHostToDevice));
+  LOG_SPEW("exit swap()");
   nvtxRangePop();
 }
 
@@ -134,9 +136,8 @@ std::vector<unsigned char> LocalDomain::region_to_host(const Dim3 &pos, const Di
   dim3 dimBlock = Dim3::make_block_dim(ext, 512);
   dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
   const cudaPitchedPtr curr = curr_data(qi);
-  LOG_SPEW("region_to_host: packing pos=" << pos << " ext=" << ext << " pitch=" << curr.pitch << " xsize=" << curr.xsize);
-  dimGrid = 1;
-  dimBlock = 1;
+  LOG_SPEW("region_to_host: packing pos=" << pos << " ext=" << ext << " pitch=" << curr.pitch
+                                          << " xsize=" << curr.xsize);
   pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr, pos, ext, elem_size(qi));
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
@@ -171,11 +172,9 @@ void LocalDomain::realize() {
     LOG_SPEW("radius +z=" << radius_.z(1));
     LOG_SPEW("radius -z=" << radius_.z(-1));
 
-    cudaExtent extent = make_cudaExtent(
-      extent.width = (sz_.x + radius_.x(-1) + radius_.x(1)) * elemSz,
-      extent.height = sz_.y + radius_.y(-1) + radius_.y(1),
-      extent.depth = sz_.z + radius_.z(-1) + radius_.z(1)
-    );
+    cudaExtent extent = make_cudaExtent(extent.width = (sz_.x + radius_.x(-1) + radius_.x(1)) * elemSz,
+                                        extent.height = sz_.y + radius_.y(-1) + radius_.y(1),
+                                        extent.depth = sz_.z + radius_.z(-1) + radius_.z(1));
 
     cudaPitchedPtr c = {}; // current
     cudaPitchedPtr n = {}; // next

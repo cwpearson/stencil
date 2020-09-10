@@ -28,7 +28,7 @@
 #include "stencil/tx_cuda.cuh"
 #include "stencil/pitched_ptr.hpp"
 
-enum class MethodFlags {
+enum class MethodFlags : int {
   None = 0,
   CudaMpi = 1,
   CudaAwareMpi = 2,
@@ -37,9 +37,9 @@ enum class MethodFlags {
   CudaMemcpyPeer = 16,
   CudaKernel = 32,
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
-  All = 1 + 2 + 4 + 8 + 16 + 32
+  All = 1 + 2 + 4 + 16 + 32
 #else
-  All = 1 + 4 + 8 + 16 + 32
+  All = 1 + 4 + 16 + 32
 #endif
 };
 static_assert(sizeof(MethodFlags) == sizeof(int), "int");

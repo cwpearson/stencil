@@ -184,15 +184,20 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
 
 ## ParaView (5.8.0)
 
+![jacobi3d after 1000 iterations](static/paraview.png)
+
+First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 --paraview --iters 1000`.
+
 * `File` > `Open`. Open individually, not as a group
-  * Select the delimiters, then hit apply on the properties pane
+  * Select the delimiters, then hit apply on the `Properties` tab of the Pipeline Browser. `,` is the delimiter used by this library.
 * Group the files into a single dataset.
   * Select the two files, then `Filters` > `Common` > `Group Datasets`.
   * `Apply`. This will create a new combined GroupDatasets1 in the pipeline browser.
 * Select the dataset and `Filters` > `Alphabetical` > `Table to Points`
-  * Select the x,y,z columns in the `Properties` pane.
+  * Select the x,y,z columns in the `Properties` tab
   * Click on the vizualization window
   * `Apply`
+* In the `Coloring` section of the `Properties` tab, choose the name of the data field.
 
 
 ## Design Goals
