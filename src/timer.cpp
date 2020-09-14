@@ -12,4 +12,5 @@ void Timer::clear() {
 
 namespace timers {
 /* extern */ Timer cudaRuntime;
+/* extern */ Timer mpi;
 }
