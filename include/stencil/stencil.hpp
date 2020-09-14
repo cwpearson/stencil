@@ -22,11 +22,11 @@
 #include "stencil/mpi_topology.hpp"
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
+#include "stencil/pitched_ptr.hpp"
 #include "stencil/radius.hpp"
 #include "stencil/tx.hpp"
 #include "stencil/tx_colocated_direct_access.cuh"
 #include "stencil/tx_cuda.cuh"
-#include "stencil/pitched_ptr.hpp"
 
 enum class MethodFlags : int {
   None = 0,
@@ -103,11 +103,9 @@ private:
   // kernel sender for same-domain sends
   PeerAccessSender peerAccessSender_;
 
-
   // Colocated Senders
   std::vector<std::map<Dim3, StatefulSender *>> coloSenders_; // vec[domain][dstIdx] = sender
   std::vector<std::map<Dim3, StatefulRecver *>> coloRecvers_;
-
 
   // prefix for any generated output files
   std::string outputPrefix_;
@@ -115,6 +113,7 @@ private:
 #ifdef STENCIL_SETUP_STATS
   // count of how many bytes are sent through various methods in each exchange
   uint64_t numBytesCudaMpi_;
+  uint64_t numBytesColoDirectAccess_;
   uint64_t numBytesColoPackMemcpyUnpack_;
   uint64_t numBytesCudaMemcpyPeer_;
   uint64_t numBytesCudaKernel_;
@@ -175,7 +174,7 @@ public:
 
   /*! return true if any provided methods are enabled
    */
-  bool any_methods(MethodFlags methods) const noexcept { return (methods & flags_) != MethodFlags::None; }
+  bool any_methods(MethodFlags methods) const noexcept { return methods && flags_; }
 
   /* Choose GPUs for this rank. Call before realize()
    */

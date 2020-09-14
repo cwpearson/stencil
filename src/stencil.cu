@@ -135,6 +135,9 @@ uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method)
   if ((method && MethodFlags::CudaMpi) || (method && MethodFlags::CudaAwareMpi)) {
     ret += numBytesCudaMpi_;
   }
+  if (method && MethodFlags::ColoDirectAccess) {
+    ret += numBytesColoDirectAccess_;
+  }
   if (method && MethodFlags::ColoPackMemcpyUnpack) {
     ret += numBytesColoPackMemcpyUnpack_;
   }
@@ -469,6 +472,7 @@ to be loaded with numpy.loadtxt
   {
 #ifdef STENCIL_SETUP_STATS
     numBytesCudaMpi_ = 0;
+    numBytesColoDirectAccess_ = 0;
     numBytesColoPackMemcpyUnpack_ = 0;
     numBytesCudaMemcpyPeer_ = 0;
     numBytesCudaKernel_ = 0;
@@ -535,7 +539,14 @@ to be loaded with numpy.loadtxt
 #ifdef STENCIL_SETUP_STATS
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
-            numBytesColoPackMemcpyUnpack_ += domains_[di].halo_bytes(msg.dir_ * -1, i);
+            uint64_t numBytes = domains_[di].halo_bytes(msg.dir_ * -1, i);
+            if (flags_ && MethodFlags::ColoDirectAccess) {
+              numBytesColoDirectAccess_ += numBytes;
+            } else if (flags_ && MethodFlags::ColoPackMemcpyUnpack) {
+              numBytesColoPackMemcpyUnpack_ += numBytes;
+            } else {
+              LOG_WARN("unpected method flag, statistics may be nonsense");
+            }
           }
 #endif
         }
@@ -567,6 +578,7 @@ to be loaded with numpy.loadtxt
 #ifdef STENCIL_SETUP_STATS
     nvtxRangePush("allreduce communication stats");
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMpi_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &numBytesColoDirectAccess_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &numBytesColoPackMemcpyUnpack_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaMemcpyPeer_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &numBytesCudaKernel_, 1, MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
@@ -574,6 +586,7 @@ to be loaded with numpy.loadtxt
 
     if (rank_ == 0) {
       LOG_INFO(numBytesCudaMpi_ << "B CudaMpi / exchange");
+      LOG_INFO(numBytesColoDirectAccess_ << "B ColoDirectAccess / exchange");
       LOG_INFO(numBytesColoPackMemcpyUnpack_ << "B ColoPackMemcpyUnpack / exchange");
       LOG_INFO(numBytesCudaMemcpyPeer_ << "B CudaMemcpyPeer / exchange");
       LOG_INFO(numBytesCudaKernel_ << "B CudaKernel / exchange");
