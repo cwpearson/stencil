@@ -55,7 +55,8 @@ int main(int argc, char **argv) {
   std::string prefix;
   bool useKernel = false;
   bool usePeer = false;
-  bool useColo = false;
+  bool useColoPmu = false;
+  bool useColoDa = false;
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
   bool useCudaAware = false;
 #endif
@@ -70,13 +71,14 @@ int main(int argc, char **argv) {
   p.add_option(prefix, "--prefix");
   p.add_flag(useKernel, "--kernel");
   p.add_flag(usePeer, "--peer");
-  p.add_flag(useColo, "--colo");
+  p.add_flag(useColoPmu, "--colo-pmu");
+  p.add_flag(useColoDa, "--colo-da");
+  p.add_flag(useStaged, "--staged");
   p.add_flag(useNaivePlacement, "--naive");
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
   p.add_flag(useCudaAware, "--cuda-aware");
 #endif
-  p.add_flag(useStaged, "--staged");
-  p.add_flag(useNaivePlacement, "--naive");
+
   if (!p.parse(argc, argv)) {
     std::cout << p.help() << "\n";
     exit(EXIT_FAILURE);
@@ -117,8 +119,11 @@ int main(int argc, char **argv) {
     methods = MethodFlags::CudaAwareMpi;
   }
 #endif
-  if (useColo) {
+  if (useColoPmu) {
     methods |= MethodFlags::ColoPackMemcpyUnpack;
+  }
+  if (useColoDa) {
+    methods |= MethodFlags::ColoDirectAccess;
   }
   if (usePeer) {
     methods |= MethodFlags::CudaMemcpyPeer;
@@ -184,7 +189,6 @@ int main(int argc, char **argv) {
       stats.insert(elapsed);
     }
 
-
 #ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
       std::string methodStr;
@@ -198,7 +202,11 @@ int main(int argc, char **argv) {
       }
       if (methods && MethodFlags::ColoPackMemcpyUnpack) {
         methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "colo";
+        methodStr += "colo-pmu";
+      }
+      if (methods && MethodFlags::ColoDirectAccess) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "colo-da";
       }
       if (methods && MethodFlags::CudaMemcpyPeer) {
         methodStr += methodStr.empty() ? "" : "/";
@@ -219,23 +227,24 @@ int main(int argc, char **argv) {
       // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,gpus,nodes,ranks,trimean (s)
       // clang-format on
       printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
-             "%lu,%lu,%lu," // ldx ldy ldz
-             "%lu,%lu,%lu,%lu,"             // <- exchange bytes
+             "%lu,%lu,%lu,"                    // ldx ldy ldz
+             "%lu,%lu,%lu,%lu,"                // <- exchange bytes
              "%d,%d,%d,%d,%e\n",
-             methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, 
-             dd.domains()[0].size().x,
-             dd.domains()[0].size().y,
-             dd.domains()[0].size().z,
-             dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
+             methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.domains()[0].size().x,
+             dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
              dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack),
              dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, stats.trimean());
+             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size,
+             stats.trimean());
     }
 #endif // STENCIL_SETUP_STATS
 
   } // send domains out of scope before MPI_Finalize
 
   MPI_Finalize();
+
+  std::cerr << "cuda=" << timers::cudaRuntime.get_elapsed() / nIters << "\n";
+  std::cerr << "mpi=" << timers::mpi.get_elapsed() / nIters << "\n";
 
   return 0;
 }

@@ -50,11 +50,14 @@ int main(int argc, char **argv) {
   size_t y = 512;
   size_t z = 512;
 
+  std::string prefix;
+
   int nIters = 30;
   bool useNaivePlacement = false;
   bool useKernel = false;
   bool usePeer = false;
-  bool useColo = false;
+  bool useColoPmu = false;
+  bool useColoDa = false;
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
   bool useCudaAware = false;
 #endif
@@ -68,8 +71,10 @@ int main(int argc, char **argv) {
   p.add_positional(nIters)->required();
   p.add_flag(useKernel, "--kernel");
   p.add_flag(usePeer, "--peer");
-  p.add_flag(useColo, "--colo");
+  p.add_flag(useColoPmu, "--colo-pmu");
+  p.add_flag(useColoDa, "--colo-da");
   p.add_flag(useNaivePlacement, "--naive");
+  p.add_option(prefix, "--prefix");
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
   p.add_flag(useCudaAware, "--cuda-aware");
 #endif
@@ -88,8 +93,11 @@ int main(int argc, char **argv) {
     methods = MethodFlags::CudaAwareMpi;
   }
 #endif
-  if (useColo) {
+  if (useColoPmu) {
     methods |= MethodFlags::ColoPackMemcpyUnpack;
+  }
+  if (useColoDa) {
+    methods |= MethodFlags::ColoDirectAccess;
   }
   if (usePeer) {
     methods |= MethodFlags::CudaMemcpyPeer;
@@ -125,6 +133,7 @@ int main(int argc, char **argv) {
 
     dd.set_methods(methods);
     dd.set_radius(radius);
+    dd.set_output_prefix(prefix);
     if (useNaivePlacement) {
       dd.set_placement(PlacementStrategy::Trivial);
     } else {
@@ -137,7 +146,6 @@ int main(int argc, char **argv) {
     dd.add_data<float>("d3");
 
     dd.realize();
-
 
     Statistics stats;
     MPI_Barrier(MPI_COMM_WORLD);
@@ -166,7 +174,11 @@ int main(int argc, char **argv) {
       }
       if (methods && MethodFlags::ColoPackMemcpyUnpack) {
         methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "colo";
+        methodStr += "colo-pmu";
+      }
+      if (methods && MethodFlags::ColoDirectAccess) {
+        methodStr += methodStr.empty() ? "" : "/";
+        methodStr += "colo-da";
       }
       if (methods && MethodFlags::CudaMemcpyPeer) {
         methodStr += methodStr.empty() ? "" : "/";
@@ -186,19 +198,16 @@ int main(int argc, char **argv) {
       // header should be
       // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,sds,nodes,ranks,exchange trimean (s)
       // clang-format on
-      printf(
-          "exchange,%s,%d,%lu,%lu,%lu,%lu," // s
-          "%lu,%lu,%lu,"                    // ldx,ldy,ldz
-          "%lu,%lu,%lu,%lu,"                // different exchange bytes
-          "%d,%d,%d,%d,%e\n",
-          methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z,
-          dd.domains()[0].size().x,
-          dd.domains()[0].size().y,
-          dd.domains()[0].size().z,
-          dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
-          dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack),
-          dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-          dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size, stats.trimean());
+      printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
+             "%lu,%lu,%lu,"                    // ldx,ldy,ldz
+             "%lu,%lu,%lu,%lu,"                // different exchange bytes
+             "%d,%d,%d,%d,%e\n",
+             methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.domains()[0].size().x,
+             dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
+             dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack),
+             dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
+             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size,
+             stats.trimean());
     }
 #endif // STENCIL_EXCHANGE_STATS
 
