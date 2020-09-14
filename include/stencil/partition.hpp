@@ -757,8 +757,6 @@ public:
         std::cerr << "\n";
 
         for (int64_t id = 0; id < gpusPerNode; ++id) {
-          const Dim3 nodeIdx = partition_.node_idx(id);
-          const Dim3 sdSize = partition_.subdomain_size(sysIdx * nodeDim + nodeIdx);
 
           // each component is owned by a rank and has a local ID
           size_t component = components[id];
@@ -769,8 +767,13 @@ public:
 
           // implicitly, the global ID is grouped by node, and subdomain id within that node
           const size_t gi = node * gpusPerNode + id;
-          LOG_DEBUG("global id=" << gi << " nodeIdx=" << nodeIdx << " size=" << sdSize << " rank=" << rank
-                                 << " gpuId=" << gpuId << " (cuda=" << cuda << ")");
+          {
+            const Dim3 nodeIdx = partition_.node_idx(id);
+            LOG_DEBUG("global id=" << gi << " nodeIdx=" << nodeIdx
+                                   << " size=" << partition_.subdomain_size(sysIdx * nodeDim + nodeIdx)
+                                   << " rank=" << rank << " gpuId=" << gpuId << " (cuda=" << cuda << ")");
+            (void)nodeIdx; // in case debug is not defined
+          }
 
           rankAssignment[gi] = rank;
           idForDomain[gi] = gpuId;
