@@ -8,11 +8,6 @@
 #include "stencil/logging.hpp"
 #include "tx_common.hpp"
 
-/* Use the CUDA Graph API to accelerate repeated
-   pack/unpack kernel launches
-*/
-#define STENCIL_USE_CUDA_GRAPH 1
-
 inline void rand_sleep() {
   int ms = rand() % 10;
   std::this_thread::sleep_for(std::chrono::milliseconds(ms));
@@ -65,7 +60,7 @@ public:
   DevicePacker(cudaStream_t stream)
       : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
   ~DevicePacker() {
-#if STENCIL_USE_CUDA_GRAPH == 1
+#ifdef STENCIL_USE_CUDA_GRAPH
     // TODO: these need to be guarded from ctor without prepare()?
     if (graph_) {
       CUDA_RUNTIME(cudaGraphDestroy(graph_));
@@ -104,7 +99,7 @@ public:
   DeviceUnpacker(cudaStream_t stream)
       : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
   ~DeviceUnpacker() {
-#if STENCIL_USE_CUDA_GRAPH == 1
+#ifdef STENCIL_USE_CUDA_GRAPH
     // TODO: these need to be guarded from ctor without prepare()?
     if (graph_) {
       CUDA_RUNTIME(cudaGraphDestroy(graph_));

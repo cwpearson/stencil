@@ -75,7 +75,7 @@ void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &mess
 /* if we are using the graph API, record all the kernel launches here, otherwise
  * they will be done on-demand
  */
-#if STENCIL_USE_CUDA_GRAPH == 1
+#ifdef STENCIL_USE_CUDA_GRAPH
   assert(stream_ != 0 && "can't capture the NULL stream, unless cudaStreamPerThread");
   // TODO: safer if thread-local?
   CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal));
@@ -114,7 +114,7 @@ void DevicePacker::launch_pack_kernels() {
 #endif
     rt::launch(dev_packer_pack_domain, dimGrid, dimBlock, 0, stream_, &devBuf_[offset], domain_->dev_curr_datas(),
                domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
-#if STENCIL_USE_CUDA_GRAPH == 0
+#ifndef STENCIL_USE_CUDA_GRAPH
     // 900: not allowed while stream is capturing
     CUDA_RUNTIME(rt::time(cudaGetLastError()));
 #endif
@@ -128,7 +128,7 @@ void DevicePacker::launch_pack_kernels() {
 
 void DevicePacker::pack() {
   assert(size_);
-#if STENCIL_USE_CUDA_GRAPH == 1
+#ifdef STENCIL_USE_CUDA_GRAPH
   CUDA_RUNTIME(rt::time(cudaGraphLaunch, instance_, stream_));
 #else
   launch_pack_kernels();
@@ -167,7 +167,7 @@ void DeviceUnpacker::prepare(LocalDomain *domain, const std::vector<Message> &me
 /* if we are using the graph API, record all the kernel launches here, otherwise
  * they will be done on-demand
  */
-#if STENCIL_USE_CUDA_GRAPH == 1
+#ifdef STENCIL_USE_CUDA_GRAPH
   assert(stream_ != 0 && "can't capture the NULL stream, unless cudaStreamPerThread");
   // TODO: safer if thread-local?
   CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal));
@@ -199,7 +199,7 @@ void DeviceUnpacker::launch_unpack_kernels() {
 #endif
     rt::launch(dev_unpacker_unpack_domain, dimGrid, dimBlock, 0, stream_, domain_->dev_curr_datas(), &devBuf_[offset],
                domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
-#if STENCIL_USE_CUDA_GRAPH == 0
+#ifndef STENCIL_USE_CUDA_GRAPH
     // 900: operation not permitted while stream is capturing
     CUDA_RUNTIME(rt::time(cudaGetLastError()));
 #endif
@@ -212,7 +212,7 @@ void DeviceUnpacker::launch_unpack_kernels() {
 
 void DeviceUnpacker::unpack() {
   assert(size_);
-#if STENCIL_USE_CUDA_GRAPH == 1
+#ifdef STENCIL_USE_CUDA_GRAPH
   CUDA_RUNTIME(rt::time(cudaGraphLaunch, instance_, stream_));
 #else
   launch_unpack_kernels();
