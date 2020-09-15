@@ -19,6 +19,7 @@ option(USE_CUDA "compile with CUDA support" ON)
 option(USE_CUDA_AWARE_MPI "assume CUDA-aware MPI support" OFF)
 option(SETUP_STATS "track statistics that may increase setup time" ON)
 option(EXCHANGE_STATS "track statistics that may increase exchange time" OFF)
+option(USE_CUDA_GRAPH "use CUDA graph API to accelerate calls" ON)
 
 # Set a log level if none was specified
 if(NOT DEFINED STENCIL_OUTPUT_LEVEL)
@@ -199,6 +200,11 @@ if (SETUP_STATS)
   target_compile_definitions(stencil PUBLIC -DSTENCIL_SETUP_STATS=1)
 else()
   message(STATUS "SETUP_STATS=OFF")
+endif()
+
+if (USE_CUDA_GRAPH)
+  message(STATUS "USE_CUDA_GRAPH=ON, compiling with -DSTENCIL_USE_CUDA_GRAPH")
+  target_compile_definitions(stencil PUBLIC -DSTENCIL_USE_CUDA_GRAPH)
 endif()
 
 if(CMAKE_CUDA_COMPILER)
