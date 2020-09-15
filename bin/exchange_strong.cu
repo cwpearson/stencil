@@ -163,35 +163,7 @@ int main(int argc, char **argv) {
 
 #ifdef STENCIL_SETUP_STATS
     if (0 == rank) {
-      std::string methodStr;
-      if (methods && MethodFlags::CudaMpi) {
-        methodStr += methodStr.empty() ? "" : ",";
-        methodStr += "staged";
-      }
-      if (methods && MethodFlags::CudaAwareMpi) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "cuda-aware";
-      }
-      if (methods && MethodFlags::ColoPackMemcpyUnpack) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "colo-pmu";
-      }
-      if (methods && MethodFlags::ColoDirectAccess) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "colo-da";
-      }
-      if (methods && MethodFlags::CudaMemcpyPeer) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "peer";
-      }
-      if (methods && MethodFlags::CudaKernel) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "kernel";
-      }
-      if (methods == MethodFlags::All) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "all";
-      }
+      const std::string methodStr = to_string(methods);
 
       // clang-format off
       // same as strong.cu

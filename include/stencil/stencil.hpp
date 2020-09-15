@@ -42,7 +42,6 @@ enum class MethodFlags : int {
   All = 1 + 4 + 16 + 32
 #endif
 };
-static_assert(sizeof(MethodFlags) == sizeof(int), "int");
 
 inline MethodFlags operator|(MethodFlags a, MethodFlags b) {
   return static_cast<MethodFlags>(static_cast<int>(a) | static_cast<int>(b));
@@ -61,8 +60,48 @@ inline bool operator&&(MethodFlags a, MethodFlags b) { return (a & b) != MethodF
 
 inline bool any(MethodFlags a) noexcept { return a != MethodFlags::None; }
 
+inline std::string to_string(const MethodFlags &m) {
+
+  std::string ret;
+  const std::string sep("|");
+
+  if (m == MethodFlags::None) {
+    return "";
+  }
+
+  if (m && MethodFlags::CudaMpi) {
+    ret += ret.empty() ? "" : sep;
+    ret += "staged";
+  }
+  if (m && MethodFlags::CudaAwareMpi) {
+    ret += ret.empty() ? "" : sep;
+    ret += "cuda-aware";
+  }
+  if (m && MethodFlags::ColoPackMemcpyUnpack) {
+    ret += ret.empty() ? "" : sep;
+    ret += "colo-pmu";
+  }
+  if (m && MethodFlags::ColoDirectAccess) {
+    ret += ret.empty() ? "" : sep;
+    ret += "colo-da";
+  }
+  if (m && MethodFlags::CudaMemcpyPeer) {
+    ret += ret.empty() ? "" : sep;
+    ret += "peer";
+  }
+  if (m && MethodFlags::CudaKernel) {
+    ret += ret.empty() ? "" : sep;
+    ret += "kernel";
+  }
+
+  return ret;
+}
+
 class DistributedDomain {
 private:
+
+  // logical size of the allocation, in elements.
+  //Typically larger than the compute region due to halo 
   Dim3 size_;
 
   int rank_;

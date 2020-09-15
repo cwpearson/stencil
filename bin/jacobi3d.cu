@@ -391,27 +391,7 @@ if (parser.need_help()) {
     }
 
     if (0 == mpi::world_rank()) {
-      std::string methodStr;
-      if (methods && MethodFlags::CudaMpi) {
-        methodStr += methodStr.empty() ? "" : ",";
-        methodStr += "staged";
-      }
-      if (methods && MethodFlags::CudaAwareMpi) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "cuda-aware";
-      }
-      if (methods && MethodFlags::ColoPackMemcpyUnpack) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "colo";
-      }
-      if (methods && MethodFlags::CudaMemcpyPeer) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "peer";
-      }
-      if (methods && MethodFlags::CudaKernel) {
-        methodStr += methodStr.empty() ? "" : "/";
-        methodStr += "kernel";
-      }
+      const std::string methodStr = to_string(methods);
 
       std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
                 << dd.exchange_bytes_for_method(MethodFlags::CudaMpi) << ","
@@ -424,7 +404,8 @@ if (parser.need_help()) {
 
   MPI_Finalize();
 
-  std::cerr << timers::cudaRuntime.get_elapsed() << "\n";
+  std::cerr << "cuda=" << timers::cudaRuntime.get_elapsed() << "\n";
+  std::cerr << "mpi=" << timers::mpi.get_elapsed() << "\n";
 
   return 0;
 }
