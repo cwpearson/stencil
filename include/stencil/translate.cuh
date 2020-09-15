@@ -8,9 +8,9 @@
 
    Doing the same logical 3D translation across multiple allocations, of possibly different-sized elements
 
-   Uses cudaGraph API to accelerate multiple transfers
+   Uses CUDA operations, and optionally accelerated with the CUDA graph API
 */
-class Translate {
+class Translator {
 
 public:
   /* parameters for the same logical transfer across multiple allocations of different sizes
@@ -28,7 +28,8 @@ public:
     Params() = default;
   };
 
-  Translate();
+  Translator();
+  virtual ~Translator();
 
   /* setup to do the requested copies
    */
@@ -38,14 +39,8 @@ public:
    */
   void async(cudaStream_t stream);
 
-private:
-  /* launch all the translate operations
-     if cudaGraph is used, this will occur once in the setup
-     otherwise, it will be used every time
-  */
-  void launch_all(cudaStream_t stream);
-
-  /* Common parameters format for all 3D transfers
+protected:
+  /* Common parameter format for all 3D transfers
    */
   struct Param {
     cudaPitchedPtr dstPtr; // dst allocation
@@ -60,11 +55,45 @@ private:
         : dstPtr(_dstPtr), dstPos(_dstPos), srcPtr(_srcPtr), srcPos(_srcPos), extent(_extent), elemSize(_elemSize) {}
   };
 
-  // initiate a 3D transfer using cudaMemcpy3DAsync (not Peer because we may not see both devices)
-  static void memcpy_3d_async(const Param &param, cudaStream_t stream);
+  std::vector<Param> params_;
+
+#ifdef STENCIL_USE_CUDA_GRAPH
+  cudaGraph_t graph_;
+  cudaGraphExec_t instance_;
+#endif
+
+private:
+  virtual void launch_all(cudaStream_t stream) = 0;
+};
+
+class TranslatorDirectAccess : public Translator {
+
+public:
+  // create a translator that will run on a device
+  TranslatorDirectAccess(int device);
+
+private:
+  /* launch all the translate operations
+     if cudaGraph is used, this will occur once in the setup
+     otherwise, it will be used every time
+  */
+  void launch_all(cudaStream_t stream) override;
 
   // initiate a 3D transfer using a kernel
   static void kernel(const Param &param, const int device, cudaStream_t stream);
 
-  std::vector<Param> params_;
+  int device_;
+};
+
+class TranslatorMemcpy3D : public Translator {
+
+private:
+  /* launch all the translate operations
+     if cudaGraph is used, this will occur once in the setup
+     otherwise, it will be used every time
+  */
+  void launch_all(cudaStream_t stream) override;
+
+  // initiate a 3D transfer using cudaMemcpy3DAsync (not Peer because we may not have an ID for both devices)
+  static void memcpy_3d_async(const Param &param, cudaStream_t stream);
 };

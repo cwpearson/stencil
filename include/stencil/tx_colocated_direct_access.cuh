@@ -16,7 +16,7 @@ private:
   Placement *placement_;
   RcStream stream_;
   IpcSender ipcSender_;
-  Translate translate_;
+  TranslatorDirectAccess translate_;
 
   /* one memory handle per quantity
    */

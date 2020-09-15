@@ -23,7 +23,7 @@ ColoDirectAccessHaloSender::ColoDirectAccessHaloSender(int srcRank, int srcDom, 
                                                        LocalDomain &domain, Placement *placement)
     : srcRank_(srcRank), dstRank_(dstRank), srcDom_(srcDom), dstDom_(dstDom), domain_(&domain), placement_(placement),
       stream_(domain.gpu(), RcStream::Priority::HIGH), ipcSender_(srcRank, srcDom, dstRank, dstDom, domain.gpu()),
-      dstDomCurrDatasDev_(nullptr) {}
+      translate_(domain.gpu()), dstDomCurrDatasDev_(nullptr) {}
 
 void ColoDirectAccessHaloSender::start_prepare(const std::vector<Message> &outbox) {
   nvtxRangePush("ColoDirectAccessHaloSender::start_prepare");
@@ -78,7 +78,7 @@ void ColoDirectAccessHaloSender::finish_prepare() {
   LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: pushed pointers");
 
   {
-    std::vector<Translate::Params> params;
+    std::vector<Translator::Params> params;
     // get the dst idx;
     const Dim3 dstIdx = placement_->get_idx(dstRank_, dstDom_);
 
@@ -94,7 +94,7 @@ void ColoDirectAccessHaloSender::finish_prepare() {
       const Dim3 srcPos = domain_->halo_pos(msg.dir_, false /*interior*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
 
-      Translate::Params p{.dsts = dstDomCurrDatas_.data(),
+      Translator::Params p{.dsts = dstDomCurrDatas_.data(),
                           .dstPos = dstPos,
                           .srcs = domain_->curr_datas().data(),
                           .srcPos = srcPos,
@@ -151,8 +151,8 @@ void ColoDirectAccessHaloRecver::start_prepare(const std::vector<Message> &inbox
 
   // post send of pitch information
   const int ptrTag = make_tag<MsgKind::ColocatedPtr>(ipc_tag_payload(srcDom_, dstDom_));
-  MPI_Isend(domain_->curr_datas().data(), domain_->curr_datas().size() * sizeof(domain_->curr_datas()[0]), MPI_BYTE, srcRank_,
-            ptrTag, MPI_COMM_WORLD, &ptrReq_);
+  MPI_Isend(domain_->curr_datas().data(), domain_->curr_datas().size() * sizeof(domain_->curr_datas()[0]), MPI_BYTE,
+            srcRank_, ptrTag, MPI_COMM_WORLD, &ptrReq_);
 
   ipcRecver_.async_prepare();
 }
