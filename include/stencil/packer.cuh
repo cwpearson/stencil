@@ -8,11 +8,6 @@
 #include "stencil/logging.hpp"
 #include "tx_common.hpp"
 
-inline void rand_sleep() {
-  int ms = rand() % 10;
-  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
-}
-
 class Packer {
 public:
   // prepare pack a domain for messages
@@ -57,19 +52,9 @@ private:
   void launch_pack_kernels();
 
 public:
-  DevicePacker(cudaStream_t stream)
-      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
-  ~DevicePacker() {
-#ifdef STENCIL_USE_CUDA_GRAPH
-    // TODO: these need to be guarded from ctor without prepare()?
-    if (graph_) {
-      CUDA_RUNTIME(cudaGraphDestroy(graph_));
-    }
-    if (instance_) {
-      CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
-    }
-#endif
-  }
+  DevicePacker(cudaStream_t stream);
+
+  ~DevicePacker(); 
 
   virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages);
 
@@ -98,17 +83,7 @@ private:
 public:
   DeviceUnpacker(cudaStream_t stream)
       : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
-  ~DeviceUnpacker() {
-#ifdef STENCIL_USE_CUDA_GRAPH
-    // TODO: these need to be guarded from ctor without prepare()?
-    if (graph_) {
-      CUDA_RUNTIME(cudaGraphDestroy(graph_));
-    }
-    if (instance_) {
-      CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
-    }
-#endif
-  }
+  ~DeviceUnpacker();
 
   virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages) override;
 

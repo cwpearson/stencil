@@ -43,13 +43,27 @@ __global__ void dev_unpacker_unpack_domain(cudaPitchedPtr *dsts,    // buffers t
   }
 }
 
-void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &messages) {
+DevicePacker::DevicePacker(cudaStream_t stream)
+      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
 
+DevicePacker::~DevicePacker() {
+#ifdef STENCIL_USE_CUDA_GRAPH
+  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+  if (graph_) {
+    CUDA_RUNTIME(cudaGraphDestroy(graph_));
+    graph_ = 0;    
+  } 
+  if (instance_) {
+    CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
+    instance_ = 0;
+  }
+#endif
+}
+
+void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &messages) {
   domain_ = domain;
   dirs_ = messages;
   std::sort(dirs_.begin(), dirs_.end());
-
-  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
   // compute the required buffer size for all messages
   size_ = 0;
@@ -70,6 +84,7 @@ void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &mess
   }
 
   // allocate the buffer for the packing
+  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   CUDA_RUNTIME(cudaMalloc(&devBuf_, size_));
 
 /* if we are using the graph API, record all the kernel launches here, otherwise
@@ -78,10 +93,12 @@ void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &mess
 #ifdef STENCIL_USE_CUDA_GRAPH
   assert(stream_ != 0 && "can't capture the NULL stream, unless cudaStreamPerThread");
   // TODO: safer if thread-local?
-  CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal));
+  CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
   launch_pack_kernels();
   CUDA_RUNTIME(cudaStreamEndCapture(stream_, &graph_));
+  assert(graph_);
   CUDA_RUNTIME(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
+  assert(instance_);
 #else
   // no other prep to do
 #endif
@@ -116,7 +133,7 @@ void DevicePacker::launch_pack_kernels() {
                domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
 #ifndef STENCIL_USE_CUDA_GRAPH
     // 900: not allowed while stream is capturing
-    CUDA_RUNTIME(rt::time(cudaGetLastError()));
+    CUDA_RUNTIME(rt::time(cudaGetLastError));
 #endif
     for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
       offset = next_align_of(offset, domain_->elem_size(qi));
@@ -124,16 +141,32 @@ void DevicePacker::launch_pack_kernels() {
       offset += domain_->halo_bytes(msg.dir_ * -1, qi);
     }
   }
+  CUDA_RUNTIME(rt::time(cudaGetLastError));
 }
 
 void DevicePacker::pack() {
   assert(size_);
 #ifdef STENCIL_USE_CUDA_GRAPH
+  CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
   CUDA_RUNTIME(rt::time(cudaGraphLaunch, instance_, stream_));
 #else
   launch_pack_kernels();
 #endif
 }
+
+DeviceUnpacker::~DeviceUnpacker() {
+#ifdef STENCIL_USE_CUDA_GRAPH
+    // TODO: these need to be guarded from ctor without prepare()?
+    if (graph_) {
+      CUDA_RUNTIME(cudaGraphDestroy(graph_));
+      graph_ = 0;
+    }
+    if (instance_) {
+      CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
+      instance_ = 0;
+    }
+#endif
+  }
 
 void DeviceUnpacker::prepare(LocalDomain *domain, const std::vector<Message> &messages) {
   domain_ = domain;
@@ -168,6 +201,7 @@ void DeviceUnpacker::prepare(LocalDomain *domain, const std::vector<Message> &me
  * they will be done on-demand
  */
 #ifdef STENCIL_USE_CUDA_GRAPH
+  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   assert(stream_ != 0 && "can't capture the NULL stream, unless cudaStreamPerThread");
   // TODO: safer if thread-local?
   CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeGlobal));
@@ -201,18 +235,20 @@ void DeviceUnpacker::launch_unpack_kernels() {
                domain_->dev_elem_sizes(), domain_->num_data(), pos, ext);
 #ifndef STENCIL_USE_CUDA_GRAPH
     // 900: operation not permitted while stream is capturing
-    CUDA_RUNTIME(rt::time(cudaGetLastError()));
+    CUDA_RUNTIME(rt::time(cudaGetLastError));
 #endif
     for (int64_t qi = 0; qi < domain_->num_data(); ++qi) {
       offset = next_align_of(offset, domain_->elem_size(qi));
       offset += domain_->halo_bytes(dir, qi);
     }
   }
+  CUDA_RUNTIME(rt::time(cudaGetLastError));
 }
 
 void DeviceUnpacker::unpack() {
   assert(size_);
 #ifdef STENCIL_USE_CUDA_GRAPH
+  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   CUDA_RUNTIME(rt::time(cudaGraphLaunch, instance_, stream_));
 #else
   launch_unpack_kernels();
