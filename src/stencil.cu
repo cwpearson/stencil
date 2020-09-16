@@ -678,24 +678,31 @@ to be loaded with numpy.loadtxt
   }
   nvtxRangePop(); // create colocated
 
-  std::cerr << "create peer copy\n";
+  LOG_DEBUG("create peer copy");
   // create colocated sender/recvers
   nvtxRangePush("DistributedDomain::realize: create PeerCopySender");
   // per-domain senders and messages
   peerCopySenders_.resize(gpus_.size());
-
+  LOG_SPEW("space for " << peerCopySenders_.size() << " sources");
   // create all required colocated senders/recvers
   for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
+    LOG_SPEW("srcGPU = " << srcGPU);
     for (size_t dstGPU = 0; dstGPU < peerCopyOutboxes[srcGPU].size(); ++dstGPU) {
+      LOG_SPEW("dstGPU = " << dstGPU);
       if (!peerCopyOutboxes[srcGPU][dstGPU].empty()) {
-        peerCopySenders_[srcGPU].emplace(dstGPU, PeerCopySender(srcGPU, dstGPU, domains_[srcGPU], domains_[dstGPU]));
+        LOG_SPEW("create PeerCopySender(" << srcGPU << "," << dstGPU << "...)");
+        PeerCopySender pcs(srcGPU, dstGPU, domains_[srcGPU], domains_[dstGPU]);
+        LOG_SPEW("finished create");
+        peerCopySenders_[srcGPU].emplace(dstGPU, pcs);
+      } else {
+        LOG_SPEW("no msg between srcGPU=" << srcGPU << " and dstGPU=" << dstGPU);
       }
     }
   }
   nvtxRangePop(); // create peer copy
 
   // prepare senders and receivers
-  std::cerr << "DistributedDomain::realize: prepare PeerAccessSender\n";
+  LOG_DEBUG("DistributedDomain::realize: prepare PeerAccessSender");
   nvtxRangePush("DistributedDomain::realize: prep peerAccessSender");
   peerAccessSender_.prepare(peerAccessOutbox, domains_);
   nvtxRangePop();
