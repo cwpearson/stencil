@@ -42,6 +42,8 @@ void Translator::prepare(const std::vector<Params> &params) {
     }
   }
 
+// FIXME: this stream is valid on device 0, but the kernels in TDA::kernel are launched on device device_
+// this may cause invalid resource handle for devices != 0
 #ifdef STENCIL_USE_CUDA_GRAPH
   // create a stream to record from
   RcStream stream;
@@ -67,6 +69,9 @@ void TranslatorDirectAccess::launch_all(cudaStream_t stream) {
   for (const Param &p : params_) {
     kernel(p, device_, stream);
   }
+#ifdef STENCIL_USE_CUDA_GRAPH
+  CUDA_RUNTIME(cudaGetLastError());
+#endif
 }
 
 void TranslatorDirectAccess::kernel(const Param &p, const int device, cudaStream_t stream) {
@@ -77,7 +82,7 @@ void TranslatorDirectAccess::kernel(const Param &p, const int device, cudaStream
   rt::launch(translate, dimGrid, dimBlock, 0, stream, p.dstPtr, p.dstPos, p.srcPtr, p.srcPos, p.extent, p.elemSize);
 #ifndef STENCIL_USE_CUDA_GRAPH
   // 900: operation not permitted while stream is capturing
-  CUDA_RUNTIME(rt::time(cudaGetLastError()));
+  CUDA_RUNTIME(rt::time(cudaGetLastError));
 #endif
 }
 
