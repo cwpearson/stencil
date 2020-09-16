@@ -32,7 +32,7 @@ Depending on availability, the following compiler defines exist:
 ## Requirements
 Tested on
 
-* CUDA 10.1 / 10.2
+* CUDA 10.1 / 10.2 / 11.0
 * OpenMPI 2.1
 
 ## Tests
@@ -47,11 +47,14 @@ To run specific tests
 ```
 test/test_cpu "<case name>" -c "<section name>"
 ```
+With `USE_CUDA_GRAPH=ON`, errors may be reported inconsistently, very late, or be nonsense (e.g., `715 invalid instruction` when a stream was on a wrong device).
+Using a newer CUDA version can improve aspects of error reporting.
+If there is an error, it probably indicates an actual problem, just not necessarily the problem CUDA reports.
 
 It may be useful to run tests under `cuda-memcheck`.
 `cuda-memcheck` may report spurious errors from `cudaDeviceEnablePeerAccess`, so we disable reporting API errors.
 All API calls are checked at runtime at all optimization levels, so errors will always surface.
-
+With `USE_CUDA_GRAPH=ON`, `cuda-memcheck` may not report errors.
 ```
 cuda-memcheck --report-api-errors no test/test_cuda
 ```
@@ -73,11 +76,6 @@ To run specific tests
 test/test_cpu "<case name>" -c "<section name>"
 ```
 
-## Running the Astaroth-sim
-
-```
-mpirun -n 4 src/astaroth-sim
-```
 ## Profiling with nsys
 
 With the default profiling settings, we sometimes see a crash on Nsight Systems 2019.3.7 on amd64.
@@ -173,15 +171,11 @@ Run scripts are in `srcipts/summit`.
 nsight-systems 2020.3.1.71 can crash with the `osrt` or `mpi` profiler turned on.
 Disable with `nsys profile -t cuda,nvtx`.
 
-CUDA 10.1 causes problems with the CUDA graph API. Ensure you are using CUDA 10.2+ when building.
-```
-module load cmake
-module load cuda/10.2.89
-```
-
 To control the compute mode, use `bsub -alloc_flags gpudefault` (see https://www.olcf.ornl.gov/for-users/system-user-guides/summitdev-quickstart-guide/#gpu-specific-jobs)
 
 To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.ornl.gov/systems/summit_user_guide.html, "CUDA-Aware MPI")
+
+To run tests, do `bsub 1node_test.sh` or get an interactive node (`bsub -W 2:00 -q debug -nnodes 1 -P csc362 -alloc_flags gpudefault -Is /bin/zsh`) and run that script.
 
 ## ParaView (5.8.0)
 
