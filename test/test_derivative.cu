@@ -35,6 +35,8 @@ __global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
 
 TEST_CASE("derivative") {
 
+  std::cerr << "TEST: \"derivative\"\n";
+
   int rank;
   int size;
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -181,6 +183,7 @@ TEST_CASE("derivative") {
     ext.z += 2 * radius;
 
     for (size_t qi = 0; qi < d.num_data(); ++qi) {
+      std::cerr << "quantity_to_host\n";
       auto vec = d.quantity_to_host(qi);
       // access quantity data as a Q1
       std::vector<Q1> quantity(ext.flatten());
