@@ -48,7 +48,10 @@ DevicePacker::DevicePacker(cudaStream_t stream)
 
 DevicePacker::~DevicePacker() {
 #ifdef STENCIL_USE_CUDA_GRAPH
-  CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+//  if (domain_) {
+//    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+//    domain_ = nullptr;
+//  }
   if (graph_) {
     CUDA_RUNTIME(cudaGraphDestroy(graph_));
     graph_ = 0;    
@@ -92,7 +95,6 @@ void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &mess
  */
 #ifdef STENCIL_USE_CUDA_GRAPH
   assert(stream_ != 0 && "can't capture the NULL stream, unless cudaStreamPerThread");
-  // TODO: safer if thread-local?
   CUDA_RUNTIME(cudaStreamBeginCapture(stream_, cudaStreamCaptureModeThreadLocal));
   launch_pack_kernels();
   CUDA_RUNTIME(cudaStreamEndCapture(stream_, &graph_));
@@ -141,7 +143,8 @@ void DevicePacker::launch_pack_kernels() {
       offset += domain_->halo_bytes(msg.dir_ * -1, qi);
     }
   }
-  CUDA_RUNTIME(rt::time(cudaGetLastError));
+  // with cuda graph, this is called during setup so dont time it
+  CUDA_RUNTIME(cudaGetLastError());
 }
 
 void DevicePacker::pack() {
@@ -154,7 +157,11 @@ void DevicePacker::pack() {
 #endif
 }
 
+DeviceUnpacker::DeviceUnpacker(cudaStream_t stream)
+      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
+
 DeviceUnpacker::~DeviceUnpacker() {
+
 #ifdef STENCIL_USE_CUDA_GRAPH
     // TODO: these need to be guarded from ctor without prepare()?
     if (graph_) {
@@ -167,6 +174,7 @@ DeviceUnpacker::~DeviceUnpacker() {
     }
 #endif
   }
+
 
 void DeviceUnpacker::prepare(LocalDomain *domain, const std::vector<Message> &messages) {
   domain_ = domain;

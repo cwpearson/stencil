@@ -81,8 +81,7 @@ private:
   void launch_unpack_kernels();
 
 public:
-  DeviceUnpacker(cudaStream_t stream)
-      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
+  DeviceUnpacker(cudaStream_t stream);
   ~DeviceUnpacker();
 
   virtual void prepare(LocalDomain *domain, const std::vector<Message> &messages) override;
