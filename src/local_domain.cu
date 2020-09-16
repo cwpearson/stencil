@@ -136,7 +136,7 @@ std::vector<unsigned char> LocalDomain::region_to_host(const Dim3 &pos, const Di
   dim3 dimBlock = Dim3::make_block_dim(ext, 512);
   dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
   const cudaPitchedPtr curr = curr_data(qi);
-  LOG_SPEW("region_to_host: packing pos=" << pos << " ext=" << ext << " pitch=" << curr.pitch
+  LOG_SPEW("region_to_host: gpu=" << gpu() << " packing pos=" << pos << " ext=" << ext << " pitch=" << curr.pitch
                                           << " xsize=" << curr.xsize);
   pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr, pos, ext, elem_size(qi));
   CUDA_RUNTIME(cudaDeviceSynchronize());

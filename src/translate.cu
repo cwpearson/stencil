@@ -26,33 +26,20 @@ Translator::~Translator() {
 #endif
 }
 
-void Translator::prepare(const std::vector<Params> &params) {
-
-  LOG_SPEW("params.size()=" << params.size());
+std::vector<Translator::Param> Translator::convert(const std::vector<Params> &params) {
+  std::vector<Translator::Param> ret;
 
   // convert all Params into individual 3D copies
   for (const Params &ps : params) {
-    LOG_SPEW("ps.n=" << ps.n);
     assert(ps.dsts);
     assert(ps.srcs);
     assert(ps.elemSizes);
     for (int64_t i = 0; i < ps.n; ++i) {
       Param p(ps.dsts[i], ps.dstPos, ps.srcs[i], ps.srcPos, ps.extent, ps.elemSizes[i]);
-      params_.push_back(p);
+      ret.push_back(p);
     }
   }
-
-// FIXME: this stream is valid on device 0, but the kernels in TDA::kernel are launched on device device_
-// this may cause invalid resource handle for devices != 0
-#ifdef STENCIL_USE_CUDA_GRAPH
-  // create a stream to record from
-  RcStream stream;
-
-  CUDA_RUNTIME(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
-  launch_all(stream);
-  CUDA_RUNTIME(cudaStreamEndCapture(stream, &graph_));
-  CUDA_RUNTIME(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
-#endif
+  return ret;
 }
 
 void Translator::async(cudaStream_t stream) {
@@ -65,13 +52,27 @@ void Translator::async(cudaStream_t stream) {
 
 TranslatorDirectAccess::TranslatorDirectAccess(int device) : Translator(), device_(device) {}
 
+void TranslatorDirectAccess::prepare(const std::vector<Params> &params) {
+
+  LOG_SPEW("params.size()=" << params.size());
+  params_ = convert(params);
+
+#ifdef STENCIL_USE_CUDA_GRAPH
+  // create a stream to record from
+  LOG_DEBUG("TranslatorDirectAccess::prepare: record on CUDA id " << device_);
+  RcStream stream(device_);
+  CUDA_RUNTIME(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
+  launch_all(stream);
+  CUDA_RUNTIME(cudaStreamEndCapture(stream, &graph_));
+  CUDA_RUNTIME(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
+  CUDA_RUNTIME(cudaGetLastError());
+#endif
+}
+
 void TranslatorDirectAccess::launch_all(cudaStream_t stream) {
   for (const Param &p : params_) {
     kernel(p, device_, stream);
   }
-#ifdef STENCIL_USE_CUDA_GRAPH
-  CUDA_RUNTIME(cudaGetLastError());
-#endif
 }
 
 void TranslatorDirectAccess::kernel(const Param &p, const int device, cudaStream_t stream) {
@@ -83,6 +84,21 @@ void TranslatorDirectAccess::kernel(const Param &p, const int device, cudaStream
 #ifndef STENCIL_USE_CUDA_GRAPH
   // 900: operation not permitted while stream is capturing
   CUDA_RUNTIME(rt::time(cudaGetLastError));
+#endif
+}
+
+void TranslatorMemcpy3D::prepare(const std::vector<Params> &params) {
+
+  LOG_SPEW("params.size()=" << params.size());
+  params_ = convert(params);
+
+#ifdef STENCIL_USE_CUDA_GRAPH
+  // create a stream to record from
+  RcStream stream;
+  CUDA_RUNTIME(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
+  launch_all(stream);
+  CUDA_RUNTIME(cudaStreamEndCapture(stream, &graph_));
+  CUDA_RUNTIME(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
 #endif
 }
 
