@@ -7,8 +7,8 @@
 #include <algorithm>
 
 ColoDirectAccessHaloSender::~ColoDirectAccessHaloSender() {
+  assert(domain_);
   CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-
   // free cuda malloc
   CUDA_RUNTIME(cudaFree(dstDomCurrDatasDev_));
 
