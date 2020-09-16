@@ -4,9 +4,9 @@
 
 A prototype MPI/CUDA stencil halo exchange library
 
-## Quick Start (weak scaling)
+## Quick Start
 
-Install MPI, CUDA, and CMake 3.13+, then
+Install MPI, CUDA, and CMake 3.17+, then
 
 ```
 git clone git@github.com:cwpearson/stencil.git
@@ -15,7 +15,7 @@ mkdir build
 cd build
 cmake ..
 make
-mpirun -n 4 src/weak
+make test
 ```
 
 ## Design Principles
@@ -78,11 +78,6 @@ test/test_all "[mpi]"
 CUDA tests only
 ```
 test/test_all "[cuda]"
-```
-
-To run specific tests
-```
-test/test_cpu "<case name>" -c "<section name>"
 ```
 
 ## Profiling with nsys
@@ -278,6 +273,7 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
 
 A C++-style class representing a shared CUDA stream.
 The underlying stream is released when the reference count drops to zero.
+Each stream can be explicitly associated with a device.
 
 ### GPU Distance Matrix
 
@@ -290,7 +286,28 @@ This is combined with other NVML APIs to determine if two GPUs are directly conn
 
 Various repeated communication patterns are accelerated through the CUDA graph API.
 
-## C++ Guidelines
+### Passthrough GPU and MPI timers with compiler barriers
+
+A construction like this can inadvertently time evaluation of argument expressions:
+```
+auto start = get_wall_time();
+cudaDoSomething(a.lots_of_work())
+auto elapsed = get_wall_time() - start();
+```
+
+use `stencil/include/rt.hpp` to time only the cuda operation after arguments have been evaluated:
+```
+rt::time(cudaDoSomething, a.lots_of_work())
+```
+
+Similarly, for MPI operations
+```
+mpi::time(MPI_Isend, srcBuf, ...);
+```
+
+The timers (`include/stencil/timer.hpp`) use compiler barriers to prevent reordering of instructions around the system calls.
+
+## C++ Guidelines this project tries to follow
 
 * Don't put state in abstract classes
   * [I.25: Prefer abstract classes as interfaces to class hierarchies](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#i25-prefer-abstract-classes-as-interfaces-to-class-hierarchies)
