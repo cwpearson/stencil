@@ -116,7 +116,10 @@ static void check_exchange(const Radius &radius, const MethodFlags methods) {
 
   INFO("exchange");
   dd.exchange();
-  CUDA_RUNTIME(cudaDeviceSynchronize());
+  for (auto &d : dd.domains()) {
+    CUDA_RUNTIME(cudaSetDevice(d.gpu()));
+    CUDA_RUNTIME(cudaDeviceSynchronize());
+  }
   MPI_Barrier(MPI_COMM_WORLD);
 
   INFO("check whole region after exchange");
