@@ -313,7 +313,37 @@ __global__ void stencil_kernel(PitchedPtr<T> dst,       //<! [out] beginning of 
   }
 }
 
+TEMPLATE_TEST_CASE("local domain", "[cuda][template]", int, double) {
+  std::cerr << "TEST: \"local domain\"\n";
+
+  // create a domain
+  INFO("ctor");
+  const Dim3 origin(0, 0, 0);
+  LocalDomain ld(Dim3(10, 10, 10), origin, /*gpu*/ 0);
+  ld.set_radius(1);
+  auto h = ld.add_data<TestType>();
+  INFO("realize");
+  ld.realize();
+
+  SECTION("interior_to_host") {
+    for (size_t qi = 0; qi < ld.num_data(); ++qi) {
+      auto vec = ld.interior_to_host(qi);
+    }
+  }
+
+  SECTION("quantity_to_host") {
+    for (size_t qi = 0; qi < ld.num_data(); ++qi) {
+      auto vec = ld.quantity_to_host(qi);
+      REQUIRE(vec.size() == 12*12*12*sizeof(TestType));
+    }
+
+  }
+
+}
+
 TEMPLATE_TEST_CASE("local domain stencil", "[cuda][template]", int) {
+
+  std::cerr << "TEST: \"local domain stencil*\"\n";
 
   // TODO: why does this test fail without this
   // test passes if run alone
