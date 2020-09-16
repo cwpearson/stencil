@@ -219,7 +219,7 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
     * [x] Control which exchange method should be used
   * v2 (next publication)
     * [x] ParaView output files `DistributedDomain::write_paraview(const std::string &prefix)`
-    * [x] support uneven radius (branch=`feature/multi-radius`)
+    * [x] support uneven radius
     * [x] "Accessor Object" for data
       * [x] Index according to point in compute domain
     * [x] Support overlapped computation and communication
@@ -228,6 +228,10 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
     * [x] CUDA runtime timer
     * [x] pitched allocation
   * v3
+    * [ ] Message bundling
+      * Improved performance by sending all data for a remote node in a single message?
+    * [ ] exchange subset of quantities
+      * this would potentially split some of the operation bundling opportunities (pack, CUDA graph, ...)
     * [ ] allow a manual partition before placement
       * constrain to single subdomain per GPU
   * future work
