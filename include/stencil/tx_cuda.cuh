@@ -135,7 +135,7 @@ public:
       : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain), dstDomain_(&dstDomain),
         srcStream_(srcDomain.gpu(), RcStream::Priority::HIGH), dstStream_(dstDomain.gpu(), RcStream::Priority::HIGH),
         packer_(srcStream_), unpacker_(dstStream_) {
-  LOG_SPEW("PeerCopySender()");
+
 }
 
   void prepare(std::vector<Message> &outbox) {
