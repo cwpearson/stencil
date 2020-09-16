@@ -5,6 +5,9 @@
 #include "stencil/rcstream.hpp"
 
 TEST_CASE("packer", "[packer]") {
+  std::cerr << "TEST: \"packer\"\n";
+
+  CUDA_RUNTIME(cudaSetDevice(0));
   Dim3 arrSz(3, 4, 5);
   Dim3 origin(0, 0, 0);
 
@@ -39,16 +42,19 @@ TEST_CASE("packer", "[packer]") {
   REQUIRE(packer.size() == unpacker.size());
 
   packer.pack();
-  CUDA_RUNTIME(cudaStreamSynchronize(0));
+  CUDA_RUNTIME(cudaStreamSynchronize(stream));
 
   CUDA_RUNTIME(cudaMemcpy(unpacker.data(), packer.data(), packer.size(),
                           cudaMemcpyDefault));
 
   unpacker.unpack();
-  CUDA_RUNTIME(cudaStreamSynchronize(0));
+  CUDA_RUNTIME(cudaStreamSynchronize(stream));
+  CUDA_RUNTIME(cudaDeviceSynchronize());
 }
 
 TEST_CASE("packer multi-radius", "[packer]") {
+  std::cerr << "TEST: \"packer multi-radius\"\n";
+  CUDA_RUNTIME(cudaSetDevice(0));
   Dim3 arrSz(3, 4, 5);
   Dim3 origin(0, 0, 0);
 
@@ -105,12 +111,14 @@ TEST_CASE("packer multi-radius", "[packer]") {
     REQUIRE(packer.size() == unpacker.size());
 
     packer.pack();
-    CUDA_RUNTIME(cudaStreamSynchronize(0));
+    CUDA_RUNTIME(cudaStreamSynchronize(stream));
 
     CUDA_RUNTIME(cudaMemcpy(unpacker.data(), packer.data(), packer.size(),
                             cudaMemcpyDefault));
 
     unpacker.unpack();
-    CUDA_RUNTIME(cudaStreamSynchronize(0));
+    CUDA_RUNTIME(cudaStreamSynchronize(stream));
   }
+  CUDA_RUNTIME(cudaSetDevice(0));
+  CUDA_RUNTIME(cudaDeviceSynchronize());
 }

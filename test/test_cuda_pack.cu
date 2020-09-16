@@ -6,6 +6,8 @@
 #include "stencil/pitched_ptr.hpp"
 
 TEMPLATE_TEST_CASE("pack", "[pack][template]", int, double) {
+  std::cerr << "TEST: \"pack -*\"\n";
+
   Dim3 arrSz(3, 4, 5);
 
   // src->dst and src -> dst -> dst2
@@ -13,6 +15,7 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int, double) {
   PitchedPtr<TestType> dst2;
 
   // 3*4*5 array
+  CUDA_RUNTIME(cudaSetDevice(0));
   INFO("alloc src");
   CUDA_RUNTIME(cudaMallocManaged(&src.ptr, sizeof(TestType) * arrSz.x * arrSz.y * arrSz.z));
   INFO("alloc dst2");
@@ -123,6 +126,10 @@ TEMPLATE_TEST_CASE("pack", "[pack][template]", int, double) {
     REQUIRE(dst[14] == 53);
     CUDA_RUNTIME(cudaFree(dst));
   }
+
+  CUDA_RUNTIME(cudaFree(src.ptr));
+  CUDA_RUNTIME(cudaFree(dst2.ptr));
+  CUDA_RUNTIME(cudaDeviceSynchronize());
 }
 
 TEST_CASE("real cases", "[cuda]") {
@@ -135,6 +142,7 @@ TEST_CASE("real cases", "[cuda]") {
     char *buf;
     cudaPitchedPtr dst;
 
+    CUDA_RUNTIME(cudaSetDevice(0));
     CUDA_RUNTIME(cudaMallocManaged(&dst.ptr, elemSize * rawSz.x * rawSz.y * rawSz.z));
     dst.pitch = elemSize * rawSz.x;
     dst.xsize = elemSize * rawSz.x;
@@ -149,5 +157,7 @@ TEST_CASE("real cases", "[cuda]") {
 
     unpack_kernel<<<dimGrid, dimBlock>>>(dst, buf, haloPos, haloExtent, elemSize);
     CUDA_RUNTIME(cudaDeviceSynchronize());
+    CUDA_RUNTIME(cudaFree(buf));
+    CUDA_RUNTIME(cudaFree(dst.ptr));
   }
 }
