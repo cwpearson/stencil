@@ -177,6 +177,12 @@ To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.orn
 
 To run tests, do `bsub 1node_test.sh` or get an interactive node (`bsub -W 2:00 -q debug -nnodes 1 -P csc362 -alloc_flags gpudefault -Is /bin/zsh`) and run that script.
 
+During configuration, you may see an error like this which causes cmake to fail:
+```
+CMake Error: Remove failed on file: /ccs/home/cpearson/repos/stencil/build/CMakeFiles/CMakeTmp/CMakeFiles/cmTC_50eb9.dir/.nfs000000001473310900000eaf: System Error: Device or resource busy
+```
+Re-run cmake again.
+
 ## ParaView (5.8.0)
 
 ![jacobi3d after 1000 iterations](static/paraview.png)
@@ -218,8 +224,8 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
       * [x] Index according to point in compute domain
     * [x] Support overlapped computation and communication
       * interface for extracting interior/exterior of compute region for kernel invocations
-    * [ ] `cudaMemcpy3D`
-    * [ ] CUDA runtime timer
+    * [x] `cudaMemcpy3D`
+    * [x] CUDA runtime timer
     * [x] pitched allocation
   * v3
     * [ ] allow a manual partition before placement
@@ -266,6 +272,10 @@ The underlying stream is released when the reference count drops to zero.
 
 The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
 This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
+
+### CUDA Graph API
+
+Various repeated communication patterns are accelerated through the CUDA graph API.
 
 ## C++ Guidelines
 
