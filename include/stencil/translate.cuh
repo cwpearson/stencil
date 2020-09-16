@@ -33,7 +33,7 @@ public:
 
   /* setup to do the requested copies
    */
-  void prepare(const std::vector<Params> &params);
+  virtual void prepare(const std::vector<Params> &params) = 0;
 
   /* launch the translate async
    */
@@ -55,6 +55,9 @@ protected:
         : dstPtr(_dstPtr), dstPos(_dstPos), srcPtr(_srcPtr), srcPos(_srcPos), extent(_extent), elemSize(_elemSize) {}
   };
 
+  // convert Params into equivalent Param
+  static std::vector<Param> convert(const std::vector<Params> &params);
+
   std::vector<Param> params_;
 
 #ifdef STENCIL_USE_CUDA_GRAPH
@@ -63,6 +66,10 @@ protected:
 #endif
 
 private:
+  /* launch all the translate operations
+   if cudaGraph is used, this will occur once in the setup
+   otherwise, it will be used every time
+*/
   virtual void launch_all(cudaStream_t stream) = 0;
 };
 
@@ -72,11 +79,9 @@ public:
   // create a translator that will run on a device
   TranslatorDirectAccess(int device);
 
+  void prepare(const std::vector<Params> &params) override;
+
 private:
-  /* launch all the translate operations
-     if cudaGraph is used, this will occur once in the setup
-     otherwise, it will be used every time
-  */
   void launch_all(cudaStream_t stream) override;
 
   // initiate a 3D transfer using a kernel
@@ -87,11 +92,10 @@ private:
 
 class TranslatorMemcpy3D : public Translator {
 
+public:
+  void prepare(const std::vector<Params> &params) override;
+
 private:
-  /* launch all the translate operations
-     if cudaGraph is used, this will occur once in the setup
-     otherwise, it will be used every time
-  */
   void launch_all(cudaStream_t stream) override;
 
   // initiate a 3D transfer using cudaMemcpy3DAsync (not Peer because we may not have an ID for both devices)
