@@ -4,7 +4,6 @@
 
 A prototype MPI/CUDA stencil halo exchange library
 
-
 ## Quick Start (weak scaling)
 
 Install MPI, CUDA, and CMake 3.13+, then
@@ -18,6 +17,16 @@ cmake ..
 make
 mpirun -n 4 src/weak
 ```
+
+## Design Principles
+
+* Maximal communication overlap: each GPU communicates with neighbors in a point-to-point scheme with all communication overlapped
+* Fast intra-node communication: communication can occur entirely through CUDA even for different ranks on the same node.
+* CUDA-aware MPI support: Can be enabled if desired (`cmake -DUSE_CUDA_AWARE_MPI=ON`)
+* Automatic partitioning: partition data to minimize communication volume
+* Topology-aware data placement: place data to maximize communication bandwidth for large messages
+* Communication/Computation Overlap: API to query grid regions that can be used concurrent with communication.
+* Friendly: Access data in terms of grid coordinates, not memory offsets.
 
 ## Documentation
 
@@ -230,8 +239,6 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
   * v3
     * [ ] Message bundling
       * Improved performance by sending all data for a remote node in a single message?
-    * [ ] exchange subset of quantities
-      * this would potentially split some of the operation bundling opportunities (pack, CUDA graph, ...)
     * [ ] allow a manual partition before placement
       * constrain to single subdomain per GPU
   * future work
@@ -247,11 +254,13 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
 
     
 * needs info
+  * [ ] exchange subset of quantities
+    * this would potentially split some of the operation bundling opportunities (pack, CUDA graph, ...)
+    * exchange is not async now, e.g. CPU polls communicators. May want a worker thread or something.
   * mesh refinement
     * we would rely on the user to specify the conditions
     * inferface for asking for refinement?
     * how to rebalance load and communication
-
     * would require test machine with non-homogeneous intra-node communication
   * mapping multiple subdomains to each GPU
 * wontfix
