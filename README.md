@@ -173,9 +173,10 @@ Run scripts are in `srcipts/summit`.
 nsight-systems 2020.3.1.71 can crash with the `osrt` or `mpi` profiler turned on.
 Disable with `nsys profile -t cuda,nvtx`.
 
+CUDA 10.1 causes problems with the CUDA graph API. Ensure you are using CUDA 10.2+ when building.
 ```
 module load cmake
-module load cuda
+module load cuda/10.2.89
 ```
 
 To control the compute mode, use `bsub -alloc_flags gpudefault` (see https://www.olcf.ornl.gov/for-users/system-user-guides/summitdev-quickstart-guide/#gpu-specific-jobs)
