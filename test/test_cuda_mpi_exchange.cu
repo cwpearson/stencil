@@ -195,14 +195,18 @@ TEST_CASE("exchange2") {
   // no transfers, anything should work
   SECTION("r=0,cmpi") { check_exchange(Radius::constant(0), Method::CudaMpi); }
   SECTION("r=0,pmu") { check_exchange(Radius::constant(0), Method::ColoPackMemcpyUnpack); }
-  SECTION("r=0,da") { check_exchange(Radius::constant(0), Method::ColoDirectAccess); }
+  SECTION("r=0,q") { check_exchange(Radius::constant(0), Method::ColoQuantityKernel); }
+  SECTION("r=0,r") { check_exchange(Radius::constant(0), Method::ColoRegionKernel); }
+  SECTION("r=0,m3") { check_exchange(Radius::constant(0), Method::ColoMemcpy3d); }
   SECTION("r=0,cmp") { check_exchange(Radius::constant(0), Method::CudaMemcpyPeer); }
   SECTION("r=0,k") { check_exchange(Radius::constant(0), Method::CudaKernel); }
 
   // CudaMpi works for all cases
   SECTION("r=1,cmpi") { check_exchange(Radius::constant(1), Method::CudaMpi); }
   SECTION("r=1,pmu") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoPackMemcpyUnpack); }
-  SECTION("r=1,da") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoDirectAccess); }
+  SECTION("r=1,q") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoQuantityKernel); }
+  SECTION("r=1,r") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoRegionKernel); }
+  SECTION("r=1,m3") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoMemcpy3d); }
   SECTION("r=1,cmp") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::CudaMemcpyPeer); }
 
   SECTION("r=2") { check_exchange(Radius::constant(2), Method::CudaMpi); }
@@ -234,7 +238,7 @@ TEST_CASE("exchange3") {
     Radius r = Radius::constant(0);
     r.dir(1, 0, 0) = 2;
     r.dir(-1, 0, 0) = 1;
-    check_exchange(r, Method::ColoDirectAccess);
+    check_exchange(r, Method::ColoQuantityKernel);
   }
 }
 #endif

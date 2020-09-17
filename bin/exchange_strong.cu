@@ -86,7 +86,7 @@ int main(int argc, char **argv) {
     methods |= Method::ColoPackMemcpyUnpack;
   }
   if (useColoDa) {
-    methods |= Method::ColoDirectAccess;
+    methods |= Method::ColoQuantityKernel;
   }
   if (usePeer) {
     methods |= Method::CudaMemcpyPeer;
@@ -164,7 +164,7 @@ int main(int argc, char **argv) {
              methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.domains()[0].size().x,
              dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(Method::CudaMpi),
              dd.exchange_bytes_for_method(Method::ColoPackMemcpyUnpack),
-             dd.exchange_bytes_for_method(Method::ColoDirectAccess),
+             dd.exchange_bytes_for_method(Method::ColoQuantityKernel),
              dd.exchange_bytes_for_method(Method::CudaMemcpyPeer), dd.exchange_bytes_for_method(Method::CudaKernel),
              nIters, numSubdoms, numNodes, size, stats.trimean());
     }

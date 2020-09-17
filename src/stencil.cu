@@ -135,7 +135,7 @@ uint64_t DistributedDomain::exchange_bytes_for_method(const Method &method) cons
   if (method && Method::CudaMpi) {
     ret += numBytesCudaMpi_;
   }
-  if (method && Method::ColoDirectAccess) {
+  if (method && Method::ColoQuantityKernel) {
     ret += numBytesColoDirectAccess_;
   }
   if (method && Method::ColoPackMemcpyUnpack) {
@@ -177,7 +177,7 @@ DistributedDomain::~DistributedDomain() {
 }
 
 void DistributedDomain::set_methods(Method flags) noexcept {
-  if ((flags && Method::ColoDirectAccess) && (flags && Method::ColoPackMemcpyUnpack)) {
+  if ((flags && Method::ColoQuantityKernel) && (flags && Method::ColoPackMemcpyUnpack)) {
     LOG_FATAL("can't use Direct Access and Pack-Memcpy-Unpack for colocated ranks");
   }
   flags_ = flags;
@@ -353,7 +353,7 @@ void DistributedDomain::realize() {
           Ultimately, we'd like to be able to figure this out even in the presence of CUDA_VISIBLE_DEVICES making each
           rank have a different CUDA device 0 Then, we could restrict CPU code to run on CPUs nearby to the GPU
           */
-          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoDirectAccess)) {
+          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
               coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
@@ -394,7 +394,7 @@ void DistributedDomain::realize() {
               goto recv_planned;
             }
           }
-          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoDirectAccess)) {
+          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel)) {
             if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) && gpu_topo::peer(srcDev, myDev)) {
               assert(di < coloInboxes.size());
               coloInboxes[di].emplace(srcIdx, std::vector<Message>());
@@ -539,7 +539,7 @@ to be loaded with numpy.loadtxt
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
             uint64_t numBytes = domains_[di].halo_bytes(msg.dir_ * -1, i);
-            if (flags_ && Method::ColoDirectAccess) {
+            if (flags_ && Method::ColoQuantityKernel) {
               numBytesColoDirectAccess_ += numBytes;
             } else if (flags_ && Method::ColoPackMemcpyUnpack) {
               numBytesColoPackMemcpyUnpack_ += numBytes;
@@ -660,8 +660,10 @@ to be loaded with numpy.loadtxt
       LOG_DEBUG("create ColoSender to " << dstIdx << " on " << dstRank << " (" << dstGPU << ")");
       if (any_methods(Method::ColoPackMemcpyUnpack)) {
         sender = new ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]);
-      } else if (any_methods(Method::ColoDirectAccess)) {
-        sender = new ColoDirectAccessHaloSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
+      } else if (any_methods(Method::ColoQuantityKernel)) {
+        sender = new ColoQuantityKernelSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
+      } else if (any_methods(Method::ColoRegionKernel)) {
+        sender = new ColoRegionKernelSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
       } else if (any_methods(Method::ColoMemcpy3d)) {
         sender = new ColoMemcpy3dHaloSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
       }
@@ -675,7 +677,9 @@ to be loaded with numpy.loadtxt
       LOG_DEBUG("create ColoRecver from " << srcIdx << " on " << srcRank << " (" << srcGPU << ")");
       if (any_methods(Method::ColoPackMemcpyUnpack)) {
         recver = new ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
-      } else if (any_methods(Method::ColoDirectAccess)) {
+      } else if (any_methods(Method::ColoQuantityKernel)) {
+        recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+      } else if (any_methods(Method::ColoRegionKernel)) {
         recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
       } else if (any_methods(Method::ColoMemcpy3d)) {
         recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);

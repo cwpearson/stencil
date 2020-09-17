@@ -26,16 +26,16 @@ Translator::~Translator() {
 #endif
 }
 
-std::vector<Translator::Param> Translator::convert(const std::vector<Params> &params) {
+std::vector<Translator::Param> Translator::convert(const std::vector<RegionParams> &params) {
   std::vector<Translator::Param> ret;
 
-  // convert all Params into individual 3D copies
-  for (const Params &ps : params) {
+  // convert all RegionParams into individual 3D copies
+  for (const RegionParams &ps : params) {
     assert(ps.dsts);
     assert(ps.srcs);
     assert(ps.elemSizes);
     for (int64_t i = 0; i < ps.n; ++i) {
-      Param p(ps.dsts[i], ps.dstPos, ps.srcs[i], ps.srcPos, ps.extent, ps.elemSizes[i]);
+      Param p(ps.dstPtrs[i], ps.dstPos, ps.srcPtrs[i], ps.srcPos, ps.extent, ps.elemSizes[i]);
       ret.push_back(p);
     }
   }
@@ -50,16 +50,16 @@ void Translator::async(cudaStream_t stream) {
 #endif
 }
 
-TranslatorDirectAccess::TranslatorDirectAccess(int device) : Translator(), device_(device) {}
+TranslatorKernel::TranslatorKernel(int device) : Translator(), device_(device) {}
 
-void TranslatorDirectAccess::prepare(const std::vector<Params> &params) {
+void TranslatorKernel::prepare(const std::vector<RegionParams> &params) {
 
   LOG_SPEW("params.size()=" << params.size());
   params_ = convert(params);
 
 #ifdef STENCIL_USE_CUDA_GRAPH
   // create a stream to record from
-  LOG_DEBUG("TranslatorDirectAccess::prepare: record on CUDA id " << device_);
+  LOG_DEBUG("TranslatorKernel::prepare: record on CUDA id " << device_);
   RcStream stream(device_);
   CUDA_RUNTIME(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
   launch_all(stream);
@@ -69,13 +69,13 @@ void TranslatorDirectAccess::prepare(const std::vector<Params> &params) {
 #endif
 }
 
-void TranslatorDirectAccess::launch_all(cudaStream_t stream) {
+void TranslatorKernel::launch_all(cudaStream_t stream) {
   for (const Param &p : params_) {
     kernel(p, device_, stream);
   }
 }
 
-void TranslatorDirectAccess::kernel(const Param &p, const int device, cudaStream_t stream) {
+void TranslatorKernel::kernel(const Param &p, const int device, cudaStream_t stream) {
   const dim3 dimBlock = Dim3::make_block_dim(p.extent, 512 /*threads per block*/);
   const dim3 dimGrid = (p.extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
   CUDA_RUNTIME(cudaSetDevice(device));
@@ -87,7 +87,7 @@ void TranslatorDirectAccess::kernel(const Param &p, const int device, cudaStream
 #endif
 }
 
-void TranslatorMemcpy3D::prepare(const std::vector<Params> &params) {
+void TranslatorMemcpy3D::prepare(const std::vector<RegionParams> &params) {
 
   LOG_SPEW("params.size()=" << params.size());
   params_ = convert(params);
@@ -134,4 +134,41 @@ void TranslatorMemcpy3D::memcpy_3d_async(const Param &param, cudaStream_t stream
   LOG_SPEW("dstPos  [" << p.dstPos.x << "," << p.dstPos.y << "," << p.dstPos.z << "]");
   LOG_SPEW("extent [dhw] = [" << p.extent.depth << "," << p.extent.height << "," << p.extent.width << "]");
   CUDA_RUNTIME(rt::time(cudaMemcpy3DAsync, &p, stream));
+}
+
+TranslatorMultiKernel::TranslatorMultiKernel(int device) : Translator(), device_(device) {}
+
+void TranslatorMultiKernel::prepare(const std::vector<RegionParams> &params) {
+
+  params_ = params;
+
+#ifdef STENCIL_USE_CUDA_GRAPH
+  // create a stream to record from
+  LOG_DEBUG("TranslatorMultiKernel::prepare: record on CUDA id " << device_);
+  RcStream stream(device_);
+  CUDA_RUNTIME(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
+  launch_all(stream);
+  CUDA_RUNTIME(cudaStreamEndCapture(stream, &graph_));
+  CUDA_RUNTIME(cudaGraphInstantiate(&instance_, graph_, NULL, NULL, 0));
+  CUDA_RUNTIME(cudaGetLastError());
+#endif
+}
+
+void TranslatorMultiKernel::launch_all(cudaStream_t stream) {
+  for (const RegionParams &p : params_) {
+    kernel(p, device_, stream);
+  }
+}
+
+void TranslatorMultiKernel::kernel(const RegionParams &p, const int device, cudaStream_t stream) {
+  const dim3 dimBlock = Dim3::make_block_dim(p.extent, 512 /*threads per block*/);
+  const dim3 dimGrid = (p.extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
+  CUDA_RUNTIME(cudaSetDevice(device));
+  LOG_SPEW("multi_translate dev=" << device << " grid=" << dimGrid << " block=" << dimBlock);
+  rt::launch(multi_translate, dimGrid, dimBlock, 0, stream, p.dstPtrs, p.dstPos, p.srcPtrs, p.srcPos, p.extent,
+             p.elemSizes, p.n);
+#ifndef STENCIL_USE_CUDA_GRAPH
+  // 900: operation not permitted while stream is capturing
+  CUDA_RUNTIME(rt::time(cudaGetLastError));
+#endif
 }

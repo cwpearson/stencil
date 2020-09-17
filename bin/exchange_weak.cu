@@ -118,7 +118,7 @@ int main(int argc, char **argv) {
     methods |= Method::ColoPackMemcpyUnpack;
   }
   if (useColoDa) {
-    methods |= Method::ColoDirectAccess;
+    methods |= Method::ColoQuantityKernel;
   }
   if (usePeer) {
     methods |= Method::CudaMemcpyPeer;

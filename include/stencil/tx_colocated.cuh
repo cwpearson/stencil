@@ -1,7 +1,7 @@
 #pragma once
 
 /*! \file tx_colocated.cuh
-    \brief Tx/Rx for colocated devices
+    \brief Tx/Rx for colocated devices where data is sent directly into destination memory
 
     Defines ColoHaloSender, which does of the hard work but do not specify a particular Translator.
     Use one of the derived Sender classes, which uses a specific Translator.
@@ -9,6 +9,7 @@
     The ColoHaloRecver may be used with any derived Sender.
 
     FIXME: Not to be confused with `ColocatedHaloSender` and `ColocatedHaloRecver`, which must be used together
+    This is the pack/memcpy/unpack sender
 */
 
 #include "stencil/local_domain.cuh"
@@ -75,10 +76,16 @@ public:
 
 /* Do a colocated halo send using direct access
  */
-class ColoDirectAccessHaloSender : public ColoHaloSender {
+class ColoQuantityKernelSender : public ColoHaloSender {
 public:
-  ColoDirectAccessHaloSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
-                             Placement *placement);
+  ColoQuantityKernelSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain, Placement *placement);
+};
+
+/* Do a colocated halo send using direct access
+ */
+class ColoRegionKernelSender : public ColoHaloSender {
+public:
+  ColoRegionKernelSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain, Placement *placement);
 };
 
 /* to be paired on the recieving end of any ColoHaloSender

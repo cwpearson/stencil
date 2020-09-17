@@ -6,10 +6,11 @@ enum class Method : int {
   None = 0,
   CudaMpi = 1, // means different things if STENCIL_USE_CUDA_AWARE_MPI=1
   ColoPackMemcpyUnpack = 2,
-  ColoDirectAccess = 4,
-  ColoMemcpy3d = 8,
-  CudaMemcpyPeer = 16,
-  CudaKernel = 32,
+  ColoQuantityKernel = 4,
+  ColoRegionKernel = 8,
+  ColoMemcpy3d = 16,
+  CudaMemcpyPeer = 32,
+  CudaKernel = 64,
   Default = CudaMpi + ColoPackMemcpyUnpack + CudaMemcpyPeer + CudaKernel
 };
 
@@ -47,9 +48,17 @@ inline std::string to_string(const Method &m) {
     ret += ret.empty() ? "" : sep;
     ret += "colo-pmu";
   }
-  if (m && Method::ColoDirectAccess) {
+  if (m && Method::ColoQuantityKernel) {
     ret += ret.empty() ? "" : sep;
-    ret += "colo-da";
+    ret += "colo-q";
+  }
+  if (m && Method::ColoRegionKernel) {
+    ret += ret.empty() ? "" : sep;
+    ret += "colo-t";
+  }
+  if (m && Method::ColoMemcpy3d) {
+    ret += ret.empty() ? "" : sep;
+    ret += "colo-m3";
   }
   if (m && Method::CudaMemcpyPeer) {
     ret += ret.empty() ? "" : sep;

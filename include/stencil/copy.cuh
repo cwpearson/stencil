@@ -28,6 +28,6 @@ __global__ void translate(cudaPitchedPtr dst, const Dim3 dstPos, cudaPitchedPtr 
                           const Dim3 extent, // the extent of the region to be copied
                           const size_t elemSize);
 
-__global__ void multi_translate(cudaPitchedPtr *dsts, const Dim3 dstPos, cudaPitchedPtr *const srcs, const Dim3 srcPos,
+__global__ void multi_translate(cudaPitchedPtr *dsts, const Dim3 dstPos, const cudaPitchedPtr *srcs, const Dim3 srcPos,
                                 const Dim3 extent, // the extent of the region to be copied
                                 const size_t *__restrict__ elemSizes, const size_t n);

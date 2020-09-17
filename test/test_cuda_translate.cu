@@ -49,17 +49,17 @@ template <typename TestType> void all_sections(Translator *translator) {
     cudaPitchedPtr cudaDst = cudaPitchedPtr(dst);
     cudaPitchedPtr *dsts = &cudaDst;
 
-    Translator::Params ps{
-        .dsts = dsts,
+    Translator::RegionParams ps{
+        .dstPtrs = dsts,
         .dstPos = Dim3(0, 0, 0),
-        .srcs = srcs,
+        .srcPtrs = srcs,
         .srcPos = Dim3(0, 0, 0),
         .extent = Dim3(1, 1, 1),
         .elemSizes = &elemSizes,
         .n = 1,
     };
 
-    translator->prepare(std::vector<Translator::Params>(1, ps));
+    translator->prepare(std::vector<Translator::RegionParams>(1, ps));
     translator->async(0);
 
     CUDA_RUNTIME(cudaDeviceSynchronize());
@@ -73,17 +73,17 @@ template <typename TestType> void all_sections(Translator *translator) {
     cudaPitchedPtr cudaDst = cudaPitchedPtr(dst);
     cudaPitchedPtr *dsts = &cudaDst;
 
-    Translator::Params ps{
-        .dsts = dsts,
+    Translator::RegionParams ps{
+        .dstPtrs = dsts,
         .dstPos = Dim3(0, 0, 0),
-        .srcs = srcs,
+        .srcPtrs = srcs,
         .srcPos = Dim3(0, 0, 0),
         .extent = Dim3(1, 1, 1),
         .elemSizes = &elemSizes,
         .n = 1,
     };
 
-    translator->prepare(std::vector<Translator::Params>(5, ps));
+    translator->prepare(std::vector<Translator::RegionParams>(5, ps));
     translator->async(0);
 
     CUDA_RUNTIME(cudaDeviceSynchronize());
@@ -97,17 +97,17 @@ template <typename TestType> void all_sections(Translator *translator) {
     cudaPitchedPtr cudaDst = cudaPitchedPtr(dst);
     cudaPitchedPtr *dsts = &cudaDst;
 
-    Translator::Params ps{
-        .dsts = dsts,
+    Translator::RegionParams ps{
+        .dstPtrs = dsts,
         .dstPos = Dim3(2, 3, 4),
-        .srcs = srcs,
+        .srcPtrs = srcs,
         .srcPos = Dim3(0, 0, 0),
         .extent = Dim3(1, 1, 1),
         .elemSizes = &elemSizes,
         .n = 1,
     };
 
-    translator->prepare(std::vector<Translator::Params>(1, ps));
+    translator->prepare(std::vector<Translator::RegionParams>(1, ps));
     translator->async(0);
     CUDA_RUNTIME(cudaDeviceSynchronize());
     REQUIRE(dst.ptr[59] == 0);
@@ -120,17 +120,17 @@ template <typename TestType> void all_sections(Translator *translator) {
     cudaPitchedPtr cudaDst = cudaPitchedPtr(dst);
     cudaPitchedPtr *dsts = &cudaDst;
 
-    Translator::Params ps{
-        .dsts = dsts,
+    Translator::RegionParams ps{
+        .dstPtrs = dsts,
         .dstPos = Dim3(1, 1, 1),
-        .srcs = srcs,
+        .srcPtrs = srcs,
         .srcPos = Dim3(2, 3, 4),
         .extent = Dim3(1, 1, 1),
         .elemSizes = &elemSizes,
         .n = 1,
     };
 
-    translator->prepare(std::vector<Translator::Params>(1, ps));
+    translator->prepare(std::vector<Translator::RegionParams>(1, ps));
     translator->async(0);
     CUDA_RUNTIME(cudaDeviceSynchronize());
     REQUIRE(dst.ptr[1 * (4 * 3) + 1 * (3) + 1] == 59);
@@ -142,17 +142,17 @@ template <typename TestType> void all_sections(Translator *translator) {
     cudaPitchedPtr cudaDst = cudaPitchedPtr(dst);
     cudaPitchedPtr *dsts = &cudaDst;
 
-    Translator::Params ps{
-        .dsts = dsts,
+    Translator::RegionParams ps{
+        .dstPtrs = dsts,
         .dstPos = Dim3(1, 1, 1),
-        .srcs = srcs,
+        .srcPtrs = srcs,
         .srcPos = Dim3(1, 2, 3),
         .extent = Dim3(2, 2, 2),
         .elemSizes = &elemSizes,
         .n = 1,
     };
 
-    translator->prepare(std::vector<Translator::Params>(1, ps));
+    translator->prepare(std::vector<Translator::RegionParams>(1, ps));
     translator->async(0);
     CUDA_RUNTIME(cudaDeviceSynchronize());
 #define _at(x, y, z) dst.ptr[z * (4 * 3) + y * (3) + x]
@@ -173,13 +173,19 @@ template <typename TestType> void all_sections(Translator *translator) {
   CUDA_RUNTIME(cudaFree(dst.ptr));
 }
 
-TEMPLATE_TEST_CASE("translate", "[cuda]", int) {
-  INFO("run TranslatorDirectAccess");
-  Translator *t = new TranslatorDirectAccess(0);
+TEMPLATE_TEST_CASE("translate", "[cuda]", int, double) {
+  const int device = 0;
+
+  INFO("run TranslatorKernel");
+  Translator *t = new TranslatorKernel(device);
   all_sections<TestType>(t);
   delete t;
   INFO("run TranslatorMemcpy3D");
   t = new TranslatorMemcpy3D();
+  all_sections<TestType>(t);
+  delete t;
+  INFO("run TranslatorMultiKernel");
+  t = new TranslatorMultiKernel(device);
   all_sections<TestType>(t);
   delete t;
 }

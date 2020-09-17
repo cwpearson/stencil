@@ -91,7 +91,7 @@ void ColoHaloSender::finish_prepare() {
   LOG_SPEW("ColoHaloSender::finish_prepare: pushed pointers");
 
   {
-    std::vector<Translator::Params> params;
+    std::vector<Translator::RegionParams> params;
     // get the dst idx;
     const Dim3 dstIdx = placement_->get_idx(dstRank_, dstDom_);
 
@@ -107,13 +107,13 @@ void ColoHaloSender::finish_prepare() {
       const Dim3 srcPos = domain_->halo_pos(msg.dir_, false /*interior*/);
       const Dim3 extent = domain_->halo_extent(msg.dir_);
 
-      Translator::Params p{.dsts = dstDomCurrDatas_.data(),
-                           .dstPos = dstPos,
-                           .srcs = domain_->curr_datas().data(),
-                           .srcPos = srcPos,
-                           .extent = extent,
-                           .elemSizes = domain_->elem_sizes().data(),
-                           .n = domain_->num_data()};
+      Translator::RegionParams p{.dstPtrs = dstDomCurrDatas_.data(),
+                                 .dstPos = dstPos,
+                                 .srcPtrs = domain_->curr_datas().data(),
+                                 .srcPos = srcPos,
+                                 .extent = extent,
+                                 .elemSizes = domain_->elem_sizes().data(),
+                                 .n = domain_->num_data()};
       params.push_back(p);
     }
     LOG_SPEW("ColoHaloSender::finish_prepare: cvt outbox to params");
@@ -146,11 +146,18 @@ ColoMemcpy3dHaloSender::ColoMemcpy3dHaloSender(int srcRank, int srcDom, int dstR
   translate_ = new TranslatorMemcpy3D();
 }
 
-ColoDirectAccessHaloSender::ColoDirectAccessHaloSender(int srcRank, int srcDom, int dstRank, int dstDom,
-                                                       LocalDomain &domain, Placement *placement)
+ColoQuantityKernelSender::ColoQuantityKernelSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
+                                   Placement *placement)
     : ColoHaloSender(srcRank, srcDom, dstRank, dstDom, domain, placement) {
   assert(!translate_);
-  translate_ = new TranslatorDirectAccess(domain.gpu());
+  translate_ = new TranslatorKernel(domain.gpu());
+}
+
+ColoRegionKernelSender::ColoRegionKernelSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
+                                             Placement *placement)
+    : ColoHaloSender(srcRank, srcDom, dstRank, dstDom, domain, placement) {
+  assert(!translate_);
+  translate_ = new TranslatorMultiKernel(domain.gpu());
 }
 
 ColoHaloRecver::ColoHaloRecver(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain)

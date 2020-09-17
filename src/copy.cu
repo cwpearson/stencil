@@ -2,6 +2,9 @@
 #include "stencil/pack_kernel.cuh"
 
 #if 0
+/* replaced by dev_packer_pack_domain and dev_packer_unpack_domain, which compute the offsets into dst on the fly
+*/
+
 __global__ void multi_pack(void *__restrict__ dst,                      // dst buffer
                            const size_t *__restrict__ offsets,          // offsets into dst
                            void *__restrict__ *__restrict__ const srcs, // n src pointers
@@ -24,13 +27,17 @@ __global__ void multi_unpack(void **__restrict__ dsts, const Dim3 dstSize, const
 }
 #endif
 
+/*! \brief grid-collaborative 3d translation
+
+   non-overlapping src and dst
+ */
 inline __device__ void translate_grid(cudaPitchedPtr dst, const Dim3 dstPos, const cudaPitchedPtr src,
                                       const Dim3 srcPos,
                                       const Dim3 extent, // the extent of the region to be copied
                                       const size_t elemSize) {
 
-  char * __restrict__ cDst = reinterpret_cast<char *>(dst.ptr);
-  const char * __restrict__ cSrc = reinterpret_cast<const char *>(src.ptr);
+  char *__restrict__ cDst = reinterpret_cast<char *>(dst.ptr);
+  const char *__restrict__ cSrc = reinterpret_cast<const char *>(src.ptr);
 
   const size_t tz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t ty = blockDim.y * blockIdx.y + threadIdx.y;
@@ -55,6 +62,7 @@ inline __device__ void translate_grid(cudaPitchedPtr dst, const Dim3 dstPos, con
         // printf("%lu %lu %lu [%lu] -> %lu %lu %lu [%lu]\n", xi, yi, zi, ii,
         // xo,
         //        yo, zo, oi);
+        // TODO: specialize to elemSize?
         memcpy(cDst + lo, cSrc + li, elemSize);
       }
     }
@@ -68,8 +76,7 @@ __global__ void translate(cudaPitchedPtr dst, const Dim3 dstPos, cudaPitchedPtr 
   translate_grid(dst, dstPos, src, srcPos, extent, elemSize);
 }
 
-__global__ void multi_translate(cudaPitchedPtr *dsts, const Dim3 dstPos,
-                                cudaPitchedPtr *const srcs, const Dim3 srcPos,
+__global__ void multi_translate(cudaPitchedPtr *dsts, const Dim3 dstPos, const cudaPitchedPtr *srcs, const Dim3 srcPos,
                                 const Dim3 extent, // the extent of the region to be copied
                                 const size_t *__restrict__ elemSizes, const size_t n) {
   for (size_t i = 0; i < n; ++i) {
