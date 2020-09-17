@@ -231,6 +231,7 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
     * [x] `cudaMemcpy3D`
     * [x] CUDA runtime timer
     * [x] pitched allocation
+    * [ ] sort communication for weak scaling?
   * v3
     * [ ] Message bundling
       * Improved performance by sending all data for a remote node in a single message?
