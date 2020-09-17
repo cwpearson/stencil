@@ -213,24 +213,24 @@ if (parser.need_help()) {
   cudaDeviceProp prop;
   CUDA_RUNTIME(cudaGetDeviceProperties(&prop, 0));
 
-  MethodFlags methods = MethodFlags::None;
+  Method methods = Method::None;
   if (useStaged) {
-    methods |= MethodFlags::CudaMpi;
+    methods |= Method::CudaMpi;
   }
   if (useCudaAwareMPI) {
-    methods |= MethodFlags::CudaAwareMpi;
+    methods |= Method::CudaAwareMpi;
   }
   if (useColo) {
-    methods |= MethodFlags::ColoPackMemcpyUnpack;
+    methods |= Method::ColoPackMemcpyUnpack;
   }
   if (useMemcpyPeer) {
-    methods |= MethodFlags::CudaMemcpyPeer;
+    methods |= Method::CudaMemcpyPeer;
   }
   if (useKernel) {
-    methods |= MethodFlags::CudaKernel;
+    methods |= Method::CudaKernel;
   }
-  if (MethodFlags::None == methods) {
-    methods = MethodFlags::All;
+  if (Method::None == methods) {
+    methods = Method::All;
   }
 
   PlacementStrategy strategy = PlacementStrategy::NodeAware;
@@ -394,10 +394,10 @@ if (parser.need_help()) {
       const std::string methodStr = to_string(methods);
 
       std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
-                << dd.exchange_bytes_for_method(MethodFlags::CudaMpi) << ","
-                << dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack) << ","
-                << dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer) << ","
-                << dd.exchange_bytes_for_method(MethodFlags::CudaKernel) << "," << iterTime.min() << ","
+                << dd.exchange_bytes_for_method(Method::CudaMpi) << ","
+                << dd.exchange_bytes_for_method(Method::ColoPackMemcpyUnpack) << ","
+                << dd.exchange_bytes_for_method(Method::CudaMemcpyPeer) << ","
+                << dd.exchange_bytes_for_method(Method::CudaKernel) << "," << iterTime.min() << ","
                 << iterTime.trimean() << "\n";
     }
   } // send domains out of scope before MPI_Finalize

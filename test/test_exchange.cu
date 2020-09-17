@@ -53,7 +53,7 @@ static void check_exchange(const Radius &radius) {
 
   dd.set_radius(radius);
   auto dh1 = dd.add_data<Q1>("d0");
-  dd.set_methods(MethodFlags::CudaMpi);
+  dd.set_methods(Method::CudaMpi);
 
   INFO("realize");
   dd.realize();

@@ -34,7 +34,7 @@ static __global__ void init_kernel(Accessor<T> dst, //<! [out] region to fill
 
 /* check an exchange that supports the given kernel radius
  */
-static void check_exchange(const Radius &radius, const MethodFlags methods) {
+static void check_exchange(const Radius &radius, const Method methods) {
 
   int rank;
   int size;
@@ -193,37 +193,37 @@ static void check_exchange(const Radius &radius, const MethodFlags methods) {
 TEST_CASE("exchange2") {
 
   // no transfers, anything should work
-  SECTION("r=0,cmpi") { check_exchange(Radius::constant(0), MethodFlags::CudaMpi); }
-  SECTION("r=0,pmu") { check_exchange(Radius::constant(0), MethodFlags::ColoPackMemcpyUnpack); }
-  SECTION("r=0,da") { check_exchange(Radius::constant(0), MethodFlags::ColoDirectAccess); }
-  SECTION("r=0,cmp") { check_exchange(Radius::constant(0), MethodFlags::CudaMemcpyPeer); }
-  SECTION("r=0,k") { check_exchange(Radius::constant(0), MethodFlags::CudaKernel); }
+  SECTION("r=0,cmpi") { check_exchange(Radius::constant(0), Method::CudaMpi); }
+  SECTION("r=0,pmu") { check_exchange(Radius::constant(0), Method::ColoPackMemcpyUnpack); }
+  SECTION("r=0,da") { check_exchange(Radius::constant(0), Method::ColoDirectAccess); }
+  SECTION("r=0,cmp") { check_exchange(Radius::constant(0), Method::CudaMemcpyPeer); }
+  SECTION("r=0,k") { check_exchange(Radius::constant(0), Method::CudaKernel); }
 
   // CudaMpi works for all cases
-  SECTION("r=1,cmpi") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi); }
-  SECTION("r=1,pmu") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi | MethodFlags::ColoPackMemcpyUnpack); }
-  SECTION("r=1,da") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi | MethodFlags::ColoDirectAccess); }
-  SECTION("r=1,cmp") { check_exchange(Radius::constant(1), MethodFlags::CudaMpi | MethodFlags::CudaMemcpyPeer); }
+  SECTION("r=1,cmpi") { check_exchange(Radius::constant(1), Method::CudaMpi); }
+  SECTION("r=1,pmu") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoPackMemcpyUnpack); }
+  SECTION("r=1,da") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoDirectAccess); }
+  SECTION("r=1,cmp") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::CudaMemcpyPeer); }
 
-  SECTION("r=2") { check_exchange(Radius::constant(2), MethodFlags::CudaMpi); }
+  SECTION("r=2") { check_exchange(Radius::constant(2), Method::CudaMpi); }
 
   SECTION("+x=2") {
     Radius r = Radius::constant(0);
     r.dir(1, 0, 0) = 2;
-    check_exchange(r, MethodFlags::CudaMpi);
+    check_exchange(r, Method::CudaMpi);
   }
 
   SECTION("mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
     r.dir(-1, 0, 0) = 1;
-    check_exchange(r, MethodFlags::CudaMpi);
+    check_exchange(r, Method::CudaMpi);
   }
 
   SECTION("+x=2, mx=1") { // -x doesnt work as a section on CLI
     Radius r = Radius::constant(0);
     r.dir(1, 0, 0) = 2;
     r.dir(-1, 0, 0) = 1;
-    check_exchange(r, MethodFlags::CudaMpi);
+    check_exchange(r, Method::CudaMpi);
   }
 }
 
@@ -234,7 +234,7 @@ TEST_CASE("exchange3") {
     Radius r = Radius::constant(0);
     r.dir(1, 0, 0) = 2;
     r.dir(-1, 0, 0) = 1;
-    check_exchange(r, MethodFlags::ColoDirectAccess);
+    check_exchange(r, Method::ColoDirectAccess);
   }
 }
 #endif

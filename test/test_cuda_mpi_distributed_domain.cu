@@ -81,7 +81,7 @@ TEST_CASE("exchange1") {
   DistributedDomain dd(10, 10, 10);
   dd.set_radius(radius);
   auto dh1 = dd.add_data<Q1>("d0");
-  dd.set_methods(MethodFlags::CudaMpi);
+  dd.set_methods(Method::CudaMpi);
 
   INFO("realize");
   dd.realize();
@@ -226,7 +226,7 @@ TEST_CASE("swap") {
   DistributedDomain dd(10, 10, 10);
   dd.set_radius(radius);
   auto dh1 = dd.add_data<Q1>("d0");
-  dd.set_methods(MethodFlags::CudaMpi);
+  dd.set_methods(Method::CudaMpi);
 
   INFO("realize");
   dd.realize();

@@ -133,24 +133,24 @@ int main(int argc, char **argv) {
   512^3 on Volta  20.1ms
   */
 
-  MethodFlags methods = MethodFlags::None;
+  Method methods = Method::None;
   if (result["remote"].as<bool>()) {
-    methods |= MethodFlags::CudaMpi;
+    methods |= Method::CudaMpi;
   }
   if (result["cuda-aware-mpi"].as<bool>()) {
-    methods |= MethodFlags::CudaAwareMpi;
+    methods |= Method::CudaAwareMpi;
   }
   if (result["colocated"].as<bool>()) {
-    methods |= MethodFlags::ColoPackMemcpyUnpack;
+    methods |= Method::ColoPackMemcpyUnpack;
   }
   if (result["peer"].as<bool>()) {
-    methods |= MethodFlags::CudaMemcpyPeer;
+    methods |= Method::CudaMemcpyPeer;
   }
   if (result["kernel"].as<bool>()) {
-    methods |= MethodFlags::CudaKernel;
+    methods |= Method::CudaKernel;
   }
-  if (MethodFlags::None == methods) {
-    methods = MethodFlags::All;
+  if (Method::None == methods) {
+    methods = Method::All;
   }
 
   PlacementStrategy strategy = PlacementStrategy::NodeAware;

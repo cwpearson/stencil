@@ -6,7 +6,7 @@
 #include <vector>
 
 DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
-    : size_(x, y, z), placement_(nullptr), flags_(MethodFlags::All), strategy_(PlacementStrategy::NodeAware) {
+    : size_(x, y, z), placement_(nullptr), flags_(Method::All), strategy_(PlacementStrategy::NodeAware) {
 
 #ifdef STENCIL_SETUP_STATS
   timeMpiTopo_ = 0;
@@ -129,22 +129,22 @@ DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
   CUDA_RUNTIME(cudaGetLastError());
 }
 
-uint64_t DistributedDomain::exchange_bytes_for_method(const MethodFlags &method) const {
+uint64_t DistributedDomain::exchange_bytes_for_method(const Method &method) const {
   uint64_t ret = 0;
 #ifdef STENCIL_SETUP_STATS
-  if ((method && MethodFlags::CudaMpi) || (method && MethodFlags::CudaAwareMpi)) {
+  if ((method && Method::CudaMpi) || (method && Method::CudaAwareMpi)) {
     ret += numBytesCudaMpi_;
   }
-  if (method && MethodFlags::ColoDirectAccess) {
+  if (method && Method::ColoDirectAccess) {
     ret += numBytesColoDirectAccess_;
   }
-  if (method && MethodFlags::ColoPackMemcpyUnpack) {
+  if (method && Method::ColoPackMemcpyUnpack) {
     ret += numBytesColoPackMemcpyUnpack_;
   }
-  if (method && MethodFlags::CudaMemcpyPeer) {
+  if (method && Method::CudaMemcpyPeer) {
     ret += numBytesCudaMemcpyPeer_;
   }
-  if (method && MethodFlags::CudaKernel) {
+  if (method && Method::CudaKernel) {
     ret += numBytesCudaKernel_;
   }
 #else
@@ -176,8 +176,8 @@ DistributedDomain::~DistributedDomain() {
   }
 }
 
-void DistributedDomain::set_methods(MethodFlags flags) noexcept {
-  if ((flags && MethodFlags::ColoDirectAccess) && (flags && MethodFlags::ColoPackMemcpyUnpack)) {
+void DistributedDomain::set_methods(Method flags) noexcept {
+  if ((flags && Method::ColoDirectAccess) && (flags && Method::ColoPackMemcpyUnpack)) {
     LOG_FATAL("can't use Direct Access and Pack-Memcpy-Unpack for colocated ranks");
   }
   flags_ = flags;
@@ -333,13 +333,13 @@ void DistributedDomain::realize() {
           }
 #endif
 
-          if (any_methods(MethodFlags::CudaKernel)) {
+          if (any_methods(Method::CudaKernel)) {
             if (dstRank == rank_ && myDev == dstDev) {
               peerAccessOutbox.push_back(sMsg);
               goto send_planned;
             }
           }
-          if (any_methods(MethodFlags::CudaMemcpyPeer)) {
+          if (any_methods(Method::CudaMemcpyPeer)) {
             LOG_DEBUG("peer " << rank_ << " " << dstRank << " peer(" << myDev << "," << dstDev
                               << ")=" << gpu_topo::peer(myDev, dstDev));
             if (dstRank == rank_ && gpu_topo::peer(myDev, dstDev)) {
@@ -353,7 +353,7 @@ void DistributedDomain::realize() {
           Ultimately, we'd like to be able to figure this out even in the presence of CUDA_VISIBLE_DEVICES making each
           rank have a different CUDA device 0 Then, we could restrict CPU code to run on CPUs nearby to the GPU
           */
-          if (any_methods(MethodFlags::ColoPackMemcpyUnpack | MethodFlags::ColoDirectAccess)) {
+          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoDirectAccess)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
               coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
@@ -362,7 +362,7 @@ void DistributedDomain::realize() {
               goto send_planned;
             }
           }
-          if (any_methods(MethodFlags::CudaMpi | MethodFlags::CudaAwareMpi)) {
+          if (any_methods(Method::CudaMpi | Method::CudaAwareMpi)) {
             assert(di < remoteOutboxes.size());
             remoteOutboxes[di][dstIdx].push_back(sMsg);
             LOG_DEBUG("Plan send <remote> "
@@ -382,19 +382,19 @@ void DistributedDomain::realize() {
           const int srcDev = placement_->get_cuda(srcIdx);
           Message rMsg(dir, srcGPU, di);
 
-          if (any_methods(MethodFlags::CudaKernel)) {
+          if (any_methods(Method::CudaKernel)) {
             if (srcRank == rank_ && srcDev == myDev) {
               // no recver needed
               goto recv_planned;
             }
           }
-          if (any_methods(MethodFlags::CudaMemcpyPeer)) {
+          if (any_methods(Method::CudaMemcpyPeer)) {
             if (srcRank == rank_ && gpu_topo::peer(srcDev, myDev)) {
               // no recver needed
               goto recv_planned;
             }
           }
-          if (any_methods(MethodFlags::ColoPackMemcpyUnpack | MethodFlags::ColoDirectAccess)) {
+          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoDirectAccess)) {
             if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) && gpu_topo::peer(srcDev, myDev)) {
               assert(di < coloInboxes.size());
               coloInboxes[di].emplace(srcIdx, std::vector<Message>());
@@ -404,7 +404,7 @@ void DistributedDomain::realize() {
               goto recv_planned;
             }
           }
-          if (any_methods(MethodFlags::CudaMpi | MethodFlags::CudaAwareMpi)) {
+          if (any_methods(Method::CudaMpi | Method::CudaAwareMpi)) {
             assert(di < remoteInboxes.size());
             remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
             remoteInboxes[di][srcIdx].push_back(sMsg);
@@ -539,9 +539,9 @@ to be loaded with numpy.loadtxt
           for (int64_t i = 0; i < domains_[di].num_data(); ++i) {
             // send size matches size of halo that we're recving into
             uint64_t numBytes = domains_[di].halo_bytes(msg.dir_ * -1, i);
-            if (flags_ && MethodFlags::ColoDirectAccess) {
+            if (flags_ && Method::ColoDirectAccess) {
               numBytesColoDirectAccess_ += numBytes;
-            } else if (flags_ && MethodFlags::ColoPackMemcpyUnpack) {
+            } else if (flags_ && Method::ColoPackMemcpyUnpack) {
               numBytesColoPackMemcpyUnpack_ += numBytes;
             } else {
               LOG_WARN("unpected method flag, statistics may be nonsense");
@@ -612,9 +612,9 @@ to be loaded with numpy.loadtxt
       const int dstGPU = placement_->get_subdomain_id(dstIdx);
       if (0 == remoteSenders_[di].count(dstIdx)) {
         StatefulSender *sender = nullptr;
-        if (any_methods(MethodFlags::CudaAwareMpi)) {
+        if (any_methods(Method::CudaAwareMpi)) {
           sender = new CudaAwareMpiSender(rank_, di, dstRank, dstGPU, domains_[di]);
-        } else if (any_methods(MethodFlags::CudaMpi)) {
+        } else if (any_methods(Method::CudaMpi)) {
           sender = new RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]);
         }
         assert(sender);
@@ -627,9 +627,9 @@ to be loaded with numpy.loadtxt
       const int srcGPU = placement_->get_subdomain_id(srcIdx);
       if (0 == remoteRecvers_[di].count(srcIdx)) {
         StatefulRecver *recver = nullptr;
-        if (any_methods(MethodFlags::CudaAwareMpi)) {
+        if (any_methods(Method::CudaAwareMpi)) {
           recver = new CudaAwareMpiRecver(srcRank, srcGPU, rank_, di, domains_[di]);
-        } else if (any_methods(MethodFlags::CudaMpi)) {
+        } else if (any_methods(Method::CudaMpi)) {
           recver = new RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]);
         }
         assert(recver);
@@ -654,9 +654,9 @@ to be loaded with numpy.loadtxt
       const int dstRank = placement_->get_rank(dstIdx);
       const int dstGPU = placement_->get_subdomain_id(dstIdx);
       LOG_DEBUG("create ColoSender to " << dstIdx << " on " << dstRank << " (" << dstGPU << ")");
-      if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
+      if (any_methods(Method::ColoPackMemcpyUnpack)) {
         sender = new ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]);
-      } else if (any_methods(MethodFlags::ColoDirectAccess)) {
+      } else if (any_methods(Method::ColoDirectAccess)) {
         sender = new ColoDirectAccessHaloSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
       }
       coloSenders_[di].emplace(dstIdx, sender);
@@ -667,9 +667,9 @@ to be loaded with numpy.loadtxt
       const int srcRank = placement_->get_rank(srcIdx);
       const int srcGPU = placement_->get_subdomain_id(srcIdx);
       LOG_DEBUG("create ColoRecver from " << srcIdx << " on " << srcRank << " (" << srcGPU << ")");
-      if (any_methods(MethodFlags::ColoPackMemcpyUnpack)) {
+      if (any_methods(Method::ColoPackMemcpyUnpack)) {
         recver = new ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
-      } else if (any_methods(MethodFlags::ColoDirectAccess)) {
+      } else if (any_methods(Method::ColoDirectAccess)) {
         recver = new ColoDirectAccessHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
       }
       coloRecvers_[di].emplace(srcIdx, recver);

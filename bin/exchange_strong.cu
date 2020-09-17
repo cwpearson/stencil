@@ -84,29 +84,29 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-  MethodFlags methods = MethodFlags::None;
+  Method methods = Method::None;
   if (useStaged) {
-    methods = MethodFlags::CudaMpi;
+    methods = Method::CudaMpi;
   }
 #if STENCIL_USE_CUDA_AWARE_MPI == 1
   if (useCudaAware) {
-    methods = MethodFlags::CudaAwareMpi;
+    methods = Method::CudaAwareMpi;
   }
 #endif
   if (useColoPmu) {
-    methods |= MethodFlags::ColoPackMemcpyUnpack;
+    methods |= Method::ColoPackMemcpyUnpack;
   }
   if (useColoDa) {
-    methods |= MethodFlags::ColoDirectAccess;
+    methods |= Method::ColoDirectAccess;
   }
   if (usePeer) {
-    methods |= MethodFlags::CudaMemcpyPeer;
+    methods |= Method::CudaMemcpyPeer;
   }
   if (useKernel) {
-    methods |= MethodFlags::CudaKernel;
+    methods |= Method::CudaKernel;
   }
-  if (methods == MethodFlags::None) {
-    methods = MethodFlags::All;
+  if (methods == Method::None) {
+    methods = Method::All;
   }
 
   if (0 == rank) {
@@ -174,10 +174,10 @@ int main(int argc, char **argv) {
              "%lu,%lu,%lu,%lu,"                // different exchange bytes
              "%d,%d,%d,%d,%e\n",
              methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.domains()[0].size().x,
-             dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(MethodFlags::CudaMpi),
-             dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack),
-             dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(MethodFlags::CudaKernel), nIters, numSubdoms, numNodes, size,
+             dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(Method::CudaMpi),
+             dd.exchange_bytes_for_method(Method::ColoPackMemcpyUnpack),
+             dd.exchange_bytes_for_method(Method::CudaMemcpyPeer),
+             dd.exchange_bytes_for_method(Method::CudaKernel), nIters, numSubdoms, numNodes, size,
              stats.trimean());
     }
 #endif // STENCIL_EXCHANGE_STATS

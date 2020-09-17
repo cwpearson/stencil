@@ -23,11 +23,11 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const size_t nQuants,
   for (size_t i = 0; i < nQuants; ++i) {
     dd.add_data<Q1>("d");
   }
-  MethodFlags methods = MethodFlags::None;
-  methods |= MethodFlags::CudaMpi;
-  methods |= MethodFlags::ColoPackMemcpyUnpack;
-  methods |= MethodFlags::CudaMemcpyPeer;
-  methods |= MethodFlags::CudaKernel;
+  Method methods = Method::None;
+  methods |= Method::CudaMpi;
+  methods |= Method::ColoPackMemcpyUnpack;
+  methods |= Method::CudaMemcpyPeer;
+  methods |= Method::CudaKernel;
   dd.set_methods(methods);
 
   // create distributed stencil
@@ -51,7 +51,7 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const size_t nQuants,
       stats.insert(elapsed);
     }
   }
-  return std::make_pair(stats, dd.exchange_bytes_for_method(MethodFlags::All));
+  return std::make_pair(stats, dd.exchange_bytes_for_method(Method::All));
 }
 
 void report_header() { std::cout << "name,count,trimean (S),trimean (B/s),stddev,min,avg,max\n"; }

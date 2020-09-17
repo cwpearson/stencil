@@ -167,24 +167,24 @@ if (parser.need_help()) {
   cudaDeviceProp prop;
   CUDA_RUNTIME(cudaGetDeviceProperties(&prop, 0));
 
-  MethodFlags methods = MethodFlags::None;
+  Method methods = Method::None;
   if (useStaged) {
-    methods |= MethodFlags::CudaMpi;
+    methods |= Method::CudaMpi;
   }
   if (useCudaAwareMPI) {
-    methods |= MethodFlags::CudaAwareMpi;
+    methods |= Method::CudaAwareMpi;
   }
   if (useColo) {
-    methods |= MethodFlags::ColoPackMemcpyUnpack;
+    methods |= Method::ColoPackMemcpyUnpack;
   }
   if (useMemcpyPeer) {
-    methods |= MethodFlags::CudaMemcpyPeer;
+    methods |= Method::CudaMemcpyPeer;
   }
   if (useKernel) {
-    methods |= MethodFlags::CudaKernel;
+    methods |= Method::CudaKernel;
   }
-  if (MethodFlags::None == methods) {
-    methods = MethodFlags::All;
+  if (Method::None == methods) {
+    methods = Method::All;
   }
 
   PlacementStrategy strategy = PlacementStrategy::NodeAware;
@@ -346,32 +346,32 @@ if (parser.need_help()) {
 
     if (0 == mpi::world_rank()) {
       std::string methodStr;
-      if (methods && MethodFlags::CudaMpi) {
+      if (methods && Method::CudaMpi) {
         methodStr += methodStr.empty() ? "" : ",";
         methodStr += "staged";
       }
-      if (methods && MethodFlags::CudaAwareMpi) {
+      if (methods && Method::CudaAwareMpi) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "cuda-aware";
       }
-      if (methods && MethodFlags::ColoPackMemcpyUnpack) {
+      if (methods && Method::ColoPackMemcpyUnpack) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "colo";
       }
-      if (methods && MethodFlags::CudaMemcpyPeer) {
+      if (methods && Method::CudaMemcpyPeer) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "peer";
       }
-      if (methods && MethodFlags::CudaKernel) {
+      if (methods && Method::CudaKernel) {
         methodStr += methodStr.empty() ? "" : "/";
         methodStr += "kernel";
       }
 
       std::cout << "jacobi3d," << methodStr << "," << size << "," << devCount << "," << x << "," << y << "," << z << ","
-                << dd.exchange_bytes_for_method(MethodFlags::CudaMpi) << ","
-                << dd.exchange_bytes_for_method(MethodFlags::ColoPackMemcpyUnpack) << ","
-                << dd.exchange_bytes_for_method(MethodFlags::CudaMemcpyPeer) << ","
-                << dd.exchange_bytes_for_method(MethodFlags::CudaKernel) << "," << iterTime.min() << ","
+                << dd.exchange_bytes_for_method(Method::CudaMpi) << ","
+                << dd.exchange_bytes_for_method(Method::ColoPackMemcpyUnpack) << ","
+                << dd.exchange_bytes_for_method(Method::CudaMemcpyPeer) << ","
+                << dd.exchange_bytes_for_method(Method::CudaKernel) << "," << iterTime.min() << ","
                 << iterTime.trimean() << "\n";
     }
   } // send domains out of scope before MPI_Finalize

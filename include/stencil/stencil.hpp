@@ -61,7 +61,7 @@ private:
   // the names of each quantity
   std::vector<std::string> dataName_;
 
-  MethodFlags flags_;
+  Method flags_;
   PlacementStrategy strategy_;
 
   // PeerCopySenders for same-rank exchanges
@@ -128,12 +128,12 @@ public:
     return DataHandle<T>(dataElemSize_.size() - 1, name);
   }
 
-  /* Choose comm methods from MethodFlags. Call before realize()
+  /* Choose comm methods from Method. Call before realize()
 
-    d.set_methods(MethodFlags::Any);
-    d.set_methods(MethodFlags::CudaAwareMpi | MethodFlags::Kernel);
+    d.set_methods(Method::Any);
+    d.set_methods(Method::CudaAwareMpi | Method::Kernel);
   */
-  void set_methods(MethodFlags flags) noexcept;
+  void set_methods(Method flags) noexcept;
 
   /* set the placement method.
 
@@ -144,7 +144,7 @@ public:
 
   /*! return true if any provided methods are enabled
    */
-  bool any_methods(MethodFlags methods) const noexcept { return methods && flags_; }
+  bool any_methods(Method methods) const noexcept { return methods && flags_; }
 
   /* Choose GPUs for this rank. Call before realize()
    */
@@ -165,7 +165,7 @@ public:
   /* return the total number of bytes moved during the halo exchange for `method`
   ( after realize() )
   */
-  uint64_t exchange_bytes_for_method(const MethodFlags &method) const;
+  uint64_t exchange_bytes_for_method(const Method &method) const;
 
   /* Initialize resources for a previously-configured domain.
   (before exchange())
