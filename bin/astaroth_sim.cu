@@ -71,7 +71,6 @@ int main(int argc, char **argv) {
   options.add_options()
   ("h,help", "Show help")
   ("remote", "Enable RemoteSender/Recver")
-  ("cuda-aware-mpi", "Enable CudaAwareMpiSender/Recver")
   ("colocated", "Enable ColocatedHaloSender/Recver")
   ("peer", "Enable PeerAccessSender")
   ("kernel", "Enable PeerCopySender")
@@ -137,9 +136,6 @@ int main(int argc, char **argv) {
   if (result["remote"].as<bool>()) {
     methods |= Method::CudaMpi;
   }
-  if (result["cuda-aware-mpi"].as<bool>()) {
-    methods |= Method::CudaAwareMpi;
-  }
   if (result["colocated"].as<bool>()) {
     methods |= Method::ColoPackMemcpyUnpack;
   }
@@ -150,7 +146,7 @@ int main(int argc, char **argv) {
     methods |= Method::CudaKernel;
   }
   if (Method::None == methods) {
-    methods = Method::All;
+    methods = Method::Default;
   }
 
   PlacementStrategy strategy = PlacementStrategy::NodeAware;

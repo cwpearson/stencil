@@ -6,7 +6,7 @@
 #include <vector>
 
 DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
-    : size_(x, y, z), placement_(nullptr), flags_(Method::All), strategy_(PlacementStrategy::NodeAware) {
+    : size_(x, y, z), placement_(nullptr), flags_(Method::Default), strategy_(PlacementStrategy::NodeAware) {
 
 #ifdef STENCIL_SETUP_STATS
   timeMpiTopo_ = 0;
@@ -132,7 +132,7 @@ DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
 uint64_t DistributedDomain::exchange_bytes_for_method(const Method &method) const {
   uint64_t ret = 0;
 #ifdef STENCIL_SETUP_STATS
-  if ((method && Method::CudaMpi) || (method && Method::CudaAwareMpi)) {
+  if (method && Method::CudaMpi) {
     ret += numBytesCudaMpi_;
   }
   if (method && Method::ColoDirectAccess) {
@@ -362,7 +362,7 @@ void DistributedDomain::realize() {
               goto send_planned;
             }
           }
-          if (any_methods(Method::CudaMpi | Method::CudaAwareMpi)) {
+          if (any_methods(Method::CudaMpi)) {
             assert(di < remoteOutboxes.size());
             remoteOutboxes[di][dstIdx].push_back(sMsg);
             LOG_DEBUG("Plan send <remote> "
@@ -404,7 +404,7 @@ void DistributedDomain::realize() {
               goto recv_planned;
             }
           }
-          if (any_methods(Method::CudaMpi | Method::CudaAwareMpi)) {
+          if (any_methods(Method::CudaMpi)) {
             assert(di < remoteInboxes.size());
             remoteInboxes[di].emplace(srcIdx, std::vector<Message>());
             remoteInboxes[di][srcIdx].push_back(sMsg);
@@ -612,10 +612,12 @@ to be loaded with numpy.loadtxt
       const int dstGPU = placement_->get_subdomain_id(dstIdx);
       if (0 == remoteSenders_[di].count(dstIdx)) {
         StatefulSender *sender = nullptr;
-        if (any_methods(Method::CudaAwareMpi)) {
+        if (any_methods(Method::CudaMpi)) {
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
           sender = new CudaAwareMpiSender(rank_, di, dstRank, dstGPU, domains_[di]);
-        } else if (any_methods(Method::CudaMpi)) {
+#else
           sender = new RemoteSender(rank_, di, dstRank, dstGPU, domains_[di]);
+#endif
         }
         assert(sender);
         remoteSenders_[di].emplace(dstIdx, sender);
@@ -627,10 +629,12 @@ to be loaded with numpy.loadtxt
       const int srcGPU = placement_->get_subdomain_id(srcIdx);
       if (0 == remoteRecvers_[di].count(srcIdx)) {
         StatefulRecver *recver = nullptr;
-        if (any_methods(Method::CudaAwareMpi)) {
+        if (any_methods(Method::CudaMpi)) {
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
           recver = new CudaAwareMpiRecver(srcRank, srcGPU, rank_, di, domains_[di]);
-        } else if (any_methods(Method::CudaMpi)) {
+#else
           recver = new RemoteRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+#endif
         }
         assert(recver);
         remoteRecvers_[di].emplace(srcIdx, recver);

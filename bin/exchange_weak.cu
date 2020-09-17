@@ -114,11 +114,6 @@ int main(int argc, char **argv) {
   if (useStaged) {
     methods = Method::CudaMpi;
   }
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  if (useCudaAware) {
-    methods = Method::CudaAwareMpi;
-  }
-#endif
   if (useColoPmu) {
     methods |= Method::ColoPackMemcpyUnpack;
   }
@@ -132,7 +127,7 @@ int main(int argc, char **argv) {
     methods |= Method::CudaKernel;
   }
   if (methods == Method::None) {
-    methods = Method::All;
+    methods = Method::Default;
   }
 
   if (0 == rank) {
@@ -205,9 +200,8 @@ int main(int argc, char **argv) {
              methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.domains()[0].size().x,
              dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(Method::CudaMpi),
              dd.exchange_bytes_for_method(Method::ColoPackMemcpyUnpack),
-             dd.exchange_bytes_for_method(Method::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(Method::CudaKernel), nIters, numSubdoms, numNodes, size,
-             stats.trimean());
+             dd.exchange_bytes_for_method(Method::CudaMemcpyPeer), dd.exchange_bytes_for_method(Method::CudaKernel),
+             nIters, numSubdoms, numNodes, size, stats.trimean());
     }
 #endif // STENCIL_SETUP_STATS
 

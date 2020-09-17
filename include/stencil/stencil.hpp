@@ -130,8 +130,8 @@ public:
 
   /* Choose comm methods from Method. Call before realize()
 
-    d.set_methods(Method::Any);
-    d.set_methods(Method::CudaAwareMpi | Method::Kernel);
+    d.set_methods(Method::Default);
+    d.set_methods(Method::CudaMpi | Method::Kernel);
   */
   void set_methods(Method flags) noexcept;
 

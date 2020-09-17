@@ -51,7 +51,7 @@ std::pair<Statistics, uint64_t> bench(const size_t nIters, const size_t nQuants,
       stats.insert(elapsed);
     }
   }
-  return std::make_pair(stats, dd.exchange_bytes_for_method(Method::All));
+  return std::make_pair(stats, dd.exchange_bytes_for_method(Method::Default));
 }
 
 void report_header() { std::cout << "name,count,trimean (S),trimean (B/s),stddev,min,avg,max\n"; }

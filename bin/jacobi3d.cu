@@ -87,7 +87,6 @@ __global__ void stencil_kernel(Accessor<float> dst, const Accessor<float> src,
 int main(int argc, char **argv) {
 
   bool useStaged = false;
-  bool useCudaAwareMPI = false;
   bool useColo = false;
   bool useMemcpyPeer = false;
   bool useKernel = false;
@@ -108,9 +107,6 @@ int main(int argc, char **argv) {
   argparse::Parser parser("a cwpearson/argparse-powered CLI app");
   // clang-format off
   parser.add_flag(useStaged, "--staged")->help("Enable RemoteSender/Recver");
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  parser.add_flag(useCudaAwareMPI, "--cuda-aware-mpi"->help("Enable CudaAwareMpiSender/Recver");
-#endif
   parser.add_flag(useColo, "--colo")->help("Enable ColocatedHaloSender/Recver");
   parser.add_flag(useMemcpyPeer, "--peer")->help("Enable PeerAccessSender");
   parser.add_flag(useKernel, "--kernel")->help("Enable PeerCopySender");
@@ -130,16 +126,15 @@ int main(int argc, char **argv) {
     exit(EXIT_FAILURE);
   }
 
-if (parser.need_help()) {
+  if (parser.need_help()) {
     std::cerr << parser.help() << "\n";
     return 0;
-}
+  }
 
   // default checkpoint 10 times
   if (checkpointPeriod <= 0) {
     checkpointPeriod = iters / 10;
   }
-
 
   MPI_Init(&argc, &argv);
 
@@ -183,7 +178,6 @@ if (parser.need_help()) {
     std::cerr << "assuming " << numSubdoms << " subdomains\n";
   }
 
-
   /*
   For a single node, scaling the compute domain as a cube while trying to keep gridpoints/GPU constant
     cause weird-to-understand scaling performance for GPU kernels because the aspect ratio affects the GPU kernel
@@ -217,9 +211,6 @@ if (parser.need_help()) {
   if (useStaged) {
     methods |= Method::CudaMpi;
   }
-  if (useCudaAwareMPI) {
-    methods |= Method::CudaAwareMpi;
-  }
   if (useColo) {
     methods |= Method::ColoPackMemcpyUnpack;
   }
@@ -230,7 +221,7 @@ if (parser.need_help()) {
     methods |= Method::CudaKernel;
   }
   if (Method::None == methods) {
-    methods = Method::All;
+    methods = Method::Default;
   }
 
   PlacementStrategy strategy = PlacementStrategy::NodeAware;
@@ -254,7 +245,6 @@ if (parser.need_help()) {
   radius.dir(0, 0, 1) = 1;
   radius.dir(0, 0, -1) = 1;
   // radius.set_face(1);
-
 
   Statistics iterTime;
 

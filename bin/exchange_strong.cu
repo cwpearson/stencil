@@ -58,9 +58,6 @@ int main(int argc, char **argv) {
   bool usePeer = false;
   bool useColoPmu = false;
   bool useColoDa = false;
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  bool useCudaAware = false;
-#endif
   bool useStaged = false;
 
   argparse::Parser p;
@@ -75,9 +72,6 @@ int main(int argc, char **argv) {
   p.add_flag(useColoDa, "--colo-da");
   p.add_flag(useNaivePlacement, "--naive");
   p.add_option(prefix, "--prefix");
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  p.add_flag(useCudaAware, "--cuda-aware");
-#endif
   p.add_flag(useStaged, "--staged");
   if (!p.parse(argc, argv)) {
     std::cout << p.help() << "\n";
@@ -88,11 +82,6 @@ int main(int argc, char **argv) {
   if (useStaged) {
     methods = Method::CudaMpi;
   }
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  if (useCudaAware) {
-    methods = Method::CudaAwareMpi;
-  }
-#endif
   if (useColoPmu) {
     methods |= Method::ColoPackMemcpyUnpack;
   }
@@ -106,7 +95,7 @@ int main(int argc, char **argv) {
     methods |= Method::CudaKernel;
   }
   if (methods == Method::None) {
-    methods = Method::All;
+    methods = Method::Default;
   }
 
   if (0 == rank) {
@@ -176,9 +165,8 @@ int main(int argc, char **argv) {
              methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.domains()[0].size().x,
              dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(Method::CudaMpi),
              dd.exchange_bytes_for_method(Method::ColoPackMemcpyUnpack),
-             dd.exchange_bytes_for_method(Method::CudaMemcpyPeer),
-             dd.exchange_bytes_for_method(Method::CudaKernel), nIters, numSubdoms, numNodes, size,
-             stats.trimean());
+             dd.exchange_bytes_for_method(Method::CudaMemcpyPeer), dd.exchange_bytes_for_method(Method::CudaKernel),
+             nIters, numSubdoms, numNodes, size, stats.trimean());
     }
 #endif // STENCIL_EXCHANGE_STATS
 

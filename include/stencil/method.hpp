@@ -4,17 +4,12 @@
 
 enum class Method : int {
   None = 0,
-  CudaMpi = 1,
-  CudaAwareMpi = 2,
-  ColoPackMemcpyUnpack = 4,
-  ColoDirectAccess = 8,
-  CudaMemcpyPeer = 16,
-  CudaKernel = 32,
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  All = 1 + 2 + 4 + 16 + 32
-#else
-  All = 1 + 4 + 16 + 32
-#endif
+  CudaMpi = 1, // means different things if STENCIL_USE_CUDA_AWARE_MPI=1
+  ColoPackMemcpyUnpack = 2,
+  ColoDirectAccess = 4,
+  CudaMemcpyPeer = 8,
+  CudaKernel = 16,
+  Default = 1 + 2 + 8 + 16
 };
 
 inline Method operator|(Method a, Method b) { return static_cast<Method>(static_cast<int>(a) | static_cast<int>(b)); }
@@ -41,11 +36,11 @@ inline std::string to_string(const Method &m) {
 
   if (m && Method::CudaMpi) {
     ret += ret.empty() ? "" : sep;
-    ret += "staged";
-  }
-  if (m && Method::CudaAwareMpi) {
-    ret += ret.empty() ? "" : sep;
+#if STENCIL_USE_CUDA_AWARE_MPI == 1
     ret += "cuda-aware";
+#else
+    ret += "staged";
+#endif
   }
   if (m && Method::ColoPackMemcpyUnpack) {
     ret += ret.empty() ? "" : sep;
