@@ -111,9 +111,8 @@ int main(int argc, char **argv) {
 
   if (0 == rank) {
 #ifndef NDEBUG
-    std::cout << "ERR: not release mode\n";
-    std::cerr << "ERR: not release mode\n";
-    exit(-1);
+    std::cout << "WARN: not release mode\n";
+    std::cerr << "WARN: not release mode\n";
 #endif
 #ifdef STENCIL_EXCHANGE_STATS
     std::cout << "WARN: detailed time measurement\n";
