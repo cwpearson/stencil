@@ -4,10 +4,9 @@
 
 A prototype MPI/CUDA stencil halo exchange library
 
+## Quick Start
 
-## Quick Start (weak scaling)
-
-Install MPI, CUDA, and CMake 3.13+, then
+Install MPI, CUDA, and CMake 3.17+, then
 
 ```
 git clone git@github.com:cwpearson/stencil.git
@@ -16,8 +15,18 @@ mkdir build
 cd build
 cmake ..
 make
-mpirun -n 4 src/weak
+make test
 ```
+
+## Design Principles
+
+* Maximal communication overlap: each GPU communicates with neighbors in a point-to-point scheme with all communication overlapped
+* Fast intra-node communication: communication can occur entirely through CUDA even for different ranks on the same node.
+* CUDA-aware MPI support: Can be enabled if desired (`cmake -DUSE_CUDA_AWARE_MPI=ON`)
+* Automatic partitioning: partition data to minimize communication volume
+* Topology-aware data placement: place data to maximize communication bandwidth for large messages
+* Communication/Computation Overlap: API to query grid regions that can be used concurrent with communication.
+* Friendly: Access data in terms of grid coordinates, not memory offsets.
 
 ## Documentation
 
@@ -32,7 +41,7 @@ Depending on availability, the following compiler defines exist:
 ## Requirements
 Tested on
 
-* CUDA 10.1 / 10.2
+* CUDA 10.1 / 10.2 / 11.0
 * OpenMPI 2.1
 
 ## Tests
@@ -47,11 +56,14 @@ To run specific tests
 ```
 test/test_cpu "<case name>" -c "<section name>"
 ```
+With `USE_CUDA_GRAPH=ON`, errors may be reported inconsistently, very late, or be nonsense (e.g., `715 invalid instruction` when a stream was on a wrong device).
+Using a newer CUDA version can improve aspects of error reporting.
+If there is an error, it probably indicates an actual problem, just not necessarily the problem CUDA reports.
 
 It may be useful to run tests under `cuda-memcheck`.
 `cuda-memcheck` may report spurious errors from `cudaDeviceEnablePeerAccess`, so we disable reporting API errors.
 All API calls are checked at runtime at all optimization levels, so errors will always surface.
-
+With `USE_CUDA_GRAPH=ON`, `cuda-memcheck` may not report errors.
 ```
 cuda-memcheck --report-api-errors no test/test_cuda
 ```
@@ -68,16 +80,6 @@ CUDA tests only
 test/test_all "[cuda]"
 ```
 
-To run specific tests
-```
-test/test_cpu "<case name>" -c "<section name>"
-```
-
-## Running the Astaroth-sim
-
-```
-mpirun -n 4 src/astaroth-sim
-```
 ## Profiling with nsys
 
 With the default profiling settings, we sometimes see a crash on Nsight Systems 2019.3.7 on amd64.
@@ -173,15 +175,17 @@ Run scripts are in `srcipts/summit`.
 nsight-systems 2020.3.1.71 can crash with the `osrt` or `mpi` profiler turned on.
 Disable with `nsys profile -t cuda,nvtx`.
 
-CUDA 10.1 causes problems with the CUDA graph API. Ensure you are using CUDA 10.2+ when building.
-```
-module load cmake
-module load cuda/10.2.89
-```
-
 To control the compute mode, use `bsub -alloc_flags gpudefault` (see https://www.olcf.ornl.gov/for-users/system-user-guides/summitdev-quickstart-guide/#gpu-specific-jobs)
 
 To enable GPUDirect, do `jsrun --smpiargs="-gpu" ...` (see https://docs.olcf.ornl.gov/systems/summit_user_guide.html, "CUDA-Aware MPI")
+
+To run tests, do `bsub 1node_test.sh` or get an interactive node (`bsub -W 2:00 -q debug -nnodes 1 -P csc362 -alloc_flags gpudefault -Is /bin/zsh`) and run that script.
+
+During configuration, you may see an error like this which causes cmake to fail:
+```
+CMake Error: Remove failed on file: /ccs/home/cpearson/repos/stencil/build/CMakeFiles/CMakeTmp/CMakeFiles/cmTC_50eb9.dir/.nfs000000001473310900000eaf: System Error: Device or resource busy
+```
+Re-run cmake again.
 
 ## ParaView (5.8.0)
 
@@ -219,15 +223,17 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
     * [x] Control which exchange method should be used
   * v2 (next publication)
     * [x] ParaView output files `DistributedDomain::write_paraview(const std::string &prefix)`
-    * [x] support uneven radius (branch=`feature/multi-radius`)
+    * [x] support uneven radius
     * [x] "Accessor Object" for data
       * [x] Index according to point in compute domain
     * [x] Support overlapped computation and communication
       * interface for extracting interior/exterior of compute region for kernel invocations
-    * [ ] `cudaMemcpy3D`
-    * [ ] CUDA runtime timer
+    * [x] `cudaMemcpy3D`
+    * [x] CUDA runtime timer
     * [x] pitched allocation
   * v3
+    * [ ] Message bundling
+      * Improved performance by sending all data for a remote node in a single message?
     * [ ] allow a manual partition before placement
       * constrain to single subdomain per GPU
   * future work
@@ -243,11 +249,13 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
 
     
 * needs info
+  * [ ] exchange subset of quantities
+    * this would potentially split some of the operation bundling opportunities (pack, CUDA graph, ...)
+    * exchange is not async now, e.g. CPU polls communicators. May want a worker thread or something.
   * mesh refinement
     * we would rely on the user to specify the conditions
     * inferface for asking for refinement?
     * how to rebalance load and communication
-
     * would require test machine with non-homogeneous intra-node communication
   * mapping multiple subdomains to each GPU
 * wontfix
@@ -265,6 +273,7 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
 
 A C++-style class representing a shared CUDA stream.
 The underlying stream is released when the reference count drops to zero.
+Each stream can be explicitly associated with a device.
 
 ### GPU Distance Matrix
 
@@ -273,7 +282,32 @@ The underlying stream is released when the reference count drops to zero.
 The Distance Between GPUs is computed by using Nvidia Management Library to determine what the common ancestor of two GPUs is.
 This is combined with other NVML APIs to determine if two GPUs are directly connected by NVLink, which is considered the closest distance.
 
-## C++ Guidelines
+### CUDA Graph API
+
+Various repeated communication patterns are accelerated through the CUDA graph API.
+
+### Passthrough GPU and MPI timers with compiler barriers
+
+A construction like this can inadvertently time evaluation of argument expressions:
+```
+auto start = get_wall_time();
+cudaDoSomething(a.lots_of_work())
+auto elapsed = get_wall_time() - start();
+```
+
+use `stencil/include/rt.hpp` to time only the cuda operation after arguments have been evaluated:
+```
+rt::time(cudaDoSomething, a.lots_of_work())
+```
+
+Similarly, for MPI operations
+```
+mpi::time(MPI_Isend, srcBuf, ...);
+```
+
+The timers (`include/stencil/timer.hpp`) use compiler barriers to prevent reordering of instructions around the system calls.
+
+## C++ Guidelines this project tries to follow
 
 * Don't put state in abstract classes
   * [I.25: Prefer abstract classes as interfaces to class hierarchies](https://github.com/isocpp/CppCoreGuidelines/blob/master/CppCoreGuidelines.md#i25-prefer-abstract-classes-as-interfaces-to-class-hierarchies)
