@@ -19,6 +19,7 @@
 #include "stencil/gpu_topology.hpp"
 #include "stencil/local_domain.cuh"
 #include "stencil/logging.hpp"
+#include "stencil/method.hpp"
 #include "stencil/mpi_topology.hpp"
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
@@ -28,80 +29,10 @@
 #include "stencil/tx_colocated_direct_access.cuh"
 #include "stencil/tx_cuda.cuh"
 
-enum class MethodFlags : int {
-  None = 0,
-  CudaMpi = 1,
-  CudaAwareMpi = 2,
-  ColoPackMemcpyUnpack = 4,
-  ColoDirectAccess = 8,
-  CudaMemcpyPeer = 16,
-  CudaKernel = 32,
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  All = 1 + 2 + 4 + 16 + 32
-#else
-  All = 1 + 4 + 16 + 32
-#endif
-};
-
-inline MethodFlags operator|(MethodFlags a, MethodFlags b) {
-  return static_cast<MethodFlags>(static_cast<int>(a) | static_cast<int>(b));
-}
-
-inline MethodFlags &operator|=(MethodFlags &a, MethodFlags b) {
-  a = a | b;
-  return a;
-}
-
-inline MethodFlags operator&(MethodFlags a, MethodFlags b) {
-  return static_cast<MethodFlags>(static_cast<int>(a) & static_cast<int>(b));
-}
-
-inline bool operator&&(MethodFlags a, MethodFlags b) { return (a & b) != MethodFlags::None; }
-
-inline bool any(MethodFlags a) noexcept { return a != MethodFlags::None; }
-
-inline std::string to_string(const MethodFlags &m) {
-
-  std::string ret;
-  const std::string sep("|");
-
-  if (m == MethodFlags::None) {
-    return "";
-  }
-
-  if (m && MethodFlags::CudaMpi) {
-    ret += ret.empty() ? "" : sep;
-    ret += "staged";
-  }
-  if (m && MethodFlags::CudaAwareMpi) {
-    ret += ret.empty() ? "" : sep;
-    ret += "cuda-aware";
-  }
-  if (m && MethodFlags::ColoPackMemcpyUnpack) {
-    ret += ret.empty() ? "" : sep;
-    ret += "colo-pmu";
-  }
-  if (m && MethodFlags::ColoDirectAccess) {
-    ret += ret.empty() ? "" : sep;
-    ret += "colo-da";
-  }
-  if (m && MethodFlags::CudaMemcpyPeer) {
-    ret += ret.empty() ? "" : sep;
-    ret += "peer";
-  }
-  if (m && MethodFlags::CudaKernel) {
-    ret += ret.empty() ? "" : sep;
-    ret += "kernel";
-  }
-
-  return ret;
-}
-
 class DistributedDomain {
 private:
-
   // logical size of the allocation, in elements.
-  //Typically larger than the compute region due to halo 
+  // Typically larger than the compute region due to halo
   Dim3 size_;
 
   int rank_;
@@ -219,6 +150,10 @@ public:
    */
   void set_gpus(const std::vector<int> &cudaIds) { gpus_ = cudaIds; }
 
+  /* Set the output prefix for the MPI communication matrix
+   */
+  void set_output_prefix(const std::string &prefix);
+
   /* return the coordinate in the domain that subdomain i's interior starts at
    */
   const Dim3 &get_origin(int64_t i) const { return domains_[i].origin(); }
@@ -265,8 +200,4 @@ public:
      subdomain `zero_nans` causes nans to be replaced with 0.0
   */
   void write_paraview(const std::string &prefix, bool zeroNaNs = false);
-
-  /* Set the output prefix for the MPI communication matrix
-   */
-  void set_output_prefix(const std::string &prefix);
 };

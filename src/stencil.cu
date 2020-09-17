@@ -477,8 +477,7 @@ to be loaded with numpy.loadtxt
     numBytesCudaMemcpyPeer_ = 0;
     numBytesCudaKernel_ = 0;
 #endif
-    // FIXME: add outputPrefix_
-    std::string planFileName = "plan_" + std::to_string(rank_) + ".txt";
+    std::string planFileName = outputPrefix_ + "plan_" + std::to_string(rank_) + ".txt";
     std::ofstream planFile(planFileName, std::ofstream::out);
 
     planFile << "rank=" << rank_ << "\n\n";
