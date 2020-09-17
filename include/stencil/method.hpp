@@ -7,9 +7,10 @@ enum class Method : int {
   CudaMpi = 1, // means different things if STENCIL_USE_CUDA_AWARE_MPI=1
   ColoPackMemcpyUnpack = 2,
   ColoDirectAccess = 4,
-  CudaMemcpyPeer = 8,
-  CudaKernel = 16,
-  Default = 1 + 2 + 8 + 16
+  ColoMemcpy3d = 8,
+  CudaMemcpyPeer = 16,
+  CudaKernel = 32,
+  Default = CudaMpi + ColoPackMemcpyUnpack + CudaMemcpyPeer + CudaKernel
 };
 
 inline Method operator|(Method a, Method b) { return static_cast<Method>(static_cast<int>(a) | static_cast<int>(b)); }

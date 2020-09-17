@@ -1,32 +1,45 @@
-#include "stencil/tx_colocated_direct_access.cuh"
+#include "stencil/tx_colocated.cuh"
 
 #include "stencil/copy.cuh"
 
 #include <nvToolsExt.h>
+#include <nvToolsExtCudaRt.h>
 
 #include <algorithm>
 
-ColoDirectAccessHaloSender::~ColoDirectAccessHaloSender() {
+ColoHaloSender::ColoHaloSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
+                               Placement *placement)
+    : srcRank_(srcRank), dstRank_(dstRank), srcDom_(srcDom), dstDom_(dstDom), domain_(&domain), placement_(placement),
+      stream_(domain.gpu(), RcStream::Priority::HIGH), ipcSender_(srcRank, srcDom, dstRank, dstDom, domain.gpu()),
+      translate_(nullptr), // derived class picks translator implementation
+      dstDomCurrDatasDev_(nullptr) {
+  std::string streamName("ColoHaloSender_");
+  streamName += "r" + std::to_string(srcRank);
+  streamName += "d" + std::to_string(srcDom);
+  streamName += "->r" + std::to_string(dstRank);
+  streamName += "d" + std::to_string(dstDom);
+  nvtxNameCudaStreamA(stream_, streamName.c_str());
+}
+
+ColoHaloSender::~ColoHaloSender() {
   assert(domain_);
   CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
   // free cuda malloc
   CUDA_RUNTIME(cudaFree(dstDomCurrDatasDev_));
+  dstDomCurrDatasDev_ = nullptr;
 
   // free mem handle
   for (cudaPitchedPtr &p : dstDomCurrDatas_) {
     CUDA_RUNTIME(cudaIpcCloseMemHandle(p.ptr));
   }
   dstDomCurrDatas_.clear();
+
+  delete translate_;
+  translate_ = nullptr;
 }
 
-ColoDirectAccessHaloSender::ColoDirectAccessHaloSender(int srcRank, int srcDom, int dstRank, int dstDom,
-                                                       LocalDomain &domain, Placement *placement)
-    : srcRank_(srcRank), dstRank_(dstRank), srcDom_(srcDom), dstDom_(dstDom), domain_(&domain), placement_(placement),
-      stream_(domain.gpu(), RcStream::Priority::HIGH), ipcSender_(srcRank, srcDom, dstRank, dstDom, domain.gpu()),
-      translate_(domain.gpu()), dstDomCurrDatasDev_(nullptr) {}
-
-void ColoDirectAccessHaloSender::start_prepare(const std::vector<Message> &outbox) {
-  nvtxRangePush("ColoDirectAccessHaloSender::start_prepare");
+void ColoHaloSender::start_prepare(const std::vector<Message> &outbox) {
+  nvtxRangePush("ColoHaloSender::start_prepare");
   outbox_ = outbox;
   std::sort(outbox_.begin(), outbox_.end());
   // outbox should only have messages for our domain and the dst domain
@@ -51,16 +64,16 @@ void ColoDirectAccessHaloSender::start_prepare(const std::vector<Message> &outbo
   nvtxRangePop();
 }
 
-void ColoDirectAccessHaloSender::finish_prepare() {
-  LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: waiting for mem handles...");
+void ColoHaloSender::finish_prepare() {
+  LOG_SPEW("ColoHaloSender::finish_prepare: waiting for mem handles...");
   // recieve mem handles
   MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
-  LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: got mem handles");
+  LOG_SPEW("ColoHaloSender::finish_prepare: got mem handles");
 
   // recieve pitch information
-  LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: waiting for pitch information");
+  LOG_SPEW("ColoHaloSender::finish_prepare: waiting for pitch information");
   MPI_Wait(&ptrReq_, MPI_STATUS_IGNORE);
-  LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: got pitch info");
+  LOG_SPEW("ColoHaloSender::finish_prepare: got pitch info");
 
   // convert to pointers
   CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
@@ -69,13 +82,13 @@ void ColoDirectAccessHaloSender::finish_prepare() {
     CUDA_RUNTIME(cudaIpcOpenMemHandle(&ptr, memHandles_[i], cudaIpcMemLazyEnablePeerAccess));
     dstDomCurrDatas_[i].ptr = ptr; // overwrite with ptr that is valid in this address space
   }
-  LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: converted to pointers");
+  LOG_SPEW("ColoHaloSender::finish_prepare: converted to pointers");
 
   // push pointers to device so they can be used in the kernel
   CUDA_RUNTIME(cudaMalloc(&dstDomCurrDatasDev_, dstDomCurrDatas_.size() * sizeof(dstDomCurrDatas_[0])));
   CUDA_RUNTIME(cudaMemcpy(dstDomCurrDatasDev_, dstDomCurrDatas_.data(),
                           dstDomCurrDatas_.size() * sizeof(dstDomCurrDatas_[0]), cudaMemcpyHostToDevice));
-  LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: pushed pointers");
+  LOG_SPEW("ColoHaloSender::finish_prepare: pushed pointers");
 
   {
     std::vector<Translator::Params> params;
@@ -95,44 +108,59 @@ void ColoDirectAccessHaloSender::finish_prepare() {
       const Dim3 extent = domain_->halo_extent(msg.dir_);
 
       Translator::Params p{.dsts = dstDomCurrDatas_.data(),
-                          .dstPos = dstPos,
-                          .srcs = domain_->curr_datas().data(),
-                          .srcPos = srcPos,
-                          .extent = extent,
-                          .elemSizes = domain_->elem_sizes().data(),
-                          .n = domain_->num_data()};
+                           .dstPos = dstPos,
+                           .srcs = domain_->curr_datas().data(),
+                           .srcPos = srcPos,
+                           .extent = extent,
+                           .elemSizes = domain_->elem_sizes().data(),
+                           .n = domain_->num_data()};
       params.push_back(p);
     }
-    LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: cvt outbox to params");
-    translate_.prepare(params);
+    LOG_SPEW("ColoHaloSender::finish_prepare: cvt outbox to params");
+    assert(translate_);
+    translate_->prepare(params);
   }
-  LOG_SPEW("ColoDirectAccessHaloSender::finish_prepare: prepared translator");
+  LOG_SPEW("ColoHaloSender::finish_prepare: prepared translator");
 
   ipcSender_.wait_prepare();
 }
 
-void ColoDirectAccessHaloSender::send() {
-  nvtxRangePush("ColoDirectAccessHaloSender::send");
-  translate_.async(stream_);
+void ColoHaloSender::send() {
+  nvtxRangePush("ColoHaloSender::send");
+  assert(translate_);
+  translate_->async(stream_);
   CUDA_RUNTIME(cudaEventRecord(ipcSender_.event(), stream_));
   ipcSender_.async_notify();
-  nvtxRangePop(); // ColoDirectAccessHaloSender::send
+  nvtxRangePop(); // ColoHaloSender::send
 }
 
-void ColoDirectAccessHaloSender::wait() {
+void ColoHaloSender::wait() {
   ipcSender_.wait_notify();
   CUDA_RUNTIME(cudaEventSynchronize(ipcSender_.event()));
 }
 
-ColoDirectAccessHaloRecver::ColoDirectAccessHaloRecver(int srcRank, int srcDom, int dstRank, int dstDom,
-                                                       LocalDomain &domain)
+ColoMemcpy3dHaloSender::ColoMemcpy3dHaloSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
+                                               Placement *placement)
+    : ColoHaloSender(srcRank, srcDom, dstRank, dstDom, domain, placement) {
+  assert(!translate_);
+  translate_ = new TranslatorMemcpy3D();
+}
+
+ColoDirectAccessHaloSender::ColoDirectAccessHaloSender(int srcRank, int srcDom, int dstRank, int dstDom,
+                                                       LocalDomain &domain, Placement *placement)
+    : ColoHaloSender(srcRank, srcDom, dstRank, dstDom, domain, placement) {
+  assert(!translate_);
+  translate_ = new TranslatorDirectAccess(domain.gpu());
+}
+
+ColoHaloRecver::ColoHaloRecver(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain)
     : srcRank_(srcRank), srcDom_(srcDom), dstDom_(dstDom), domain_(&domain),
       stream_(domain.gpu(), RcStream::Priority::HIGH), ipcRecver_(srcRank, srcDom, dstRank, dstDom, domain.gpu()),
       state_(State::NONE) {}
 
-ColoDirectAccessHaloRecver::~ColoDirectAccessHaloRecver() {}
+ColoHaloRecver::~ColoHaloRecver() {}
 
-void ColoDirectAccessHaloRecver::start_prepare(const std::vector<Message> &inbox) {
+void ColoHaloRecver::start_prepare(const std::vector<Message> &inbox) {
 
   // we don't do anything to recv messages
   (void)inbox;
@@ -157,7 +185,7 @@ void ColoDirectAccessHaloRecver::start_prepare(const std::vector<Message> &inbox
   ipcRecver_.async_prepare();
 }
 
-void ColoDirectAccessHaloRecver::finish_prepare() {
+void ColoHaloRecver::finish_prepare() {
 
   // wait for mem handles to be sent
   MPI_Wait(&memReq_, MPI_STATUS_IGNORE);
@@ -165,16 +193,16 @@ void ColoDirectAccessHaloRecver::finish_prepare() {
   ipcRecver_.wait_prepare();
 }
 
-void ColoDirectAccessHaloRecver::recv() {
+void ColoHaloRecver::recv() {
   assert(State::NONE == state_);
   ipcRecver_.async_listen();
   state_ = State::WAIT_NOTIFY;
 }
 
 // once we are in the WAIT_KERNEL state, there's nothing else we need to do
-bool ColoDirectAccessHaloRecver::active() { return state_ == State::WAIT_NOTIFY; }
+bool ColoHaloRecver::active() { return state_ == State::WAIT_NOTIFY; }
 
-bool ColoDirectAccessHaloRecver::next_ready() {
+bool ColoHaloRecver::next_ready() {
   if (State::WAIT_NOTIFY == state_) {
     return ipcRecver_.test_listen();
   } else { // should only be asked this in active() states
@@ -182,13 +210,13 @@ bool ColoDirectAccessHaloRecver::next_ready() {
   }
 }
 
-void ColoDirectAccessHaloRecver::next() {
+void ColoHaloRecver::next() {
   if (State::WAIT_NOTIFY == state_) {
     state_ = State::WAIT_KERNEL;
   }
 }
 
-void ColoDirectAccessHaloRecver::wait() {
+void ColoHaloRecver::wait() {
   // wait on the event that the sender recorded after the kernel
   assert(stream_.device() == domain_->gpu());
   CUDA_RUNTIME(cudaEventSynchronize(ipcRecver_.event()));

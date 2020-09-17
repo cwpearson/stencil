@@ -26,7 +26,6 @@
 #include "stencil/pitched_ptr.hpp"
 #include "stencil/radius.hpp"
 #include "stencil/tx.hpp"
-#include "stencil/tx_colocated_direct_access.cuh"
 #include "stencil/tx_cuda.cuh"
 
 class DistributedDomain {

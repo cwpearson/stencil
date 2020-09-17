@@ -154,17 +154,17 @@ int main(int argc, char **argv) {
       const std::string methodStr = to_string(methods);
 
       // clang-format off
-      // same as strong.cu
       // header should be
-      // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer (B),direct (B),iters,sds,nodes,ranks,exchange trimean (s)
+      // bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colo-PMU (B),Colo-DA (B),cudaMemcpyPeer (B),direct (B),iters,sds,nodes,ranks,exchange trimean (s)
       // clang-format on
       printf("exchange,%s,%d,%lu,%lu,%lu,%lu," // s
              "%lu,%lu,%lu,"                    // ldx,ldy,ldz
-             "%lu,%lu,%lu,%lu,"                // different exchange bytes
+             "%lu,%lu,%lu,%lu,%lu,"            // different exchange bytes
              "%d,%d,%d,%d,%e\n",
              methodStr.c_str(), useNaivePlacement, x, y, z, x * y * z, dd.domains()[0].size().x,
              dd.domains()[0].size().y, dd.domains()[0].size().z, dd.exchange_bytes_for_method(Method::CudaMpi),
              dd.exchange_bytes_for_method(Method::ColoPackMemcpyUnpack),
+             dd.exchange_bytes_for_method(Method::ColoDirectAccess),
              dd.exchange_bytes_for_method(Method::CudaMemcpyPeer), dd.exchange_bytes_for_method(Method::CudaKernel),
              nIters, numSubdoms, numNodes, size, stats.trimean());
     }

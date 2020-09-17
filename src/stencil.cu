@@ -1,7 +1,7 @@
 #include "stencil/stencil.hpp"
 
 #include "stencil/logging.hpp"
-#include "stencil/tx_colocated_direct_access.cuh"
+#include "stencil/tx_colocated.cuh"
 
 #include <vector>
 
@@ -643,7 +643,7 @@ to be loaded with numpy.loadtxt
   }
   nvtxRangePop(); // create remote
 
-  std::cerr << "create colocated\n";
+  LOG_DEBUG("create colocated");
   // create colocated sender/recvers
   nvtxRangePush("DistributedDomain::realize: create colocated");
   // per-domain senders and messages
@@ -662,6 +662,8 @@ to be loaded with numpy.loadtxt
         sender = new ColocatedHaloSender(rank_, di, dstRank, dstGPU, domains_[di]);
       } else if (any_methods(Method::ColoDirectAccess)) {
         sender = new ColoDirectAccessHaloSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
+      } else if (any_methods(Method::ColoMemcpy3d)) {
+        sender = new ColoMemcpy3dHaloSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
       }
       coloSenders_[di].emplace(dstIdx, sender);
     }
@@ -674,7 +676,9 @@ to be loaded with numpy.loadtxt
       if (any_methods(Method::ColoPackMemcpyUnpack)) {
         recver = new ColocatedHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
       } else if (any_methods(Method::ColoDirectAccess)) {
-        recver = new ColoDirectAccessHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+        recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+      } else if (any_methods(Method::ColoMemcpy3d)) {
+        recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
       }
       coloRecvers_[di].emplace(srcIdx, recver);
     }
@@ -949,17 +953,6 @@ void DistributedDomain::exchange() {
   }
   nvtxRangePop();
 
-  // send same-rank messages
-  LOG_DEBUG("send peer copy");
-  nvtxRangePush("DD::exchange: peer copy send");
-  for (auto &src : peerCopySenders_) {
-    for (auto &kv : src) {
-      PeerCopySender &sender = kv.second;
-      sender.send();
-    }
-  }
-  nvtxRangePop();
-
   // start colocated Senders
   LOG_DEBUG("start colo send");
   nvtxRangePush("DD::exchange: colo send");
@@ -967,6 +960,17 @@ void DistributedDomain::exchange() {
     for (auto &kv : domSenders) {
       StatefulSender *sender = kv.second;
       sender->send();
+    }
+  }
+  nvtxRangePop();
+
+  // send same-rank messages
+  LOG_DEBUG("send peer copy");
+  nvtxRangePush("DD::exchange: peer copy send");
+  for (auto &src : peerCopySenders_) {
+    for (auto &kv : src) {
+      PeerCopySender &sender = kv.second;
+      sender.send();
     }
   }
   nvtxRangePop();
@@ -1054,7 +1058,7 @@ void DistributedDomain::exchange() {
   nvtxRangePop(); // DD::exchange: poll
 
   // wait for sends
-  LOG_SPEW("[" << rank_ << "] wait for peer access senders");
+  LOG_SPEW("wait for peer access senders");
   nvtxRangePush("peerAccessSender.wait()");
   peerAccessSender_.wait();
   nvtxRangePop();

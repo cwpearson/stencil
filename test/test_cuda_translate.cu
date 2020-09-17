@@ -3,7 +3,7 @@
 #include "stencil/cuda_runtime.hpp"
 #include "stencil/dim3.hpp"
 #include "stencil/pitched_ptr.hpp"
-#include "stencil/translate.cuh"
+#include "stencil/translator.cuh"
 
 template <typename TestType> void all_sections(Translator *translator) {
   Dim3 arrSz(3, 4, 5);

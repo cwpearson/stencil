@@ -1,4 +1,4 @@
-#include "stencil/translate.cuh"
+#include "stencil/translator.cuh"
 
 #include "stencil/copy.cuh"
 #include "stencil/cuda_runtime.hpp"

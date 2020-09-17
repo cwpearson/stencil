@@ -134,9 +134,7 @@ public:
   PeerCopySender(size_t srcGPU, size_t dstGPU, LocalDomain &srcDomain, LocalDomain &dstDomain)
       : srcGPU_(srcGPU), dstGPU_(dstGPU), srcDomain_(&srcDomain), dstDomain_(&dstDomain),
         srcStream_(srcDomain.gpu(), RcStream::Priority::HIGH), dstStream_(dstDomain.gpu(), RcStream::Priority::HIGH),
-        packer_(srcStream_), unpacker_(dstStream_) {
-
-}
+        packer_(srcStream_), unpacker_(dstStream_) {}
 
   void prepare(std::vector<Message> &outbox) {
     packer_.prepare(srcDomain_, outbox);
@@ -359,7 +357,14 @@ private:
 public:
   ColocatedHaloSender(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : domain_(&domain), stream_(domain.gpu(), RcStream::Priority::HIGH), packer_(stream_),
-        sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {}
+        sender_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()) {
+    std::string streamName("ColocatedHaloSender_");
+    streamName += "r" + std::to_string(srcRank);
+    streamName += "g" + std::to_string(srcGPU);
+    streamName += "->r" + std::to_string(dstRank);
+    streamName += "g" + std::to_string(dstGPU);
+    nvtxNameCudaStreamA(stream_, streamName.c_str());
+  }
 
   void start_prepare(const std::vector<Message> &outbox) override {
     packer_.prepare(domain_, outbox);
@@ -372,8 +377,12 @@ public:
   void finish_prepare() override { sender_.finish_prepare(); }
 
   void send() noexcept override {
+    nvtxRangePush("ColoHaloSender: init pack");
     packer_.pack();
+    nvtxRangePop();
+    nvtxRangePush("ColoHaloSender: init send");
     sender_.send(packer_.data(), stream_);
+    nvtxRangePop();
   }
 
   void wait() noexcept override { sender_.wait(); }
@@ -417,7 +426,14 @@ public:
   ColocatedHaloRecver(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstGPU_(dstGPU), domain_(&domain),
         stream_(domain.gpu(), RcStream::Priority::HIGH), recver_(srcRank, srcGPU, dstRank, dstGPU, domain.gpu()),
-        unpacker_(stream_), state_(State::NONE) {}
+        unpacker_(stream_), state_(State::NONE) {
+    std::string streamName("ColocatedHaloRecver_");
+    streamName += "r" + std::to_string(srcRank);
+    streamName += "g" + std::to_string(srcGPU);
+    streamName += "->r" + std::to_string(dstRank);
+    streamName += "g" + std::to_string(dstGPU);
+    nvtxNameCudaStreamA(stream_, streamName.c_str());
+  }
 
   void start_prepare(const std::vector<Message> &inbox) override {
     unpacker_.prepare(domain_, inbox);
@@ -433,7 +449,9 @@ public:
     assert(State::NONE == state_);
     state_ = State::WAIT_NOTIFY;
 
+    nvtxRangePush("ColoHaloRecver: init listen");
     recver_.async_listen();
+    nvtxRangePop();
 
     assert(stream_.device() == domain_->gpu());
   }
@@ -455,7 +473,9 @@ public:
       // The device recver knows how to exchange with the
       state_ = State::WAIT_COPY;
       recver_.wait(stream_);
+      nvtxRangePush("ColoHaloRecver: init unpack");
       unpacker_.unpack();
+      nvtxRangePop();
     }
   }
 

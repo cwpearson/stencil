@@ -5,7 +5,7 @@
 
 #include <algorithm>
 
-/*! pack all quantities in a single domain into dst
+/*! pack all quantities in a single domain into a destination buffer
  */
 __global__ void dev_packer_pack_domain(void *dst,               // buffer to pack into
                                        cudaPitchedPtr *srcs,    // pointer to each quantity
