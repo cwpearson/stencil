@@ -3,7 +3,8 @@
 #include <nvToolsExt.h>
 
 LocalDomain::LocalDomain(Dim3 sz, Dim3 origin, int dev)
-    : sz_(sz), origin_(origin), dev_(dev), devCurrDataPtrs_(nullptr), devDataElemSize_(nullptr) {}
+    : sz_(sz), origin_(origin), dev_(dev), devCurrDataPtrs_(nullptr), devNextDataPtrs_(nullptr),
+      devDataElemSize_(nullptr) {}
 
 LocalDomain::~LocalDomain() {
   CUDA_RUNTIME(cudaGetLastError());
@@ -15,6 +16,8 @@ LocalDomain::~LocalDomain() {
   }
   if (devCurrDataPtrs_)
     CUDA_RUNTIME(cudaFree(devCurrDataPtrs_));
+  if (devNextDataPtrs_)
+    CUDA_RUNTIME(cudaFree(devNextDataPtrs_));
 
   for (auto p : nextDataPtrs_) {
     if (p.ptr)
@@ -72,8 +75,10 @@ void LocalDomain::swap() noexcept {
   }
 
   // update the device version of the pointers
-  CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(), currDataPtrs_.size() * sizeof(currDataPtrs_[0]),
-                          cudaMemcpyHostToDevice));
+  assert(devCurrDataPtrs_);
+  assert(devNextDataPtrs_);
+  std::swap(devCurrDataPtrs_, devNextDataPtrs_);
+
   LOG_SPEW("exit swap()");
   nvtxRangePop();
 }
@@ -137,7 +142,7 @@ std::vector<unsigned char> LocalDomain::region_to_host(const Dim3 &pos, const Di
   dim3 dimGrid = (ext + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
   const cudaPitchedPtr curr = curr_data(qi);
   LOG_SPEW("region_to_host: gpu=" << gpu() << " packing pos=" << pos << " ext=" << ext << " pitch=" << curr.pitch
-                                          << " xsize=" << curr.xsize);
+                                  << " xsize=" << curr.xsize);
   pack_kernel<<<dimGrid, dimBlock>>>(devBuf, curr, pos, ext, elem_size(qi));
   CUDA_RUNTIME(cudaDeviceSynchronize());
 
@@ -185,9 +190,14 @@ void LocalDomain::realize() {
   }
 
   CUDA_RUNTIME(cudaMalloc(&devCurrDataPtrs_, currDataPtrs_.size() * sizeof(currDataPtrs_[0])));
-  CUDA_RUNTIME(cudaMalloc(&devDataElemSize_, dataElemSize_.size() * sizeof(dataElemSize_[0])));
   CUDA_RUNTIME(cudaMemcpy(devCurrDataPtrs_, currDataPtrs_.data(), currDataPtrs_.size() * sizeof(currDataPtrs_[0]),
                           cudaMemcpyHostToDevice));
+  CUDA_RUNTIME(cudaMalloc(&devNextDataPtrs_, nextDataPtrs_.size() * sizeof(nextDataPtrs_[0])));
+  CUDA_RUNTIME(cudaMemcpy(devNextDataPtrs_, nextDataPtrs_.data(), nextDataPtrs_.size() * sizeof(nextDataPtrs_[0]),
+                          cudaMemcpyHostToDevice));
+
+  CUDA_RUNTIME(cudaMalloc(&devDataElemSize_, dataElemSize_.size() * sizeof(dataElemSize_[0])));
+
   CUDA_RUNTIME(cudaMemcpy(devDataElemSize_, dataElemSize_.data(), dataElemSize_.size() * sizeof(dataElemSize_[0]),
                           cudaMemcpyHostToDevice));
   CUDA_RUNTIME(cudaGetLastError());

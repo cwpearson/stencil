@@ -9,9 +9,9 @@
 #include "stencil/dim3.hpp"
 #include "stencil/logging.hpp"
 #include "stencil/pack_kernel.cuh"
+#include "stencil/pitched_ptr.hpp"
 #include "stencil/radius.hpp"
 #include "stencil/rect3.hpp"
-#include "stencil/pitched_ptr.hpp"
 
 class DistributedDomain;
 
@@ -55,7 +55,7 @@ private:
   /* device versions of the pointers (the pointers already point to device data)
    used in the packers
    */
-  cudaPitchedPtr *devCurrDataPtrs_;
+  cudaPitchedPtr *devCurrDataPtrs_, *devNextDataPtrs_;
   size_t *devDataElemSize_;
 
   int dev_; // CUDA device
@@ -118,7 +118,7 @@ public:
 
   /*! \brief retrieve a pointer to next domain values (to set in stencil)
    */
-  template <typename T> PitchedPtr<T>get_next(const DataHandle<T> handle) const {
+  template <typename T> PitchedPtr<T> get_next(const DataHandle<T> handle) const {
     assert(dataElemSize_.size() > handle.id_);
     assert(nextDataPtrs_.size() > handle.id_);
     cudaPitchedPtr p = nextDataPtrs_[handle.id_];
@@ -140,8 +140,10 @@ public:
   }
 
   const std::vector<cudaPitchedPtr> &curr_datas() const noexcept { return currDataPtrs_; }
+  const std::vector<cudaPitchedPtr> &next_datas() const noexcept { return nextDataPtrs_; }
 
   cudaPitchedPtr *dev_curr_datas() const { return devCurrDataPtrs_; }
+  cudaPitchedPtr *dev_next_datas() const { return devNextDataPtrs_; }
 
   cudaPitchedPtr next_data(size_t idx) const {
     assert(idx < nextDataPtrs_.size());
