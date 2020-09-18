@@ -8,6 +8,10 @@
 
     The ColoHaloRecver may be used with any derived Sender.
 
+    Since these senders/recvers write directly into the destination memory, they must track both the `current` and
+   `next` data at the destination, and allow themselves to be swapped
+
+
     FIXME: Not to be confused with `ColocatedHaloSender` and `ColocatedHaloRecver`, which must be used together
     This is the pack/memcpy/unpack sender
 */
@@ -26,7 +30,8 @@
 class ColoHaloSender : public StatefulSender {
 protected:
   // to be set by the derived class. This class sets to nullptr
-  Translator *translate_;
+  Translator *currTranslator_; // translator for `current` data
+  Translator *nextTranslator_; // translator for `next` data
 
 private:
   int srcRank_, dstRank_;
@@ -39,8 +44,8 @@ private:
 
   /* one memory handle per quantity
    */
-  MPI_Request memReq_;
-  std::vector<cudaIpcMemHandle_t> memHandles_;
+  MPI_Request currMemReq_, nextMemReq_;
+  std::vector<cudaIpcMemHandle_t> currMemHandles_, nextMemHandles_;
 
   /* pitch information about quantities
    */
@@ -50,7 +55,7 @@ private:
 
   // pointers to the destination domain buffers
   std::vector<cudaPitchedPtr> dstDomCurrDatas_;
-  cudaPitchedPtr *dstDomCurrDatasDev_;
+  std::vector<cudaPitchedPtr> dstDomNextDatas_;
 
 public:
   ColoHaloSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain, Placement *placement);
@@ -65,6 +70,9 @@ public:
   bool active() override { return false; }
   bool next_ready() override { return false; }
   void next() override{};
+
+  // swap the current next destination pointers
+  void swap();
 };
 
 /* Do a colocated halo send using cudaMemcpy3d
@@ -103,8 +111,8 @@ private:
   IpcRecver ipcRecver_;
 
   // send destination buffers to host
-  MPI_Request memReq_;
-  std::vector<cudaIpcMemHandle_t> handles_;
+  MPI_Request currMemReq_, nextMemReq_;
+  std::vector<cudaIpcMemHandle_t> currHandles_, nextHandles_;
 
   // pitch information about quantities
   MPI_Request ptrReq_;
