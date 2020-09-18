@@ -24,13 +24,16 @@ public:
   }
 };
 
+// three bits for the message kind
 enum class MsgKind {
   ColocatedEvt = 0,
-  ColocatedMem = 1,
-  ColocatedDev = 2,
-  ColocatedNotify = 3,
-  ColocatedPtr = 4,
-  Other = 5,
+  ColocatedCurrMem = 1,
+  ColocatedNextMem = 2,
+  ColocatedBuf = 3,
+  ColocatedDev = 4,
+  ColocatedNotify = 5,
+  ColocatedPtr = 6,
+  Other = 7,
 };
 
 /*!
