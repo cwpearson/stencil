@@ -223,8 +223,8 @@ public:
   void start_prepare(size_t numBytes) {
     ipcSender_.async_prepare();
 
-    // Recieve the IPC mem handle
-    const int memHandleTag = make_tag<MsgKind::ColocatedMem>(payload());
+    // Recieve the IPC mem handle for the buffer
+    const int memHandleTag = make_tag<MsgKind::ColocatedBuf>(payload());
     assert(memHandleTag < tagUb_);
     MPI_Irecv(&memHandle_, sizeof(memHandle_), MPI_BYTE, dstRank_, memHandleTag, MPI_COMM_WORLD, &memReq_);
 
@@ -300,7 +300,7 @@ public:
     CUDA_RUNTIME(cudaIpcGetMemHandle(&memHandle_, devPtr));
 
     // Send the mem handle to the ColocatedSender
-    const int memTag = make_tag<MsgKind::ColocatedMem>(payload);
+    const int memTag = make_tag<MsgKind::ColocatedBuf>(payload);
     MPI_Isend(&memHandle_, sizeof(memHandle_), MPI_BYTE, srcRank_, memTag, MPI_COMM_WORLD, &memReq_);
     LOG_SPEW("ColocatedDeviceRecver::start_prepare(): exit");
   }
