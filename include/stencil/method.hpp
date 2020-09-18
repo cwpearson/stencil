@@ -54,7 +54,7 @@ inline std::string to_string(const Method &m) {
   }
   if (m && Method::ColoRegionKernel) {
     ret += ret.empty() ? "" : sep;
-    ret += "colo-t";
+    ret += "colo-r";
   }
   if (m && Method::ColoMemcpy3d) {
     ret += ret.empty() ? "" : sep;
