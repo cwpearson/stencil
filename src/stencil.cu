@@ -333,6 +333,7 @@ void DistributedDomain::realize() {
           }
 #endif
 
+          // TODO: this method can be removed, in place of the peer access method
           if (any_methods(Method::CudaKernel)) {
             if (dstRank == rank_ && myDev == dstDev) {
               peerAccessOutbox.push_back(sMsg);
@@ -353,7 +354,8 @@ void DistributedDomain::realize() {
           Ultimately, we'd like to be able to figure this out even in the presence of CUDA_VISIBLE_DEVICES making each
           rank have a different CUDA device 0 Then, we could restrict CPU code to run on CPUs nearby to the GPU
           */
-          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel)) {
+          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel | Method::ColoRegionKernel |
+                          Method::ColoMemcpy3d)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
               coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
@@ -394,7 +396,8 @@ void DistributedDomain::realize() {
               goto recv_planned;
             }
           }
-          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel)) {
+          if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel | Method::ColoRegionKernel |
+                          Method::ColoMemcpy3d)) {
             if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) && gpu_topo::peer(srcDev, myDev)) {
               assert(di < coloInboxes.size());
               coloInboxes[di].emplace(srcIdx, std::vector<Message>());
