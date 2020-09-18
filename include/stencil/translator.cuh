@@ -114,6 +114,7 @@ class TranslatorMultiKernel : public Translator {
 public:
   // create a translator that will run on a device
   TranslatorMultiKernel(int device);
+  ~TranslatorMultiKernel();
 
   void prepare(const std::vector<RegionParams> &params) override;
 

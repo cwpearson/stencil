@@ -31,8 +31,8 @@ std::vector<Translator::Param> Translator::convert(const std::vector<RegionParam
 
   // convert all RegionParams into individual 3D copies
   for (const RegionParams &ps : params) {
-    assert(ps.dsts);
-    assert(ps.srcs);
+    assert(ps.dstPtrs);
+    assert(ps.srcPtrs);
     assert(ps.elemSizes);
     for (int64_t i = 0; i < ps.n; ++i) {
       Param p(ps.dstPtrs[i], ps.dstPos, ps.srcPtrs[i], ps.srcPos, ps.extent, ps.elemSizes[i]);
@@ -120,8 +120,6 @@ void TranslatorMemcpy3D::memcpy_3d_async(const Param &param, cudaStream_t stream
   // "dimension of the transferred area in elements of unsigned char"
   p.extent = make_cudaExtent(param.extent.x * es, param.extent.y, param.extent.z);
 
-  // we mark our srcPtr as `const void*` since we will not modify data through it, but the cuda pitchedPtr is just
-  // `void*`
   p.srcPtr = param.srcPtr;
   p.dstPtr = param.dstPtr;
 
@@ -137,10 +135,46 @@ void TranslatorMemcpy3D::memcpy_3d_async(const Param &param, cudaStream_t stream
 }
 
 TranslatorMultiKernel::TranslatorMultiKernel(int device) : Translator(), device_(device) {}
+TranslatorMultiKernel::~TranslatorMultiKernel() {
+  CUDA_RUNTIME(cudaSetDevice(device_));
+  for (RegionParams &param : params_) {
+    // FIXME: free param.srcPtrs
+    // CUDA_RUNTIME(cudaFree(param.srcPtrs));
+    // param.srcPtrs = nullptr;
+    // CUDA_RUNTIME(cudaFree(param.elemSizes));
+    // param.elemSizes = nullptr;
+    LOG_WARN("did not finish cleanup");
+    CUDA_RUNTIME(cudaFree(param.dstPtrs));
+    param.dstPtrs = nullptr;
+  }
+}
 
 void TranslatorMultiKernel::prepare(const std::vector<RegionParams> &params) {
 
   params_ = params;
+  // overwrite each srcPtrs, dstPtrs, and elemSizes with a device version to pass to kernel later
+  CUDA_RUNTIME(cudaSetDevice(device_));
+  for (auto &param : params_) {
+    {
+      cudaPitchedPtr *ptr = nullptr;
+      CUDA_RUNTIME(cudaMalloc(&ptr, param.n * sizeof(param.srcPtrs[0])));
+      CUDA_RUNTIME(cudaMemcpy(ptr, param.srcPtrs, param.n * sizeof(param.srcPtrs[0]), cudaMemcpyHostToDevice));
+      param.srcPtrs = ptr;
+
+      CUDA_RUNTIME(cudaMalloc(&ptr, param.n * sizeof(param.dstPtrs[0])));
+      CUDA_RUNTIME(cudaMemcpy(ptr, param.dstPtrs, param.n * sizeof(param.dstPtrs[0]), cudaMemcpyHostToDevice));
+      param.dstPtrs = ptr;
+    }
+
+    {
+      size_t *ptr = nullptr;
+      CUDA_RUNTIME(cudaMalloc(&ptr, param.n * sizeof(param.elemSizes[0])));
+      CUDA_RUNTIME(cudaMemcpy(ptr, param.elemSizes, param.n * sizeof(param.elemSizes[0]), cudaMemcpyHostToDevice));
+      param.elemSizes = ptr;
+    }
+  }
+
+  // overwrite
 
 #ifdef STENCIL_USE_CUDA_GRAPH
   // create a stream to record from
