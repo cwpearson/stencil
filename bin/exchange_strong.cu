@@ -57,7 +57,9 @@ int main(int argc, char **argv) {
   bool useKernel = false;
   bool usePeer = false;
   bool useColoPmu = false;
-  bool useColoDa = false;
+  bool useColoR = false;
+  bool useColoQ = false;
+  bool useColoM3 = false;
   bool useStaged = false;
 
   argparse::Parser p;
@@ -68,8 +70,10 @@ int main(int argc, char **argv) {
   p.add_positional(nIters)->required();
   p.add_flag(useKernel, "--kernel");
   p.add_flag(usePeer, "--peer");
-  p.add_flag(useColoPmu, "--colo-pmu");
-  p.add_flag(useColoDa, "--colo-da");
+  p.add_flag(useColoPmu, "--colo-pmu")->help("colocated pack-memcpy-unpack");
+  p.add_flag(useColoR, "--colo-r")->help("colocated region kernel");
+  p.add_flag(useColoQ, "--colo-q")->help("colocated quantity kernel");
+  p.add_flag(useColoM3, "--colo-m3")->help("colocated cudaMemcpy3D");
   p.add_flag(useNaivePlacement, "--naive");
   p.add_option(prefix, "--prefix");
   p.add_flag(useStaged, "--staged");
@@ -85,8 +89,14 @@ int main(int argc, char **argv) {
   if (useColoPmu) {
     methods |= Method::ColoPackMemcpyUnpack;
   }
-  if (useColoDa) {
+  if (useColoR) {
+    methods |= Method::ColoRegionKernel;
+  }
+  if (useColoQ) {
     methods |= Method::ColoQuantityKernel;
+  }
+  if (useColoM3) {
+    methods |= Method::ColoMemcpy3d;
   }
   if (usePeer) {
     methods |= Method::CudaMemcpyPeer;
