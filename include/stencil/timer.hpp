@@ -20,9 +20,9 @@ public:
 
   inline void pause() {
     if (!paused_) {
-      asm volatile ("":::"memory");
+      asm volatile("" ::: "memory");
       Time now = Clock::now();
-      asm volatile ("":::"memory");
+      asm volatile("" ::: "memory");
       Duration elapsed = now - start_;
       elapsed_ += elapsed;
       paused_ = true;
@@ -32,19 +32,19 @@ public:
   inline void resume() {
     if (paused_) {
       paused_ = false;
-      asm volatile ("":::"memory");
+      asm volatile("" ::: "memory");
       start_ = Clock::now();
-      asm volatile ("":::"memory");
+      asm volatile("" ::: "memory");
     }
   }
-  
+
   double get_elapsed();
 };
 
 namespace timers {
 extern Timer cudaRuntime;
 extern Timer mpi;
-}
+} // namespace timers
 
 #if 0
 #define CR_TIC() timers::cudaRuntime.resume()
