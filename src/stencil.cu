@@ -1018,8 +1018,24 @@ void DistributedDomain::exchange() {
   LOG_DEBUG("[" << rank_ << "] start poll");
   nvtxRangePush("DD::exchange: poll");
   bool pending = true;
+  /* the intuition here is to prefer senders.
+  as soon as we make progress on anything that's not a sender, jump back to the senders and try again
+  */
   while (pending) {
     pending = false;
+  senders:
+    // move senders from d2h to h2h
+    for (auto &domSenders : remoteSenders_) {
+      for (auto &kv : domSenders) {
+        StatefulSender *sender = kv.second;
+        if (sender->active()) {
+          pending = true;
+          if (sender->next_ready()) {
+            sender->next();
+          }
+        }
+      }
+    }
   recvers:
     // move recvers from h2h to h2d
     for (auto &domRecvers : remoteRecvers_) {
@@ -1032,21 +1048,7 @@ void DistributedDomain::exchange() {
             // std::cerr << "[" << rank_ << "] src=" << srcIdx << "
             // recv_h2d\n";
             recver->next();
-            goto senders; // try to overlap sends and recvs
-          }
-        }
-      }
-    }
-  senders:
-    // move senders from d2h to h2h
-    for (auto &domSenders : remoteSenders_) {
-      for (auto &kv : domSenders) {
-        StatefulSender *sender = kv.second;
-        if (sender->active()) {
-          pending = true;
-          if (sender->next_ready()) {
-            sender->next();
-            goto colorecver; // try to overlap sends and recvs
+            goto senders; // see if a sender got ready
           }
         }
       }
@@ -1059,7 +1061,7 @@ void DistributedDomain::exchange() {
           pending = true;
           if (recver->next_ready()) {
             recver->next();
-            goto recvers; // try to overlap sends and recvs
+            goto senders; // see if a sender got ready
           }
         }
       }
