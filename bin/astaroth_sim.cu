@@ -15,27 +15,9 @@ __global__ void init_kernel(Accessor<T> dst,    //<! [out] pointer to beginning 
                             const Rect3 cr,     //<! [in] compute region
                             const double period //<! [in] sine wave period
 ) {
-
-  constexpr size_t radius = 3;
-
-  const int gdz = gridDim.z;
-  const int biz = blockIdx.z;
-  const int bdz = blockDim.z;
-  const int tiz = threadIdx.z;
-
-  const int gdy = gridDim.y;
-  const int biy = blockIdx.y;
-  const int bdy = blockDim.y;
-  const int tiy = threadIdx.y;
-
-  const int gdx = gridDim.x;
-  const int bix = blockIdx.x;
-  const int bdx = blockDim.x;
-  const int tix = threadIdx.x;
-
-  for (int64_t z = cr.lo.z + biz * bdz + tiz; z < cr.hi.z; z += gdz * bdz) {
-    for (int64_t y = cr.lo.y + biy * bdy + tiy; y < cr.hi.y; y += gdy * bdy) {
-      for (int64_t x = cr.lo.x + bix * bdx + tix; x < cr.hi.x; x += gdx * bdx) {
+  for (int64_t z = cr.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < cr.hi.z; z += gridDim.z * blockDim.z) {
+    for (int64_t y = cr.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < cr.hi.y; y += gridDim.y * blockDim.y) {
+      for (int64_t x = cr.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < cr.hi.x; x += gridDim.x * blockDim.x) {
         dst[Dim3(x, y, z)] = sin(2 * 3.14159 / period * x + 2 * 3.14159 / period * y + 2 * 3.14159 / period * z);
       }
     }
