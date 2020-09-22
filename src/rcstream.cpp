@@ -1,5 +1,7 @@
 #include "stencil/rcstream.hpp"
 
+#include "stencil/logging.hpp"
+
 #include <cassert>
 
 void RcStream::maybe_release() {
@@ -26,7 +28,9 @@ RcStream::RcStream(int dev, Priority requestedPriority) : count_(new size_t), de
   int maxPrio;
   CUDA_RUNTIME(cudaDeviceGetStreamPriorityRange(&minPrio, &maxPrio));
   if (minPrio == maxPrio) {
-    std::cerr << "WARN: stream priority not supported\n";
+    LOG_WARN("stream priority not supported");
+  } else {
+    LOG_DEBUG("stream priority " << minPrio << ".." << maxPrio);
   }
 
   int priority;
