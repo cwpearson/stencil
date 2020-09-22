@@ -166,11 +166,10 @@ Show queue: `swqueue`
 
 ## On OLCF Summit
 
-* [jsrunvisualizer](jsrunvisualizer.olcf.ornl.gov)
-* [job-step-viewer](https://jobstepviewer.olcf.ornl.gov)
-* [jsrun arguments](https://docs.olcf.ornl.gov/systems/summit_user_guide.html#launching-a-job-with-jsrun)
+Suggest using the latest version of CUDA:`module load cuda/11.0.3`.
+Earlier versions work but have poor error reporting from CUDA graphs and cannot overlap CUDA graph execution and data transfer.
 
-Run scripts are in `srcipts/summit`.
+Run scripts are in `scripts/summit`.
 
 nsight-systems 2020.3.1.71 can crash with the `osrt` or `mpi` profiler turned on.
 Disable with `nsys profile -t cuda,nvtx`.
@@ -186,6 +185,10 @@ During configuration, you may see an error like this which causes cmake to fail:
 CMake Error: Remove failed on file: /ccs/home/cpearson/repos/stencil/build/CMakeFiles/CMakeTmp/CMakeFiles/cmTC_50eb9.dir/.nfs000000001473310900000eaf: System Error: Device or resource busy
 ```
 Re-run cmake again.
+
+* [jsrunvisualizer](jsrunvisualizer.olcf.ornl.gov)
+* [job-step-viewer](https://jobstepviewer.olcf.ornl.gov)
+* [jsrun arguments](https://docs.olcf.ornl.gov/systems/summit_user_guide.html#launching-a-job-with-jsrun)
 
 ## ParaView (5.8.0)
 
