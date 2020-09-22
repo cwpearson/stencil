@@ -244,8 +244,8 @@ __global__ void domain_kernel(TranslatorDomainKernel::DeviceParam params) {
     const size_t *__restrict__ qdo = params.dstByteOffsets[q];
 
     for (int64_t x = blockDim.x * blockIdx.x + threadIdx.x; x < params.nElems; x += gridDim.x + blockDim.x) {
-      const char *sp = qsp + qso[x];
-      char *dp = qdp + qdo[x];
+      const char *__restrict__ sp = qsp + qso[x];
+      char *__restrict__ dp = qdp + qdo[x];
       if (elemSize == 4) {
         *reinterpret_cast<int32_t *>(dp) = *reinterpret_cast<const int32_t *>(sp);
       } else if (elemSize == 8) {
@@ -424,6 +424,8 @@ void TranslatorDomainKernel::prepare(const std::vector<RegionParams> &params) {
 #endif
 }
 
+/* launch one thread per element per quantity
+ */
 void TranslatorDomainKernel::launch_all(cudaStream_t stream) {
   const int dimBlock = 512;
   const int dimGrid = (devParam_.nElems + dimBlock - 1) / (dimBlock);

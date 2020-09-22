@@ -198,6 +198,7 @@ TEST_CASE("exchange2") {
   SECTION("r=0,q") { check_exchange(Radius::constant(0), Method::ColoQuantityKernel); }
   SECTION("r=0,r") { check_exchange(Radius::constant(0), Method::ColoRegionKernel); }
   SECTION("r=0,m3") { check_exchange(Radius::constant(0), Method::ColoMemcpy3d); }
+  SECTION("r=0,d") { check_exchange(Radius::constant(0), Method::ColoDomainKernel); }
   SECTION("r=0,cmp") { check_exchange(Radius::constant(0), Method::CudaMemcpyPeer); }
   SECTION("r=0,k") { check_exchange(Radius::constant(0), Method::CudaKernel); }
 
@@ -207,6 +208,7 @@ TEST_CASE("exchange2") {
   SECTION("r=1,q") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoQuantityKernel); }
   SECTION("r=1,r") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoRegionKernel); }
   SECTION("r=1,m3") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoMemcpy3d); }
+  SECTION("r=1,d") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::ColoDomainKernel); }
   SECTION("r=1,cmp") { check_exchange(Radius::constant(1), Method::CudaMpi | Method::CudaMemcpyPeer); }
 
   SECTION("r=2") { check_exchange(Radius::constant(2), Method::CudaMpi); }

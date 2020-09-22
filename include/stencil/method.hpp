@@ -9,8 +9,9 @@ enum class Method : int {
   ColoQuantityKernel = 4,
   ColoRegionKernel = 8,
   ColoMemcpy3d = 16,
-  CudaMemcpyPeer = 32,
-  CudaKernel = 64,
+  ColoDomainKernel = 32,
+  CudaMemcpyPeer = 64,
+  CudaKernel = 128,
   Default = CudaMpi + ColoPackMemcpyUnpack + CudaMemcpyPeer + CudaKernel
 };
 

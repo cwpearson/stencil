@@ -202,6 +202,15 @@ ColoRegionKernelSender::ColoRegionKernelSender(int srcRank, int srcDom, int dstR
   nextTranslator_ = new TranslatorMultiKernel(domain.gpu());
 }
 
+ColoDomainKernelSender::ColoDomainKernelSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain,
+                                               Placement *placement)
+    : ColoHaloSender(srcRank, srcDom, dstRank, dstDom, domain, placement) {
+  assert(!currTranslator_);
+  assert(!nextTranslator_);
+  currTranslator_ = new TranslatorDomainKernel(domain.gpu());
+  nextTranslator_ = new TranslatorDomainKernel(domain.gpu());
+}
+
 ColoHaloRecver::ColoHaloRecver(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain)
     : srcRank_(srcRank), srcDom_(srcDom), dstDom_(dstDom), domain_(&domain),
       stream_(domain.gpu(), RcStream::Priority::HIGH), ipcRecver_(srcRank, srcDom, dstRank, dstDom, domain.gpu()),
@@ -232,11 +241,13 @@ void ColoHaloRecver::start_prepare(const std::vector<Message> &inbox) {
     MPI_Isend(currHandles_.data(), currHandles_.size() * sizeof(currHandles_[0]), MPI_BYTE, srcRank_, memTag,
               MPI_COMM_WORLD, &currMemReq_);
   }
+  LOG_SPEW("ColoHaloRecver::start_prepare posted curr mem handles to r=" << srcRank_);
   {
     const int memTag = make_tag<MsgKind::ColocatedNextMem>(ipc_tag_payload(srcDom_, dstDom_));
     MPI_Isend(nextHandles_.data(), nextHandles_.size() * sizeof(nextHandles_[0]), MPI_BYTE, srcRank_, memTag,
               MPI_COMM_WORLD, &nextMemReq_);
   }
+  LOG_SPEW("ColoHaloRecver:start_prepare: posted next mem handles to r=" << srcRank_);
 
   // post send of pitch information. Only send one for curr/next because pitch will be the same for both, and the dst
   // will overwrite the pointers

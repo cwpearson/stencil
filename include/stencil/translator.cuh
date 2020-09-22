@@ -127,3 +127,38 @@ private:
   int device_;
   std::vector<RegionParams> params_;
 };
+
+/*! \class
+    \brief Uses one kernel per domain to write into destination memory
+*/
+class TranslatorDomainKernel : public Translator {
+public:
+  // create a translator that will run on a device
+  TranslatorDomainKernel(int device);
+  ~TranslatorDomainKernel();
+  TranslatorDomainKernel(const TranslatorDomainKernel &other) = delete;
+
+  void prepare(const std::vector<RegionParams> &params) override;
+
+  /* Each domain consists of one unique set of src/dst pointer, src/dst offsets, and element size per quantity.
+  The number of elements in each copy is the same
+   */
+
+  struct DeviceParam {
+    void **srcPtrs;          // nQuants pointers
+    void **dstPtrs;          // nQuants pointers
+    size_t **srcByteOffsets; // nQuants offset arrays
+    size_t **dstByteOffsets; // nQuants offset arrays
+    size_t *elemSizes;       // nQuants element sizes
+    size_t nQuants;
+    size_t nElems;
+  };
+
+private:
+  void launch_all(cudaStream_t stream) override;
+
+  int device_;
+
+  std::vector<void*> toDelete_; // cuda allocations
+  DeviceParam devParam_; // kernel params
+};

@@ -96,6 +96,13 @@ public:
   ColoRegionKernelSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain, Placement *placement);
 };
 
+/* Do a colocated halo send using direct access
+ */
+class ColoDomainKernelSender : public ColoHaloSender {
+public:
+  ColoDomainKernelSender(int srcRank, int srcDom, int dstRank, int dstDom, LocalDomain &domain, Placement *placement);
+};
+
 /* to be paired on the recieving end of any ColoHaloSender
  */
 class ColoHaloRecver : public StatefulRecver {

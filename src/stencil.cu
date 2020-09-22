@@ -355,12 +355,12 @@ void DistributedDomain::realize() {
           rank have a different CUDA device 0 Then, we could restrict CPU code to run on CPUs nearby to the GPU
           */
           if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel | Method::ColoRegionKernel |
-                          Method::ColoMemcpy3d)) {
+                          Method::ColoMemcpy3d | Method::ColoDomainKernel)) {
             if ((dstRank != rank_) && mpiTopology_.colocated(dstRank) && gpu_topo::peer(myDev, dstDev)) {
               assert(di < coloOutboxes.size());
               coloOutboxes[di].emplace(dstIdx, std::vector<Message>());
               coloOutboxes[di][dstIdx].push_back(sMsg);
-              LOG_DEBUG("Plan send colocated for Mesage dir=" << sMsg.dir_);
+              LOG_DEBUG("Plan send <colocated> for Mesage dir=" << sMsg.dir_);
               goto send_planned;
             }
           }
@@ -397,7 +397,7 @@ void DistributedDomain::realize() {
             }
           }
           if (any_methods(Method::ColoPackMemcpyUnpack | Method::ColoQuantityKernel | Method::ColoRegionKernel |
-                          Method::ColoMemcpy3d)) {
+                          Method::ColoMemcpy3d | Method::ColoDomainKernel)) {
             if ((srcRank != rank_) && mpiTopology_.colocated(srcRank) && gpu_topo::peer(srcDev, myDev)) {
               assert(di < coloInboxes.size());
               coloInboxes[di].emplace(srcIdx, std::vector<Message>());
@@ -669,6 +669,8 @@ to be loaded with numpy.loadtxt
         sender = new ColoRegionKernelSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
       } else if (any_methods(Method::ColoMemcpy3d)) {
         sender = new ColoMemcpy3dHaloSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
+      } else if (any_methods(Method::ColoDomainKernel)) {
+        sender = new ColoDomainKernelSender(rank_, di, dstRank, dstGPU, domains_[di], placement_);
       }
       coloSenders_[di].emplace(dstIdx, sender);
     }
@@ -686,6 +688,8 @@ to be loaded with numpy.loadtxt
         recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
       } else if (any_methods(Method::ColoMemcpy3d)) {
         recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
+      } else if (any_methods(Method::ColoDomainKernel)) {
+        recver = new ColoHaloRecver(srcRank, srcGPU, rank_, di, domains_[di]);
       }
       coloRecvers_[di].emplace(srcIdx, recver);
     }
@@ -697,7 +701,7 @@ to be loaded with numpy.loadtxt
   nvtxRangePush("DistributedDomain::realize: create PeerCopySender");
   // per-domain senders and messages
   peerCopySenders_.resize(gpus_.size());
-  LOG_SPEW("space for " << peerCopySenders_.size() << " sources");
+  LOG_SPEW("Peer Copy Sender for " << peerCopySenders_.size() << " sources");
   // create all required colocated senders/recvers
   for (size_t srcGPU = 0; srcGPU < peerCopyOutboxes.size(); ++srcGPU) {
     LOG_SPEW("srcGPU = " << srcGPU);

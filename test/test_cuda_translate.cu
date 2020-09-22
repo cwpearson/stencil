@@ -175,9 +175,10 @@ template <typename TestType> void all_sections(Translator *translator) {
 
 TEMPLATE_TEST_CASE("translate", "[cuda]", int, double) {
   const int device = 0;
+  Translator *t = nullptr;
 
   INFO("run TranslatorKernel");
-  Translator *t = new TranslatorKernel(device);
+  t = new TranslatorKernel(device);
   all_sections<TestType>(t);
   delete t;
   INFO("run TranslatorMemcpy3D");
@@ -186,6 +187,10 @@ TEMPLATE_TEST_CASE("translate", "[cuda]", int, double) {
   delete t;
   INFO("run TranslatorMultiKernel");
   t = new TranslatorMultiKernel(device);
+  all_sections<TestType>(t);
+  delete t;
+  INFO("run TranslatorDomainKernel");
+  t = new TranslatorDomainKernel(device);
   all_sections<TestType>(t);
   delete t;
 }
