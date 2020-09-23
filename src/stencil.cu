@@ -322,13 +322,16 @@ void DistributedDomain::realize() {
           const int dstRank = placement_->get_rank(dstIdx);
           const int dstGPU = placement_->get_subdomain_id(dstIdx);
           const int dstDev = placement_->get_cuda(dstIdx);
-          Message sMsg(dir, di, dstGPU);
+          // size of our send is the size of the recieving neighbor's halo in -dir
+          const Dim3 dstSize = placement_->subdomain_size(dstIdx);
+          const Dim3 sExt = LocalDomain::halo_extent(dir * -1, dstSize, radius_);
+          Message sMsg(dir, di, dstGPU, sExt);
 
           // TODO: move this out of the plan so that this time isn't accumulated into the statistics
 #ifdef STENCIL_SETUP_STATS
           for (int qi = 0; qi < domains_[di].num_data(); ++qi) {
             // send size matches size of halo that we're recving into
-            const size_t bytes = domains_[di].halo_bytes(dir * -1, qi);
+            const size_t bytes = domains_[di].halo_bytes(dir * -1, qi); // FIXME: directionality?
             rankCommBytes.at(rank_, dstRank) += bytes;
           }
 #endif
@@ -382,7 +385,9 @@ void DistributedDomain::realize() {
           const int srcRank = placement_->get_rank(srcIdx);
           const int srcGPU = placement_->get_subdomain_id(srcIdx);
           const int srcDev = placement_->get_cuda(srcIdx);
-          Message rMsg(dir, srcGPU, di);
+          // size of our recv is the size of our halo in -dir
+          const Dim3 rExt = domains_[di].halo_extent(dir * -1);
+          Message rMsg(dir, srcGPU, di, rExt);
 
           if (any_methods(Method::CudaKernel)) {
             if (srcRank == rank_ && srcDev == myDev) {

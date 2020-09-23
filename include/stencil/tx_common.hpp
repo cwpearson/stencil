@@ -12,12 +12,27 @@ inline uint16_t ipc_tag_payload(uint8_t a, uint8_t b) noexcept { return (uint16_
 
 class Message {
 private:
+  Dim3 ext_; // for sorting by size, otherwise unused
+
 public:
   Dim3 dir_;
   int srcGPU_;
   int dstGPU_;
-  Message(Dim3 dir, int srcGPU, int dstGPU) : dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
+  Message(Dim3 dir, int srcGPU, int dstGPU) : Message(dir, srcGPU, dstGPU, Dim3(0, 0, 0)) {}
+  Message(Dim3 dir, int srcGPU, int dstGPU, Dim3 ext) : ext_(ext), dir_(dir), srcGPU_(srcGPU), dstGPU_(dstGPU) {}
 
+  // true if lhs is larger than rhs. Tie by direction
+  static bool by_size(const Message &lhs, const Message &rhs) noexcept {
+    if (lhs.ext_.flatten() > rhs.ext_.flatten()) {
+      return true;
+    } else if (lhs.ext_.flatten() < rhs.ext_.flatten()) {
+      return false;
+    } else {
+      return lhs < rhs;
+    }
+  }
+
+  // order by direction
   bool operator<(const Message &rhs) const noexcept { return dir_ < rhs.dir_; }
   bool operator==(const Message &rhs) const noexcept {
     return dir_ == rhs.dir_ && srcGPU_ == rhs.srcGPU_ && dstGPU_ == rhs.dstGPU_;

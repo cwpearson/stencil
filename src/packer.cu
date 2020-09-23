@@ -44,18 +44,18 @@ __global__ void dev_unpacker_unpack_domain(cudaPitchedPtr *dsts,    // buffers t
 }
 
 DevicePacker::DevicePacker(cudaStream_t stream)
-      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
+    : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
 
 DevicePacker::~DevicePacker() {
 #ifdef STENCIL_USE_CUDA_GRAPH
-//  if (domain_) {
-//    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
-//    domain_ = nullptr;
-//  }
+  //  if (domain_) {
+  //    CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
+  //    domain_ = nullptr;
+  //  }
   if (graph_) {
     CUDA_RUNTIME(cudaGraphDestroy(graph_));
-    graph_ = 0;    
-  } 
+    graph_ = 0;
+  }
   if (instance_) {
     CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
     instance_ = 0;
@@ -66,7 +66,7 @@ DevicePacker::~DevicePacker() {
 void DevicePacker::prepare(LocalDomain *domain, const std::vector<Message> &messages) {
   domain_ = domain;
   dirs_ = messages;
-  std::sort(dirs_.begin(), dirs_.end());
+  std::sort(dirs_.begin(), dirs_.end(), Message::by_size);
 
   // compute the required buffer size for all messages
   size_ = 0;
@@ -158,30 +158,29 @@ void DevicePacker::pack() {
 }
 
 DeviceUnpacker::DeviceUnpacker(cudaStream_t stream)
-      : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
+    : domain_(nullptr), size_(-1), devBuf_(0), stream_(stream), graph_(NULL), instance_(NULL) {}
 
 DeviceUnpacker::~DeviceUnpacker() {
 
 #ifdef STENCIL_USE_CUDA_GRAPH
-    // TODO: these need to be guarded from ctor without prepare()?
-    if (graph_) {
-      CUDA_RUNTIME(cudaGraphDestroy(graph_));
-      graph_ = 0;
-    }
-    if (instance_) {
-      CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
-      instance_ = 0;
-    }
-#endif
+  // TODO: these need to be guarded from ctor without prepare()?
+  if (graph_) {
+    CUDA_RUNTIME(cudaGraphDestroy(graph_));
+    graph_ = 0;
   }
-
+  if (instance_) {
+    CUDA_RUNTIME(cudaGraphExecDestroy(instance_));
+    instance_ = 0;
+  }
+#endif
+}
 
 void DeviceUnpacker::prepare(LocalDomain *domain, const std::vector<Message> &messages) {
   domain_ = domain;
   dirs_ = messages;
 
   // sort so we unpack in the same order as the sender packed
-  std::sort(dirs_.begin(), dirs_.end());
+  std::sort(dirs_.begin(), dirs_.end(), Message::by_size);
 
   CUDA_RUNTIME(cudaSetDevice(domain_->gpu()));
 
