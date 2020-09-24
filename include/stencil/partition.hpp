@@ -17,8 +17,6 @@
 #include "stencil/qap.hpp"
 #include "stencil/radius.hpp"
 
-namespace collective {}
-
 class RankPartition {
 
 private:
@@ -27,7 +25,7 @@ private:
   Dim3 rem_;  // input size % dim_
 
 public:
-  RankPartition(const Dim3 &size, const int64_t n) : size_(size), dim_(1, 1, 1) {
+  RankPartition(const Dim3 &size, const int64_t n) : dim_(1, 1, 1), size_(size) {
 
     // split repeatedly by the prime factors of n
     std::vector<int64_t> factors = prime_factors(n);
@@ -157,7 +155,7 @@ private:
 
 public:
   NodePartition(const Dim3 &size, const Radius radius, const int64_t nodes, const int64_t gpus)
-      : size_(size), sysDim_(1, 1, 1), nodeDim_(1, 1, 1) {
+      : sysDim_(1, 1, 1), nodeDim_(1, 1, 1), size_(size) {
 
     // split among nodes
     std::vector<int64_t> factors = prime_factors(nodes);
