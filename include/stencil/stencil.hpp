@@ -25,8 +25,8 @@
 #include "stencil/partition.hpp"
 #include "stencil/pitched_ptr.hpp"
 #include "stencil/radius.hpp"
+#include "stencil/topology.hpp"
 #include "stencil/tx.hpp"
-#include "stencil/tx_cuda.cuh"
 
 class DistributedDomain {
 private:
@@ -44,6 +44,8 @@ private:
   MpiTopology mpiTopology_;
 
   Placement *placement_;
+
+  Topology topology_; // information about stencil neighbors
 
   // the stencil radius in each direction
   Radius radius_;
@@ -166,6 +168,12 @@ public:
   */
   uint64_t exchange_bytes_for_method(const Method &method) const;
 
+  /* only compute partition and placement, do not allocate any resources
+
+     useful for modeling
+  */
+  void do_placement();
+
   /* Initialize resources for a previously-configured domain.
   (before exchange())
   */
@@ -187,6 +195,12 @@ public:
    * One vector per LocalDomain
    */
   std::vector<std::vector<Rect3>> get_exterior() const;
+
+  /* return the distributed stencil topology for information about neighbors
+   */
+  const Topology &get_topology() const noexcept { return topology_; }
+
+  Placement *get_placement() const noexcept { return placement_; }
 
   /*!
   Do a halo exchange of the "current" quantities and return

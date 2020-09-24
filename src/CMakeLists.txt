@@ -9,9 +9,9 @@ set(STENCIL_SOURCES ${STENCIL_SOURCES}
   ${CMAKE_CURRENT_LIST_DIR}/rcstream.cpp
   ${CMAKE_CURRENT_LIST_DIR}/stencil.cu
   ${CMAKE_CURRENT_LIST_DIR}/timer.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/topology.cpp
   ${CMAKE_CURRENT_LIST_DIR}/translator.cu
   ${CMAKE_CURRENT_LIST_DIR}/tx_colocated.cu
-  # ${CMAKE_CURRENT_LIST_DIR}/tx_colocated_direct_access.cu
   ${CMAKE_CURRENT_LIST_DIR}/tx_ipc.cpp
 )
 

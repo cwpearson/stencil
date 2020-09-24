@@ -40,7 +40,7 @@ DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
   }
 #endif
 
-  std::cerr << "[" << rank_ << "] colocated with " << mpiTopology_.colocated_size() << " ranks\n";
+  LOG_DEBUG("colocated with " << mpiTopology_.colocated_size() << " ranks");
 
   int deviceCount;
   CUDA_RUNTIME(cudaGetDeviceCount(&deviceCount));
@@ -154,6 +154,7 @@ uint64_t DistributedDomain::exchange_bytes_for_method(const Method &method) cons
 }
 
 DistributedDomain::~DistributedDomain() {
+  LOG_SPEW("~DD entry");
   for (auto &m : remoteSenders_) {
     for (auto &kv : m) {
       delete kv.second;
@@ -174,6 +175,11 @@ DistributedDomain::~DistributedDomain() {
       delete kv.second;
     }
   }
+  if (placement_) {
+    delete placement_;
+    placement_ = nullptr;
+  }
+  LOG_SPEW("~DD: exit");
 }
 
 void DistributedDomain::set_methods(Method flags) noexcept {
@@ -183,10 +189,12 @@ void DistributedDomain::set_methods(Method flags) noexcept {
   flags_ = flags;
 }
 
-void DistributedDomain::realize() {
-  // TODO: make sure everyone has the same Placement Strategy
+/* place domains on GPUs, and initialize topology
+ */
+void DistributedDomain::do_placement() {
+// TODO: make sure everyone has the same Placement Strategy
 
-  // compute domain placement
+// compute domain placement
 #ifdef STENCIL_SETUP_STATS
   MPI_Barrier(MPI_COMM_WORLD);
   double start = MPI_Wtime();
@@ -210,9 +218,16 @@ void DistributedDomain::realize() {
   }
 #endif
 
+  topology_ = Topology(placement_->dim(), Topology::Boundary::PERIODIC);
+}
+
+void DistributedDomain::realize() {
+
+  do_placement();
+
 #ifdef STENCIL_SETUP_STATS
   MPI_Barrier(MPI_COMM_WORLD);
-  start = MPI_Wtime();
+  double start = MPI_Wtime();
 #endif
   for (int64_t domId = 0; domId < int64_t(gpus_.size()); domId++) {
 
@@ -239,7 +254,8 @@ void DistributedDomain::realize() {
     d.realize();
   }
 #ifdef STENCIL_SETUP_STATS
-  elapsed = MPI_Wtime() - start;
+  double maxElapsed = -1;
+  double elapsed = MPI_Wtime() - start;
   MPI_Reduce(&elapsed, &maxElapsed, 1, MPI_DOUBLE, MPI_MAX, 0, MPI_COMM_WORLD);
   if (0 == rank_) {
     timeRealize_ += maxElapsed;
@@ -291,8 +307,6 @@ void DistributedDomain::realize() {
   remoteOutboxes.resize(gpus_.size());
   remoteInboxes.resize(gpus_.size());
 
-  const Dim3 globalDim = placement_->dim();
-
   for (size_t di = 0; di < domains_.size(); ++di) {
     const Dim3 myIdx = placement_->get_idx(rank_, di);
     const int myDev = domains_[di].gpu();
@@ -316,9 +330,11 @@ void DistributedDomain::realize() {
             LOG_DEBUG(dir << " radius = " << radius_.dir(dir * -1));
           }
 
-          // TODO: this assumes we have periodic boundaries
-          // we can filter out some messages here if we do not
-          const Dim3 dstIdx = (myIdx + dir).wrap(globalDim);
+          const Topology::OptionalNeighbor dstNbr = topology_.get_neighbor(myIdx, dir);
+          if (!dstNbr.exists) {
+            continue;
+          }
+          const Dim3 dstIdx = dstNbr.index;
           const int dstRank = placement_->get_rank(dstIdx);
           const int dstGPU = placement_->get_subdomain_id(dstIdx);
           const int dstDev = placement_->get_cuda(dstIdx);
@@ -379,9 +395,11 @@ void DistributedDomain::realize() {
           LOG_FATAL("No method available to send required message " << sMsg.dir_ << "\n");
         send_planned: // successfully found a way to send
 
-          // TODO: this assumes we have periodic boundaries
-          // we can filter out some messages here if we do not
-          const Dim3 srcIdx = (myIdx - dir).wrap(globalDim);
+          const Topology::OptionalNeighbor srcNbr = topology_.get_neighbor(myIdx, dir * -1);
+          if (!srcNbr.exists) {
+            continue;
+          }
+          const Dim3 srcIdx = srcNbr.index;
           const int srcRank = placement_->get_rank(srcIdx);
           const int srcGPU = placement_->get_subdomain_id(srcIdx);
           const int srcDev = placement_->get_cuda(srcIdx);
