@@ -25,6 +25,7 @@ target_compile_options(
     -Wundef;
     -Wvla;
     -Wformat=2;
+    -mtune=native;
   >
 )
 
@@ -51,9 +52,27 @@ target_compile_options(
     -Xcompiler=-Wswitch-enum;
     -Xcompiler=-Wvla;
     -Xptxas=-v;
+    -Xcompiler=-mtune=native;
     --use_fast_math;
   >
 )
+
+
+if (CXX_HAS_MARCH)
+    target_compile_options(
+      ${tgt}
+      PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-march=native>
+      $<$<COMPILE_LANGUAGE:CXX>:-march=native>
+    )
+  elseif (CXX_HAS_MCPU)
+    target_compile_options(
+      ${tgt}
+      PRIVATE
+      $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=-mcpu=native>
+      $<$<COMPILE_LANGUAGE:CXX>:-mcpu=native>
+    )
+  endif()
 
 target_include_directories(${tgt} SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../thirdparty)
 # we require separable compilation for stencil library
@@ -64,6 +83,11 @@ endmacro()
 add_executable(astaroth-sim astaroth_sim.cu)
 target_link_libraries(astaroth-sim stencil::stencil)
 add_args(astaroth-sim)
+
+add_executable(bench-mpi bench_mpi.cu statistics.cpp)
+set_target_properties(bench-mpi PROPERTIES ENABLE_EXPORTS ON) # better back trace
+target_link_libraries(bench-mpi stencil::stencil)
+add_args(bench-mpi)
 
 add_executable(jacobi3d jacobi3d.cu statistics.cpp)
 target_link_libraries(jacobi3d stencil::stencil)
