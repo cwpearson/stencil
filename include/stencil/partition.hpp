@@ -260,6 +260,8 @@ enum class PlacementStrategy { NodeAware, Trivial };
 class Placement {
 
 public:
+  virtual ~Placement() {}
+
   // get the index of subdomain i for rank
   virtual Dim3 get_idx(const int rank, const int i) = 0;
 
