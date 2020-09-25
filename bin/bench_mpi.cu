@@ -15,6 +15,12 @@ int main(int argc, char **argv) {
   const int worldRank = mpi::world_rank();
   const int worldSize = mpi::world_size();
 
+  int numNodes;
+  {
+    MpiTopology topo(MPI_COMM_WORLD);
+    numNodes = worldSize / topo.colocated_size();
+  }
+
   // stencil config
   int nIters = 1000;
   int x = 60;
@@ -136,7 +142,7 @@ int main(int argc, char **argv) {
     MPI_Allreduce(MPI_IN_PLACE, &durWait, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &durTotal, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
 
-    // fastest time between last send and first recv
+    // avg time between last send and first recv
     MPI_Allreduce(MPI_IN_PLACE, &durFirst, 1, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
     durFirst /= worldSize;
 
@@ -146,8 +152,8 @@ int main(int argc, char **argv) {
   delete dd;
 
   if (mpi::world_rank() == 0) {
-    printf("x,y,z,n,first (s), total (s)\n");
     printf("%d,%d,%d", x, y, z);
+    printf(",%d", numNodes);
     printf(",%e,%e", statsFirst.trimean(), statsTotal.trimean());
     std::cout << "\n";
   }
