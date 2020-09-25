@@ -6,7 +6,8 @@
 #include <iostream>
 #include <vector>
 
-#include "mat2d.hpp"
+#include "stencil/mat2d.hpp"
+#include "stencil/logging.hpp"
 
 namespace qap {
 
