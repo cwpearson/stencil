@@ -1,7 +1,7 @@
 #include "stencil/numeric.hpp"
 
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 
 std::vector<int64_t> prime_factors(int64_t n) {
   std::vector<int64_t> result;
