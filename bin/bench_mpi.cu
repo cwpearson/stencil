@@ -23,6 +23,9 @@ int main(int argc, char **argv) {
     ranksPerNode = topo.colocated_size();
   }
 
+  // discover which ranks are on which nodes
+  Machine machine = Machine::build(MPI_COMM_WORLD);
+
   // stencil config
   int nIters = 100;
   int x = 60;
@@ -51,6 +54,10 @@ int main(int argc, char **argv) {
   std::vector<std::vector<unsigned char>> recvBufs(worldSize);
   std::vector<MPI_Request> sendReqs(worldSize);
   std::vector<MPI_Request> recvReqs(worldSize);
+
+  int selfMessages = 0;
+  int coloMessages = 0;
+  int nodeMessages = 0;
 
   const Dim3 myIdx = dd->get_placement()->get_idx(worldRank, 0);
 
@@ -83,10 +90,22 @@ int main(int argc, char **argv) {
           const Dim3 ext = LocalDomain::halo_extent(dir * -1, sz, radius);
           const size_t nBytes = ext.flatten() * sizeof(float);
           sendBufs[dstRank].resize(sendBufs[dstRank].size() + nBytes);
+
+          if (dstRank == worldRank) {
+            selfMessages++;
+          } else if (machine.node_of_rank(worldRank) == machine.node_of_rank(dstRank)) {
+            coloMessages++;
+          } else {
+            nodeMessages++;
+          }
         }
       }
     }
   }
+
+  MPI_Allreduce(MPI_IN_PLACE, &selfMessages, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &coloMessages, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+  MPI_Allreduce(MPI_IN_PLACE, &nodeMessages, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
 
   Statistics statsFirst, statsTotal;
 
@@ -160,6 +179,7 @@ int main(int argc, char **argv) {
   if (mpi::world_rank() == 0) {
     printf("%d,%d,%d", x, y, z);
     printf(",%d,%d", numNodes, ranksPerNode);
+    printf(",%d,%d,%d", selfMessages, coloMessages, nodeMessages);
     printf(",%e,%e", statsFirst.trimean(), statsTotal.trimean());
     std::cout << "\n";
   }

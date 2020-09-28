@@ -19,6 +19,7 @@
 #include "stencil/gpu_topology.hpp"
 #include "stencil/local_domain.cuh"
 #include "stencil/logging.hpp"
+#include "stencil/machine.hpp"
 #include "stencil/method.hpp"
 #include "stencil/mpi_topology.hpp"
 #include "stencil/nvml.hpp"
