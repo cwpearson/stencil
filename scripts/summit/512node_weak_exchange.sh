@@ -19,7 +19,9 @@ export Y=750
 export Z=750
 export NUM_ITER=300
 
-OUT=/gpfs/alpine/scratch/cpearson/csc362/stencil_results/512node_weak_exchange.csv
+
+SCRATCH=/gpfs/alpine/scratch/cpearson/csc362/stencil_results
+OUT=$SCRATCH/512node_weak_exchange.csv
 
 set -x
 
@@ -30,10 +32,10 @@ echo "bin,config,naive,x,y,z,s,ldx,ldy,ldz,MPI (B),Colocated (B),cudaMemcpyPeer 
 for nodes in 1 2 4 8 16 32 64 128 256 384 512; do
   ranks=6
   gpus=6 
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged                         | tee -a $OUT  
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged --colo                  | tee -a $OUT
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged --colo --peer           | tee -a $OUT
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged --colo --peer --kernel  | tee -a $OUT
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b packed:7 ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged                        --prefix $SCRATCH/${nodes}n_${ranks}r_${gpus}g_s_    | tee -a $OUT  
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b packed:7 ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged --colo                 --prefix $SCRATCH/${nodes}n_${ranks}r_${gpus}g_sc_   | tee -a $OUT
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b packed:7 ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged --colo --peer          --prefix $SCRATCH/${nodes}n_${ranks}r_${gpus}g_scp_  | tee -a $OUT
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b packed:7 ../../build/bin/exchange-weak $X $Y $Z $NUM_ITER --staged --colo --peer --kernel --prefix $SCRATCH/${nodes}n_${ranks}r_${gpus}g_scpk_ | tee -a $OUT
 done
 
 

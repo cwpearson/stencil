@@ -179,6 +179,7 @@ int main(int argc, char **argv) {
   if (mpi::world_rank() == 0) {
     printf("%d,%d,%d", x, y, z);
     printf(",%d,%d", numNodes, ranksPerNode);
+    printf(",%f,%f,%f", double(selfMessages) / worldSize, double(coloMessages) / worldSize, double(nodeMessages)/ worldSize);
     printf(",%d,%d,%d", selfMessages, coloMessages, nodeMessages);
     printf(",%e,%e", statsFirst.trimean(), statsTotal.trimean());
     std::cout << "\n";

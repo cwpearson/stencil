@@ -18,7 +18,7 @@ OUT=$SCRATCH/6node_bench_mpi.csv
 set -x
 
 # CSV header
-echo "bin,x,y,z," > $OUT
+echo "x,y,z,nodes,ranks-per-node,self-per-node,colo-per-node,remote-per-node,self,colo,remote,first (s),total (s)" > $OUT
 
 # 6 ranks per node, 1 GPU per rank
 for nodes in 1 2 3 4 5 6; do
@@ -26,7 +26,7 @@ for nodes in 1 2 3 4 5 6; do
     for X in 15 30 60 100 200 400; do
       gpus=$ranks
       let nrs=$nodes*$ranks
-      jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -r 1 -b packed:7 ../../build/bin/bench-mpi $X $X $X | tee -a $OUT
+      jsrun --smpiargs="-gpu" -n $nodes -a $ranks -g $ranks -c 42 -r 1 -b packed:7 ../../build/bin/bench-mpi $X $X $X | tee -a $OUT
     done
   done
 done

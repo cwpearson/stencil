@@ -31,10 +31,10 @@ echo "bin,config,ranks,gpus,x,y,z,staged (B),colo (B),peer (B),kernel (B),min (s
 for nodes in 1 2 4 8 16 32 64 128 256 384 512; do
   gpus=6
   ranks=$gpus
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 7 -g $gpus -r 6 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged                        | tee -a $OUT 
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 7 -g $gpus -r 6 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged --colo                 | tee -a $OUT
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 7 -g $gpus -r 6 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged --colo --peer          | tee -a $OUT
-  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 7 -g $gpus -r 6 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged --colo --peer --kernel | tee -a $OUT
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged                        | tee -a $OUT 
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged --colo                 | tee -a $OUT
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged --colo --peer          | tee -a $OUT
+  jsrun --smpiargs="-gpu" -n $nodes -a $ranks -c 42 -g $gpus -r 1 -b rs ../../build/bin/jacobi3d $X $Y $Z -n $NUM_ITER --staged --colo --peer --kernel | tee -a $OUT
 done
 
 
