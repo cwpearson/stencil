@@ -504,7 +504,7 @@ private:
   RcStream stream_;
   MPI_Request req_;
 
-  enum class State { None, D2H, Wait };
+  enum class State { Idle, D2H, Wait };
   State state_;
 
   DevicePacker packer_;
@@ -513,7 +513,7 @@ public:
   // RemoteSender() : hostBuf_(nullptr) {}
   RemoteSender(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain), hostBuf_(nullptr),
-        stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), packer_(stream_) {}
+        stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::Idle), packer_(stream_) {}
 
   ~RemoteSender() { CUDA_RUNTIME(cudaFreeHost(hostBuf_)); }
 
@@ -552,18 +552,13 @@ public:
     send_d2h();
   }
 
-  virtual bool active() override {
-    assert(State::None != state_);
-    return State::Wait != state_;
-  }
+  virtual bool active() override { return State::Wait != state_; }
 
   virtual bool next_ready() override {
-    assert(State::None != state_);
     if (state_ == State::D2H) {
       return d2h_done();
     } else {
-      __builtin_unreachable();
-      LOG_FATAL("unreachable");
+      return false;
     }
   }
 
@@ -571,9 +566,6 @@ public:
     if (State::D2H == state_) {
       state_ = State::Wait;
       send_h2h();
-    } else {
-      __builtin_unreachable();
-      LOG_FATAL("unreachable");
     }
   }
 
@@ -582,7 +574,7 @@ public:
     if (packer_.size()) {
       MPI_Wait(&req_, MPI_STATUS_IGNORE);
     }
-    state_ = State::None;
+    state_ = State::Idle;
   }
 
   void send_d2h() {

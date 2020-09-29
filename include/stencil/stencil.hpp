@@ -214,4 +214,11 @@ public:
      subdomain `zero_nans` causes nans to be replaced with 0.0
   */
   void write_paraview(const std::string &prefix, bool zeroNaNs = false);
+
+protected:
+  /* Try to make progress on all stateful senders once
+
+  return true if any of the senders are still pending
+  */
+  bool poll_advance_sends();
 };

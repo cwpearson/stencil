@@ -961,8 +961,28 @@ std::vector<std::vector<Rect3>> DistributedDomain::get_exterior() const {
 
 const Rect3 DistributedDomain::get_compute_region() const noexcept { return Rect3(Dim3(0, 0, 0), size_); }
 
-void DistributedDomain::exchange() {
+bool DistributedDomain::poll_advance_sends() {
+  nvtxRangePush("DD::poll_advance_sends");
+  bool pending = false;
 
+  // move senders from d2h to h2h
+  for (auto &domSenders : remoteSenders_) {
+    for (auto &kv : domSenders) {
+      StatefulSender *sender = kv.second;
+      if (sender->active()) {
+        pending = true;
+        if (sender->next_ready()) {
+          sender->next();
+        }
+      }
+    }
+  }
+
+  nvtxRangePop();
+  return pending;
+}
+
+void DistributedDomain::exchange() {
   nvtxRangePush("DD::exchange()");
 
 #ifdef STENCIL_EXCHANGE_STATS
@@ -983,6 +1003,7 @@ void DistributedDomain::exchange() {
     for (auto &kv : domSenders) {
       StatefulSender *sender = kv.second;
       sender->send();
+      poll_advance_sends();
     }
   }
   nvtxRangePop();
@@ -1047,19 +1068,7 @@ void DistributedDomain::exchange() {
   while (pending) {
     pending = false;
   senders:
-    // move senders from d2h to h2h
-    for (auto &domSenders : remoteSenders_) {
-      for (auto &kv : domSenders) {
-        StatefulSender *sender = kv.second;
-        if (sender->active()) {
-          pending = true;
-          if (sender->next_ready()) {
-            sender->next();
-          }
-        }
-      }
-    }
-  recvers:
+    pending |= poll_advance_sends();
     // move recvers from h2h to h2d
     for (auto &domRecvers : remoteRecvers_) {
       for (auto &kv : domRecvers) {
@@ -1071,12 +1080,11 @@ void DistributedDomain::exchange() {
             // std::cerr << "[" << rank_ << "] src=" << srcIdx << "
             // recv_h2d\n";
             recver->next();
-            goto senders; // see if a sender got ready
+            goto senders; // try to send as early as possible
           }
         }
       }
     }
-  colorecver:
     for (auto &domRecvers : coloRecvers_) {
       for (auto &kv : domRecvers) {
         StatefulRecver *recver = kv.second;
@@ -1084,7 +1092,7 @@ void DistributedDomain::exchange() {
           pending = true;
           if (recver->next_ready()) {
             recver->next();
-            goto senders; // see if a sender got ready
+            goto senders; // try to send as early as possible
           }
         }
       }
