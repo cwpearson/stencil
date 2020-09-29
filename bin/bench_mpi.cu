@@ -122,7 +122,7 @@ int main(int argc, char **argv) {
       // LOG_DEBUG("Isend   to " << dstRank << " " << buf.size() << "B");
     }
     const double timeIsend = MPI_Wtime();
-    asm volatile ("" ::: "memory");
+    asm volatile("" ::: "memory");
 
     // do the MPI recvs
     for (int srcRank = 0; srcRank < int(recvBufs.size()); ++srcRank) {
@@ -145,7 +145,7 @@ int main(int argc, char **argv) {
         }
       }
     }
-    got_first:
+  got_first:
 
     // wait for all
     for (auto &req : sendReqs) {
@@ -174,16 +174,19 @@ int main(int argc, char **argv) {
     statsTotal.insert(durTotal);
     statsFirst.insert(durFirst);
   }
-  delete dd;
 
   if (mpi::world_rank() == 0) {
+    Dim3 sdSize = dd->get_placement()->subdomain_size(Dim3(0, 0, 0));
     printf("%d,%d,%d", x, y, z);
     printf(",%d,%d", numNodes, ranksPerNode);
+    printf(",%ld,%ld,%ld", sdSize.x, sdSize.y, sdSize.z);
     printf(",%f,%f,%f", double(selfMessages) / worldSize, double(coloMessages) / worldSize, double(nodeMessages)/ worldSize);
     printf(",%d,%d,%d", selfMessages, coloMessages, nodeMessages);
     printf(",%e,%e", statsFirst.trimean(), statsTotal.trimean());
     std::cout << "\n";
   }
+
+  delete dd;
 
   MPI_Finalize();
 }
