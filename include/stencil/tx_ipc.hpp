@@ -25,8 +25,6 @@ class IpcSender {
   cudaEvent_t event_; // event to synchronize without MPI
   cudaIpcEventHandle_t eventHandle_;
 
-  char junk_; // garbage to be sent as notifcation message
-
 public:
   IpcSender();
   IpcSender(int srcRank, int srcDom, // domain ID
@@ -64,8 +62,6 @@ class IpcRecver {
   int srcDev_, dstDev_; // cuda ID
   cudaEvent_t event_;   // to synchronize with sender
   cudaIpcEventHandle_t eventHandle_;
-
-  char junk_; // garbage to be recved into for notification message
 
 public:
   IpcRecver();

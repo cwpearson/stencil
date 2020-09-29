@@ -51,7 +51,7 @@ void IpcSender::wait_prepare() {
 
 void IpcSender::async_notify() {
   const int notTag = make_tag<MsgKind::ColocatedNotify>(ipc_tag_payload(srcDom_, dstDom_));
-  mpirt::time(MPI_Isend, &junk_, 1, MPI_BYTE, dstRank_, notTag, MPI_COMM_WORLD, &notReq_);
+  mpirt::time(MPI_Isend, nullptr /*0-size*/, 0, MPI_BYTE, dstRank_, notTag, MPI_COMM_WORLD, &notReq_);
 }
 
 void IpcSender::wait_notify() { mpirt::time(MPI_Wait, &notReq_, MPI_STATUS_IGNORE); }
@@ -93,7 +93,7 @@ void IpcRecver::wait_prepare() {
 void IpcRecver::async_listen() {
   // wait to recv the event
   const int notTag = make_tag<MsgKind::ColocatedNotify>(ipc_tag_payload(srcDom_, dstDom_));
-  mpirt::time(MPI_Irecv, &junk_, 1, MPI_INT, srcRank_, notTag, MPI_COMM_WORLD, &notReq_);
+  mpirt::time(MPI_Irecv, nullptr, 0, MPI_INT, srcRank_, notTag, MPI_COMM_WORLD, &notReq_);
 }
 
 bool IpcRecver::test_listen() {
