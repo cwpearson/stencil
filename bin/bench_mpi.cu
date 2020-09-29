@@ -16,16 +16,18 @@ int main(int argc, char **argv) {
   const int worldSize = mpi::world_size();
 
   int numNodes;
+  int ranksPerNode;
   {
     MpiTopology topo(MPI_COMM_WORLD);
     numNodes = worldSize / topo.colocated_size();
+    ranksPerNode = topo.colocated_size();
   }
 
   // discover which ranks are on which nodes
   Machine machine = Machine::build(MPI_COMM_WORLD);
 
   // stencil config
-  int nIters = 1000;
+  int nIters = 100;
   int x = 60;
   int y = 60;
   int z = 60;
@@ -120,6 +122,7 @@ int main(int argc, char **argv) {
       // LOG_DEBUG("Isend   to " << dstRank << " " << buf.size() << "B");
     }
     const double timeIsend = MPI_Wtime();
+    asm volatile("" ::: "memory");
 
     // do the MPI recvs
     for (int srcRank = 0; srcRank < int(recvBufs.size()); ++srcRank) {
@@ -132,14 +135,17 @@ int main(int argc, char **argv) {
 
     // poll recvs until we find the first that's done
     double timeFirst = 0;
-    for (auto &req : recvReqs) {
-      int done;
-      MPI_Test(&req, &done, MPI_STATUS_IGNORE);
-      if (done) {
-        timeFirst = MPI_Wtime();
-        break;
+    while (true) {
+      for (auto &req : recvReqs) {
+        int done = false;
+        MPI_Test(&req, &done, MPI_STATUS_IGNORE);
+        if (done) {
+          timeFirst = MPI_Wtime();
+          goto got_first;
+        }
       }
     }
+  got_first:
 
     // wait for all
     for (auto &req : sendReqs) {
@@ -172,8 +178,8 @@ int main(int argc, char **argv) {
   if (mpi::world_rank() == 0) {
     Dim3 sdSize = dd->get_placement()->subdomain_size(Dim3(0, 0, 0));
     printf("%d,%d,%d", x, y, z);
+    printf(",%d,%d", numNodes, ranksPerNode);
     printf(",%ld,%ld,%ld", sdSize.x, sdSize.y, sdSize.z);
-    printf(",%d", numNodes);
     printf(",%d,%d,%d", selfMessages, coloMessages, nodeMessages);
     printf(",%e,%e", statsFirst.trimean(), statsTotal.trimean());
     std::cout << "\n";
