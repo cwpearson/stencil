@@ -168,15 +168,18 @@ int main(int argc, char **argv) {
     statsTotal.insert(durTotal);
     statsFirst.insert(durFirst);
   }
-  delete dd;
 
   if (mpi::world_rank() == 0) {
+    Dim3 sdSize = dd->get_placement()->subdomain_size(Dim3(0, 0, 0));
     printf("%d,%d,%d", x, y, z);
+    printf(",%ld,%ld,%ld", sdSize.x, sdSize.y, sdSize.z);
     printf(",%d", numNodes);
     printf(",%d,%d,%d", selfMessages, coloMessages, nodeMessages);
     printf(",%e,%e", statsFirst.trimean(), statsTotal.trimean());
     std::cout << "\n";
   }
+
+  delete dd;
 
   MPI_Finalize();
 }
