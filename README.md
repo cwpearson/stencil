@@ -138,7 +138,7 @@ Checking for CUDA-Aware MPI support:
 ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ```
 
-## Bulding OpenMPI 4.0.5 with CUDA Support
+## Bulding OpenMPI 4.0.5 with CUDA
 
 ```
 ./configure --prefix="blah" --with-cuda=/path/to/cuda
@@ -150,12 +150,33 @@ apt-get install bison
 ./configure --prefix="blah: --enable-cuda --with-cuda=/path/to/cuda
 ```
 
+may need a quick patch for CUDA 11:
+```
+src/mpid/ch3/channels/mrail/src/gen2/ibv_cuda_util.c:844:37: error: ‘struct cudaPointerAttributes’ has no member named ‘memoryType’
+  844 |                 is_dev = (attributes.memoryType == cudaMemoryTypeDevice) ? 1 : 0;
+```
+
+the struct member should be `attributes.type`
+
 may also need
 
 ```
 --disbale-mcast --enable-fortran=no
 ```
 
+## Building MPICH 3.4a3 with CUDA
+
+```
+./configure --prefix="blah" ---with-device=ch4 -with-ch4-shmmods=gpudirect
+```
+
+uncertain of the difference between `ch4` and `ofi`.
+
+may also need
+
+```
+--enable-fortran=no
+```
 
 ## On NCSA Hal
 
