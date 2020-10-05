@@ -138,10 +138,15 @@ Checking for CUDA-Aware MPI support:
 ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ```
 
-## Bulding OpenMPI with CUDA Support
+## Bulding OpenMPI 4.0.5 with CUDA Support
 
 ```
 ./configure --prefix="blah" --with-cuda=/path/to/cuda
+```
+
+## Building Mvapich 2.3.4 with CUDA
+```
+./configure --prefix="blah: --with-cuda=/path/to/cuda --enable-fortran=no
 ```
 
 ## On NCSA Hal
