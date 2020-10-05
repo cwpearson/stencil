@@ -44,6 +44,16 @@ Tested on
 * CUDA 10.1 / 10.2 / 11.0
 * OpenMPI 2.1
 
+## Using different MPIs
+
+Create a toolchain file, like `cmake/toolchains/deneb-openmpi-4.0.5.cmake`
+
+clear your build directory, and invoke CMake like this
+```
+cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/deneb-openmpi-4.0.5.cmake ..
+```
+
+
 ## Tests
 
 Install MPI and CUDA, then

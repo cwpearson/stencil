@@ -1,0 +1,1 @@
+set(MPI_ROOT /home/pearson/software/mpich-3.4a3)

@@ -89,6 +89,11 @@ set_target_properties(bench-mpi PROPERTIES ENABLE_EXPORTS ON) # better back trac
 target_link_libraries(bench-mpi stencil::stencil)
 add_args(bench-mpi)
 
+add_executable(bench-mpi-pack bench_mpi_pack.cu statistics.cpp)
+set_target_properties(bench-mpi-pack PROPERTIES ENABLE_EXPORTS ON) # better back trace
+target_link_libraries(bench-mpi-pack stencil::stencil)
+add_args(bench-mpi-pack)
+
 add_executable(jacobi3d jacobi3d.cu statistics.cpp)
 target_link_libraries(jacobi3d stencil::stencil)
 add_args(jacobi3d)

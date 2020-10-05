@@ -1,0 +1,1 @@
+set(MPI_ROOT /home/pearson/software/mvapich2-2.3.4)
