@@ -147,7 +147,7 @@ ompi_info --parsable --all | grep mpi_built_with_cuda_support:value
 ## Building Mvapich 2.3.4 with CUDA
 ```
 apt-get install bison
-./configure --prefix="blah: --with-cuda=/path/to/cuda
+./configure --prefix="blah: --enable-cuda --with-cuda=/path/to/cuda
 ```
 
 may also need
