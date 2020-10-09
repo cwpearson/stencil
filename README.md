@@ -132,8 +132,15 @@ sshfs -o IdentityFile=/path/to/id_rsa user@host:/path /mount/location
 
 ```
 cd build
-rm -rf *
+rm -f CMakeCache.txt
 cmake -DCMAKE_PREFIX_PATH=path/to/mpi ..
+```
+
+`mpiexec` from the MPI will be soft-linked into the build directory for convenience
+This mpiexec should be used to launch any binaries.
+
+```
+./mpiexec -n 2 bin/<exe>
 ```
 
 ## MCA Parameters
@@ -173,6 +180,8 @@ may also need
 ```
 --disbale-mcast --enable-fortran=no
 ```
+
+Run with `MV2_USE_CUDA=1`.
 
 ## Building MPICH 3.4a3 with CUDA
 

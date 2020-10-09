@@ -35,7 +35,10 @@ __device__ void grid_pack(void *__restrict__ dst, const cudaPitchedPtr src,
         // byte offset of input
         const size_t bi = zi * src.ysize * src.pitch + yi * src.pitch + xi * elemSize;
         // printf("[xi, yi, zi]->bi = [%u, %u, %u]->%lu\n", xi, yi, zi, bi);
-        if (4 == elemSize) {
+        if (1 == elemSize) {
+          char v = *reinterpret_cast<const char *>(sp + bi);
+          reinterpret_cast<char *>(dst)[oi] = v;
+        } else if (4 == elemSize) {
           uint32_t v = *reinterpret_cast<const uint32_t *>(sp + bi);
           reinterpret_cast<uint32_t *>(dst)[oi] = v;
         } else if (8 == elemSize) {
