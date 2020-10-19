@@ -57,9 +57,6 @@ int main(int argc, char **argv) {
   bool usePeer = false;
   bool useColoPmu = false;
   bool useColoDa = false;
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  bool useCudaAware = false;
-#endif
   bool useStaged = false;
 
   argparse::Parser p;
@@ -75,9 +72,6 @@ int main(int argc, char **argv) {
   p.add_flag(useColoDa, "--colo-da");
   p.add_flag(useStaged, "--staged");
   p.add_flag(useNaivePlacement, "--naive");
-#if STENCIL_USE_CUDA_AWARE_MPI == 1
-  p.add_flag(useCudaAware, "--cuda-aware");
-#endif
 
   if (!p.parse(argc, argv)) {
     std::cout << p.help() << "\n";
