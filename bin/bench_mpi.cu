@@ -160,7 +160,7 @@ int main(int argc, char **argv) {
     double durIrecv = timeIrecv - timeIsend;
     double durFirst = timeFirst - timeIsend; // between last send and first recv
     double durWait = timeDone - timeIrecv;
-    double durTotal = timeDone - timeStart;
+    double durTotal = timeDone - timeStart; // first send and last recv
 
     MPI_Allreduce(MPI_IN_PLACE, &durIsend, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
     MPI_Allreduce(MPI_IN_PLACE, &durIrecv, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);

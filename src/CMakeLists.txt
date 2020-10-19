@@ -13,6 +13,7 @@ set(STENCIL_SOURCES ${STENCIL_SOURCES}
   ${CMAKE_CURRENT_LIST_DIR}/translator.cu
   ${CMAKE_CURRENT_LIST_DIR}/tx_colocated.cu
   ${CMAKE_CURRENT_LIST_DIR}/tx_ipc.cpp
+  ${CMAKE_CURRENT_LIST_DIR}/tx_cuda_aware_mpi.cu
 )
 
 set(STENCIL_SOURCES 

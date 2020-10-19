@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <functional>
 #include <future>
 #include <iomanip>
@@ -752,6 +753,16 @@ public:
 };
 
 /*! Send from one domain to a remote domain
+
+
+    Has 3 states: None, Pack, and Send
+
+    None->Pack, launches packer
+    Pack: active
+    Pack->Send, launches MPI_Isend
+    Send: not active
+    On wait, transition pack to None
+
  */
 class CudaAwareMpiSender : public StatefulSender {
 private:
@@ -777,10 +788,10 @@ private:
   DevicePacker packer_;
 
 public:
-  // CudaAwareMpiSender() {}
+  CudaAwareMpiSender() = delete;
   CudaAwareMpiSender(int srcRank, int srcGPU, int dstRank, int dstGPU, LocalDomain &domain)
       : srcRank_(srcRank), srcGPU_(srcGPU), dstRank_(dstRank), dstGPU_(dstGPU), domain_(&domain),
-        stream_(domain.gpu(), RcStream::Priority::HIGH), state_(State::None), packer_(stream_) {}
+        stream_(domain.gpu(), RcStream::Priority::HIGH), req_({}), state_(State::None), packer_(stream_) {}
 
   virtual void start_prepare(const std::vector<Message> &outbox) override {
     packer_.prepare(domain_, outbox);
@@ -794,15 +805,19 @@ public:
   }
 
   virtual void send() override {
+    assert(State::None == state_);
     state_ = State::Pack;
     send_pack();
   }
 
-  virtual bool active() override { return State::Send != state_; }
+  virtual bool active() override { return State::Pack == state_; }
 
   virtual bool next_ready() override {
-    assert(State::Pack == state_);
-    return pack_done();
+    if (State::Pack == state_) {
+      return pack_done();
+    } else {
+      LOG_FATAL("unexpected state");
+    }
   }
 
   virtual void next() override {
@@ -810,52 +825,21 @@ public:
       state_ = State::Send;
       send_d2d();
     } else {
-      assert(0);
-      __builtin_unreachable();
+      LOG_FATAL("unexpected state");
     }
   }
 
-  virtual void wait() override {
-    assert(State::Send == state_);
-    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
-    MPI_Wait(&req_, MPI_STATUS_IGNORE);
-  }
+  virtual void wait() override;
 
-  void send_pack() {
-    nvtxRangePush("CudaAwareMpiSender::send_pack");
-    assert(packer_.data());
-    packer_.pack();
-    nvtxRangePop(); // CudaAwareMpiSender::send_pack
-  }
+private:
+  // launch pack kernel
+  void send_pack();
 
-  bool is_pack() const noexcept { return state_ == State::Pack; }
+  // true if pack kernel finished
+  bool pack_done();
 
-  bool pack_done() {
-    assert(packer_.size());
-    cudaError_t err = rt::time(cudaStreamQuery, stream_);
-    if (cudaSuccess == err) {
-      return true;
-    } else if (cudaErrorNotReady == err) {
-      return false;
-    } else {
-      CUDA_RUNTIME(err);
-      LOG_FATAL("cuda error");
-    }
-  }
-
-  void send_d2d() {
-    assert(packer_.size());
-    nvtxRangePush("CudaAwareMpiSender::send_d2d");
-    assert(packer_.data());
-    assert(srcGPU_ < 8);
-    assert(dstGPU_ < 8);
-    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
-    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    size_t numBytes = packer_.size();
-    assert(numBytes <= std::numeric_limits<int>::max());
-    mpirt::time(MPI_Isend, packer_.data(), int(numBytes), MPI_BYTE, dstRank_, tag, MPI_COMM_WORLD, &req_);
-    nvtxRangePop(); // CudaAwareMpiSender::send_d2d
-  }
+  // post MPI_Isend
+  void send_d2d();
 };
 
 class CudaAwareMpiRecver : public StatefulRecver {
@@ -909,7 +893,13 @@ public:
     return State::Unpack != state_;
   }
 
-  virtual bool next_ready() override { return d2d_done(); }
+  virtual bool next_ready() override {
+    if (State::Recv == state_) {
+      return d2d_done();
+    } else {
+      LOG_FATAL("unexpected state");
+    }
+  }
 
   virtual void next() override {
     if (State::Recv == state_) {
@@ -917,7 +907,6 @@ public:
       recv_unpack();
     } else {
       LOG_FATAL("unreachable");
-      __builtin_unreachable();
     }
   }
 
@@ -927,36 +916,13 @@ public:
     CUDA_RUNTIME(cudaStreamSynchronize(stream_));
   }
 
-  void recv_unpack() {
-    assert(unpacker_.size());
-    nvtxRangePush("CudaAwareMpiRecver::recv_unpack");
-    unpacker_.unpack();
-    nvtxRangePop(); // CudaAwareMpiRecver::recv_unpack
-  }
+private:
+  // launch unpack kernel
+  void recv_unpack();
 
-  bool is_d2d() const { return state_ == State::Recv; }
+  // true if MPI_Irecv is done
+  bool d2d_done();
 
-  bool d2d_done() {
-    assert(unpacker_.size());
-    int flag;
-    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
-    mpirt::time(MPI_Test, &req_, &flag, MPI_STATUS_IGNORE);
-    if (flag) {
-      return true;
-    } else {
-      return false;
-    }
-  }
-
-  void recv_d2d() {
-    assert(unpacker_.size());
-    nvtxRangePush("CudaAwareMpiRecver::recv_d2d");
-    assert(unpacker_.data());
-    assert(srcGPU_ < 8);
-    assert(dstGPU_ < 8);
-    CUDA_RUNTIME(rt::time(cudaSetDevice, domain_->gpu()));
-    const int tag = ((srcGPU_ & 0xF) << 4) | (dstGPU_ & 0xF);
-    mpirt::time(MPI_Irecv, unpacker_.data(), int(unpacker_.size()), MPI_BYTE, srcRank_, tag, MPI_COMM_WORLD, &req_);
-    nvtxRangePop(); // CudaAwareMpiRecver::recv_d2d
-  }
+  // post MPI_Irecv
+  void recv_d2d();
 };
