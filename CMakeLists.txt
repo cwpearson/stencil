@@ -27,6 +27,12 @@ message(STATUS "STENCIL_OUTPUT_LEVEL not defined, setting to INFO")
 set(STENCIL_OUTPUT_LEVEL INFO CACHE STRING "one of SPEW DEBUG INFO WARN ERROR FATAL")
 endif()
 
+# Allow nvcc to choose CUDA architectures if none defined
+if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
+message(STATUS "CMAKE_CUDA_ARCHITECTURES not defined, setting to OFF")
+set(CMAKE_CUDA_ARCHITECTURES OFF CACHE STRING "")
+endif()
+
 # Set a default build type if none was specified
 set(default_build_type "Release")
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
