@@ -12,6 +12,29 @@ similar in acDeviceCreate in src/device.cc
 
 We will assume real as double as the case we care about
 
+src/core/kernels/integration.cuh defines a macro to generate
+acDeviceKernel_<> which calls kernel <>
+
+API_specification_and_use_manual says
+solve() can be called with acDeviceKernel_solve()
+
+build/user_kernels.h seems to define the generated code
+solve() may be the entry point. it does 
+out_lnrho =rk3 (out_lnrho ,lnrho ,continuity (globalVertexIdx ,uu ,lnrho ,dt ),dt );
+out_aa =rk3 (out_aa ,aa ,induction (uu ,aa ),dt );
+out_uu =rk3 (out_uu ,uu ,momentum (globalVertexIdx ,uu ,lnrho ,ss ,aa ,dt ),dt );
+out_ss =rk3 (out_ss ,ss ,entropy (ss ,uu ,lnrho ,aa ),dt );
+
+rk3 is defined in src/core/kernels/integration.cuh
+
+defined in build/user_kernels
+continuity
+induction
+momentum
+entropy
+
+
+
 */
 
 #include <chrono>
