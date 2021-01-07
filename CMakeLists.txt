@@ -266,5 +266,6 @@ target_link_libraries(stencil PUBLIC ${NVTOOLSEXT_LIB})
 enable_testing() 
 
 add_subdirectory(test)
+add_subdirectory(astaroth)
 add_subdirectory(bin)
 

@@ -79,11 +79,6 @@ target_include_directories(${tgt} SYSTEM PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/../t
 set_property(TARGET ${tgt} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 endmacro()
 
-
-add_executable(astaroth-sim astaroth_sim.cu)
-target_link_libraries(astaroth-sim stencil::stencil)
-add_args(astaroth-sim)
-
 add_executable(bench-mpi bench_mpi.cu statistics.cpp)
 set_target_properties(bench-mpi PROPERTIES ENABLE_EXPORTS ON) # better back trace
 target_link_libraries(bench-mpi stencil::stencil)

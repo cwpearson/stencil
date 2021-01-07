@@ -1,40 +1,5 @@
-/* Try to do some rough approximation of astaroth using the stencil library.
-
-
-git clone https://jpekkila@bitbucket.org/jpekkila/astaroth.git
-cd astaroth && mkdir build && cd build
-cmake -DDOUBLE_PRECISION=ON -DMPI_ENABLED=ON .. && make -j
-
-First, we will try to understand the required data structures to create them.
-
-acHostMeshCreate() in src/astaroth.cc seems to suggest 8 handles that are nx/ny/nz * sizeof(real)
-similar in acDeviceCreate in src/device.cc
-
-We will assume real as double as the case we care about
-
-src/core/kernels/integration.cuh defines a macro to generate
-acDeviceKernel_<> which calls kernel <>
-
-API_specification_and_use_manual says
-solve() can be called with acDeviceKernel_solve()
-
-build/user_kernels.h seems to define the generated code
-solve() may be the entry point. it does 
-out_lnrho =rk3 (out_lnrho ,lnrho ,continuity (globalVertexIdx ,uu ,lnrho ,dt ),dt );
-out_aa =rk3 (out_aa ,aa ,induction (uu ,aa ),dt );
-out_uu =rk3 (out_uu ,uu ,momentum (globalVertexIdx ,uu ,lnrho ,ss ,aa ,dt ),dt );
-out_ss =rk3 (out_ss ,ss ,entropy (ss ,uu ,lnrho ,aa ),dt );
-
-rk3 is defined in src/core/kernels/integration.cuh
-
-defined in build/user_kernels
-continuity
-induction
-momentum
-entropy
-
-
-
+/* 
+Try to do some rough approximation of astaroth using the stencil library.
 */
 
 #include <chrono>
@@ -46,7 +11,8 @@ entropy
 #include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
-#define Real double
+
+#include "kernels.h"
 
 /*! set compute region to dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
  */
@@ -66,7 +32,7 @@ __global__ void init_kernel(Accessor<T> dst,    //<! [out] pointer to beginning 
 
 /* Apply the stencil to the coordinates in `reg`
  */
-__global__ void stencil_kernel(Accessor<Real> dst, const Accessor<Real> src, const Rect3 reg) {
+__global__ void stencil_kernel(Accessor<AcReal> dst, const Accessor<AcReal> src, const Rect3 reg) {
 
   for (int64_t z = reg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < reg.hi.z; z += gridDim.z * blockDim.z) {
     for (int64_t y = reg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < reg.hi.y; y += gridDim.y * blockDim.y) {
@@ -161,14 +127,14 @@ int main(int argc, char **argv) {
     dd.set_radius(radius);
     dd.set_placement(strategy);
 
-    auto dh0 = dd.add_data<Real>("d0");
-    auto dh1 = dd.add_data<Real>("d1");
-    auto dh2 = dd.add_data<Real>("d2");
-    auto dh3 = dd.add_data<Real>("d3");
-    auto dh4 = dd.add_data<Real>("d4");
-    auto dh5 = dd.add_data<Real>("d5");
-    auto dh6 = dd.add_data<Real>("d6");
-    auto dh7 = dd.add_data<Real>("d7");
+    auto dh0 = dd.add_data<AcReal>("d0");
+    auto dh1 = dd.add_data<AcReal>("d1");
+    auto dh2 = dd.add_data<AcReal>("d2");
+    auto dh3 = dd.add_data<AcReal>("d3");
+    auto dh4 = dd.add_data<AcReal>("d4");
+    auto dh5 = dd.add_data<AcReal>("d5");
+    auto dh6 = dd.add_data<AcReal>("d6");
+    auto dh7 = dd.add_data<AcReal>("d7");
 
     dd.realize();
 
@@ -201,8 +167,8 @@ int main(int argc, char **argv) {
       // launch operations on interior
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
-        const Accessor<Real> src0 = d.get_curr_accessor<Real>(dh0);
-        const Accessor<Real> dst0 = d.get_next_accessor<Real>(dh0);
+        const Accessor<AcReal> src0 = d.get_curr_accessor<AcReal>(dh0);
+        const Accessor<AcReal> dst0 = d.get_next_accessor<AcReal>(dh0);
         nvtxRangePush("launch");
         const Rect3 cr = interiors[di];
         std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
@@ -223,8 +189,8 @@ int main(int argc, char **argv) {
       // operate on exterior
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
-        const Accessor<Real> src0 = d.get_curr_accessor<Real>(dh0);
-        const Accessor<Real> dst0 = d.get_next_accessor<Real>(dh0);
+        const Accessor<AcReal> src0 = d.get_curr_accessor<AcReal>(dh0);
+        const Accessor<AcReal> dst0 = d.get_next_accessor<AcReal>(dh0);
         for (size_t si = 0; si < exteriors[di].size(); ++si) {
           nvtxRangePush("launch");
           const Rect3 cr = exteriors[di][si];
