@@ -1,4 +1,4 @@
-/* 
+/*
 Try to do some rough approximation of astaroth using the stencil library.
 */
 
@@ -11,9 +11,9 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
-
 #include "kernels.h"
 
+#if 0
 /*! set compute region to dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
  */
 template <typename T>
@@ -29,7 +29,9 @@ __global__ void init_kernel(Accessor<T> dst,    //<! [out] pointer to beginning 
     }
   }
 }
+#endif
 
+#if 0
 /* Apply the stencil to the coordinates in `reg`
  */
 __global__ void stencil_kernel(Accessor<AcReal> dst, const Accessor<AcReal> src, const Rect3 reg) {
@@ -51,6 +53,7 @@ __global__ void stencil_kernel(Accessor<AcReal> dst, const Accessor<AcReal> src,
     }
   }
 }
+#endif
 
 int main(int argc, char **argv) {
 
@@ -127,15 +130,14 @@ int main(int argc, char **argv) {
     dd.set_radius(radius);
     dd.set_placement(strategy);
 
-    auto dh0 = dd.add_data<AcReal>("d0");
-    auto dh1 = dd.add_data<AcReal>("d1");
-    auto dh2 = dd.add_data<AcReal>("d2");
-    auto dh3 = dd.add_data<AcReal>("d3");
-    auto dh4 = dd.add_data<AcReal>("d4");
-    auto dh5 = dd.add_data<AcReal>("d5");
-    auto dh6 = dd.add_data<AcReal>("d6");
-    auto dh7 = dd.add_data<AcReal>("d7");
+    // add required data
+    std::vector<DataHandle<AcReal>> handles;
+    for (size_t i = 0; i < NUM_VTXBUF_HANDLES; ++i) {
+      handles.push_back(dd.add_data<AcReal>(""));
+    }
 
+    // create arrays
+    std::cerr << "realize\n";
     dd.realize();
 
     MPI_Barrier(MPI_COMM_WORLD);
@@ -146,6 +148,19 @@ int main(int argc, char **argv) {
       computeStreams[di] = RcStream(dd.domains()[di].gpu());
     }
 
+    // create the VBAs for each domain
+    std::vector<VertexBufferArray> vbas(dd.domains().size());
+    for (size_t di = 0; di < dd.domains().size(); ++di) {
+      VertexBufferArray &vba = vbas[di];
+      LocalDomain &d = dd.domains()[di];
+
+      for (size_t i = 0; i < NUM_VTXBUF_HANDLES; ++i) {
+        vba.in[i] = d.get_curr_accessor<AcReal>(handles[i]).ptr().ptr;
+        vba.out[i] = d.get_next_accessor<AcReal>(handles[i]).ptr().ptr;
+      }
+    }
+
+#if 0
     std::cerr << "init\n";
     for (size_t di = 0; di < dd.domains().size(); ++di) {
       auto &d = dd.domains()[di];
@@ -158,6 +173,7 @@ int main(int argc, char **argv) {
 
     if (0)
       dd.write_paraview("init");
+#endif
 
     const std::vector<Rect3> interiors = dd.get_interior();
     const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
@@ -167,40 +183,29 @@ int main(int argc, char **argv) {
       // launch operations on interior
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
-        const Accessor<AcReal> src0 = d.get_curr_accessor<AcReal>(dh0);
-        const Accessor<AcReal> dst0 = d.get_next_accessor<AcReal>(dh0);
         nvtxRangePush("launch");
         const Rect3 cr = interiors[di];
         std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
         // std::cerr << src0.origin() << "=src0 origin\n";
         d.set_device();
-        dim3 dimBlock = Dim3::make_block_dim(cr.hi - cr.lo, 512);
-        dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-        stencil_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(dst0, src0, cr);
-        CUDA_RUNTIME(cudaGetLastError());
+        integrate_substep(cr, vbas[di]);
         nvtxRangePop(); // launch
-                        // CUDA_RUNTIME(cudaDeviceSynchronize());
       }
 
       // exchange halo
       std::cerr << rank << ": exchange\n";
       dd.exchange();
 
-      // operate on exterior
+      // launch on exteriors
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
-        const Accessor<AcReal> src0 = d.get_curr_accessor<AcReal>(dh0);
-        const Accessor<AcReal> dst0 = d.get_next_accessor<AcReal>(dh0);
         for (size_t si = 0; si < exteriors[di].size(); ++si) {
           nvtxRangePush("launch");
           const Rect3 cr = exteriors[di][si];
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          dim3 dimBlock = Dim3::make_block_dim(cr.hi - cr.lo, 512);
-          dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-          stencil_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(dst0, src0, cr);
-          CUDA_RUNTIME(cudaGetLastError());
+          integrate_substep(cr, vbas[di]);
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());
         }

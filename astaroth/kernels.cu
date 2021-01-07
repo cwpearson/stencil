@@ -8,31 +8,11 @@
 
 __device__ __constant__ AcMeshInfo d_mesh_info;
 
-static int __device__ __forceinline__
-DCONST(const AcIntParam param)
-{
-    return d_mesh_info.int_params[param];
-}
-static int3 __device__ __forceinline__
-DCONST(const AcInt3Param param)
-{
-    return d_mesh_info.int3_params[param];
-}
-static AcReal __device__ __forceinline__
-DCONST(const AcRealParam param)
-{
-    return d_mesh_info.real_params[param];
-}
-static AcReal3 __device__ __forceinline__
-DCONST(const AcReal3Param param)
-{
-    return d_mesh_info.real3_params[param];
-}
-static __device__ constexpr VertexBufferHandle
-DCONST(const VertexBufferHandle handle)
-{
-    return handle;
-}
+static int __device__ __forceinline__ DCONST(const AcIntParam param) { return d_mesh_info.int_params[param]; }
+static int3 __device__ __forceinline__ DCONST(const AcInt3Param param) { return d_mesh_info.int3_params[param]; }
+static AcReal __device__ __forceinline__ DCONST(const AcRealParam param) { return d_mesh_info.real_params[param]; }
+static AcReal3 __device__ __forceinline__ DCONST(const AcReal3Param param) { return d_mesh_info.real3_params[param]; }
+static __device__ constexpr VertexBufferHandle DCONST(const VertexBufferHandle handle) { return handle; }
 #define DEVICE_VTXBUF_IDX(i, j, k) ((i) + (j)*DCONST(AC_mx) + (k)*DCONST(AC_mxy))
 #define DEVICE_1D_COMPDOMAIN_IDX(i, j, k) ((i) + (j)*DCONST(AC_nx) + (k)*DCONST(AC_nxy))
 #define globalGridN (d_mesh_info.int3_params[AC_global_grid_n])
@@ -44,23 +24,11 @@ DCONST(const VertexBufferHandle handle)
 #define d_multigpu_offset (d_mesh_info.int3_params[AC_multigpu_offset])
 //#define d_multinode_offset (d_mesh_info.int3_params[AC_multinode_offset]) // Placeholder
 
-static __device__ constexpr int
-IDX(const int i)
-{
-    return i;
-}
+static __device__ constexpr int IDX(const int i) { return i; }
 
-static __device__ __forceinline__ int
-IDX(const int i, const int j, const int k)
-{
-    return DEVICE_VTXBUF_IDX(i, j, k);
-}
+static __device__ __forceinline__ int IDX(const int i, const int j, const int k) { return DEVICE_VTXBUF_IDX(i, j, k); }
 
-static __device__ __forceinline__ int
-IDX(const int3 idx)
-{
-    return DEVICE_VTXBUF_IDX(idx.x, idx.y, idx.z);
-}
+static __device__ __forceinline__ int IDX(const int3 idx) { return DEVICE_VTXBUF_IDX(idx.x, idx.y, idx.z); }
 
 #if AC_DOUBLE_PRECISION == 1
 typedef cuDoubleComplex acComplex;
@@ -70,27 +38,19 @@ typedef cuFloatComplex acComplex;
 #define acComplex(x, y) make_cuFloatComplex(x, y)
 #endif
 
-static __device__ inline acComplex
-exp(const acComplex& val)
-{
-    return acComplex(exp(val.x) * cos(val.y), exp(val.x) * sin(val.y));
+static __device__ inline acComplex exp(const acComplex &val) {
+  return acComplex(exp(val.x) * cos(val.y), exp(val.x) * sin(val.y));
 }
-static __device__ inline acComplex
-operator*(const AcReal& a, const acComplex& b)
-{
-    return (acComplex){a * b.x, a * b.y};
+static __device__ inline acComplex operator*(const AcReal &a, const acComplex &b) {
+  return (acComplex){a * b.x, a * b.y};
 }
 
-static __device__ inline acComplex
-operator*(const acComplex& b, const AcReal& a)
-{
-    return (acComplex){a * b.x, a * b.y};
+static __device__ inline acComplex operator*(const acComplex &b, const AcReal &a) {
+  return (acComplex){a * b.x, a * b.y};
 }
 
-static __device__ inline acComplex
-operator*(const acComplex& a, const acComplex& b)
-{
-    return (acComplex){a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x};
+static __device__ inline acComplex operator*(const acComplex &a, const acComplex &b) {
+  return (acComplex){a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x};
 }
 
 // Kernels /////////////////////////////////////////////////////////////////////
@@ -98,6 +58,25 @@ operator*(const acComplex& a, const acComplex& b)
 #include "integration.cuh"
 #include "packing.cuh"
 #include "reductions.cuh"
+
+AcResult integrate_substep(Rect3 cr, // compute region
+                           VertexBufferArray vba) {
+
+  dim3 dimBlock(32, 1, 4);
+  dim3 dimGrid = ((cr.hi - cr.lo) + Dim3(dimBlock) - 1) / (Dim3(dimBlock)); // ceil
+
+  int3 start{}, end{};
+  start.x = cr.lo.x;
+  start.y = cr.lo.y;
+  start.z = cr.lo.z;
+  end.x = cr.hi.x;
+  end.y = cr.hi.y;
+  end.z = cr.hi.z;
+
+  solve<0><<<dimGrid, dimBlock>>>(start, end, vba);
+
+  return AC_SUCCESS;
+}
 
 #if 0
 AcResult

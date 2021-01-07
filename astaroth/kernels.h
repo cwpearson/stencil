@@ -8,39 +8,44 @@
 #define MPI_GPUDIRECT_DISABLED (0)
 #endif // AC_MPI_ENABLED
 
+#include "stencil/stencil.hpp"
+
 typedef AcReal AcRealPacked;
 
 typedef struct {
-    int3 dims;
-    AcRealPacked* data;
+  int3 dims;
+  AcRealPacked *data;
 
-    AcRealPacked* data_pinned;
-    bool pinned = false; // Set if data was received to pinned memory
+  AcRealPacked *data_pinned;
+  bool pinned = false; // Set if data was received to pinned memory
 } PackedData;
 
 typedef struct {
-    AcReal* in[NUM_VTXBUF_HANDLES];
-    AcReal* out[NUM_VTXBUF_HANDLES];
+  AcReal *in[NUM_VTXBUF_HANDLES];
+  AcReal *out[NUM_VTXBUF_HANDLES];
 
-    AcReal* profiles[NUM_SCALARARRAY_HANDLES];
+  AcReal *profiles[NUM_SCALARARRAY_HANDLES];
 } VertexBufferArray;
 
 struct device_s {
-    int id;
-    AcMeshInfo local_config;
+  int id;
+  AcMeshInfo local_config;
 
-    // Concurrency
-    // cudaStream_t streams[NUM_STREAMS];
+  // Concurrency
+  // cudaStream_t streams[NUM_STREAMS];
 
-    // Memory
-    VertexBufferArray vba;
-    AcReal* reduce_scratchpad;
-    AcReal* reduce_result;
+  // Memory
+  VertexBufferArray vba;
+  AcReal *reduce_scratchpad;
+  AcReal *reduce_result;
 };
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+AcResult integrate_substep(Rect3 cr, // compute region
+                           VertexBufferArray vba);
 
 #if 0 // not sure if we need these
 /** */
@@ -85,7 +90,6 @@ AcReal acKernelReduceVecScal(const cudaStream_t stream, const ReductionType rtyp
                              const int3 end, const AcReal* vtxbuf0, const AcReal* vtxbuf1,
                              const AcReal* vtxbuf2, const AcReal* vtxbuf3, AcReal* scratchpad, AcReal* reduce_result);
 #endif
-
 
 #ifdef __cplusplus
 } // extern "C"
