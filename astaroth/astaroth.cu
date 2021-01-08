@@ -11,8 +11,8 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "argparse/argparse.hpp"
 #include "stencil/stencil.hpp"
 
-#include "kernels.h"
 #include "astaroth_utils.h"
+#include "kernels.h"
 
 #if 0
 /*! set compute region to dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
@@ -64,17 +64,10 @@ int main(int argc, char **argv) {
   MPI_Comm_size(MPI_COMM_WORLD, &size);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  argparse::Parser p("an astaroth-like performance simulator");
-
-  int x = 256;
-  int y = 256;
-  int z = 256;
+  argparse::Parser p("Astaroth simulator");
   bool trivialPlacement = false;
 
   p.add_flag(trivialPlacement, "--trivial")->help("use trivial placement");
-  p.add_positional(x)->required();
-  p.add_positional(y)->required();
-  p.add_positional(z)->required();
 
   // If there was an error during parsing, report it.
   if (!p.parse(argc, argv)) {
@@ -103,6 +96,29 @@ int main(int argc, char **argv) {
   if (0 == rank) {
     std::cout << "assuming " << numSubdoms << " subdomains\n";
   }
+
+  // load config
+  // like from config_loader.cc
+  AcMeshInfo info{};
+  acLoadConfig(AC_DEFAULT_CONFIG, &info);
+
+  std::cerr << "AC_nx=" << info.int_params[AC_nx] << "\n";
+  std::cerr << "AC_ny=" << info.int_params[AC_ny] << "\n";
+  std::cerr << "AC_nz=" << info.int_params[AC_nz] << "\n";
+  std::cerr << "AC_mx=" << info.int_params[AC_mx] << "\n";
+  std::cerr << "AC_my=" << info.int_params[AC_my] << "\n";
+  std::cerr << "AC_mz=" << info.int_params[AC_mz] << "\n";
+  std::cerr << "AC_nx_min=" << info.int_params[AC_nx_min] << "\n";
+  std::cerr << "AC_ny_min=" << info.int_params[AC_ny_min] << "\n";
+  std::cerr << "AC_nz_min=" << info.int_params[AC_nz_min] << "\n";
+  std::cerr << "AC_nx_max=" << info.int_params[AC_nx_max] << "\n";
+  std::cerr << "AC_ny_max=" << info.int_params[AC_ny_max] << "\n";
+  std::cerr << "AC_nz_max=" << info.int_params[AC_nz_max] << "\n";
+
+  const int x = info.int_params[AC_nx];
+  const int y = info.int_params[AC_ny];
+  const int z = info.int_params[AC_nz];
+  MPI_Barrier(MPI_COMM_WORLD);
 
   Method methods = Method::None;
   methods |= Method::CudaMpi;
@@ -154,14 +170,7 @@ int main(int argc, char **argv) {
       int device = dd.domains()[di].gpu();
       acDeviceLoadDefaultUniforms(device);
 
-     
-
-      // like from config_loader.cc
-      AcMeshInfo info{};
-      acLoadConfig(AC_DEFAULT_CONFIG, &info);
-      info.int_params[AC_nx];
-      info.int_params[AC_nx];
-      info.int_params[AC_nx];
+      std::cerr << info.int_params[AC_nx] << "\n";
       acDeviceLoadMeshInfo(device, info);
     }
 
@@ -198,10 +207,15 @@ int main(int argc, char **argv) {
     for (size_t iter = 0; iter < 5; ++iter) {
 
       // launch operations on interior
+      // stencil defines compute region in terms of grid points, while asteroth does it in terms of
+      // memory offset
+      const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
         nvtxRangePush("launch");
-        const Rect3 cr = interiors[di];
+        Rect3 cr = interiors[di];
+        cr.lo += acOff;
+        cr.hi += acOff;
         std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
         // std::cerr << src0.origin() << "=src0 origin\n";
         d.set_device();
@@ -220,7 +234,9 @@ int main(int argc, char **argv) {
         auto &d = dd.domains()[di];
         for (size_t si = 0; si < exteriors[di].size(); ++si) {
           nvtxRangePush("launch");
-          const Rect3 cr = exteriors[di][si];
+          Rect3 cr = exteriors[di][si];
+          cr.lo += acOff;
+          cr.hi += acOff;
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
