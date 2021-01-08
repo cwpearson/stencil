@@ -74,6 +74,7 @@ int main(int argc, char **argv) {
     if (0 == rank) {
       std::cerr << p.help();
     }
+    MPI_Finalize();
     exit(EXIT_FAILURE);
   }
 
@@ -81,6 +82,7 @@ int main(int argc, char **argv) {
     if (0 == rank) {
       std::cerr << p.help();
     }
+    MPI_Finalize();
     exit(EXIT_SUCCESS);
   }
 
@@ -102,19 +104,22 @@ int main(int argc, char **argv) {
   AcMeshInfo info{};
   acLoadConfig(AC_DEFAULT_CONFIG, &info);
 
-  std::cerr << "AC_nx=" << info.int_params[AC_nx] << "\n";
-  std::cerr << "AC_ny=" << info.int_params[AC_ny] << "\n";
-  std::cerr << "AC_nz=" << info.int_params[AC_nz] << "\n";
-  std::cerr << "AC_mx=" << info.int_params[AC_mx] << "\n";
-  std::cerr << "AC_my=" << info.int_params[AC_my] << "\n";
-  std::cerr << "AC_mz=" << info.int_params[AC_mz] << "\n";
-  std::cerr << "AC_nx_min=" << info.int_params[AC_nx_min] << "\n";
-  std::cerr << "AC_ny_min=" << info.int_params[AC_ny_min] << "\n";
-  std::cerr << "AC_nz_min=" << info.int_params[AC_nz_min] << "\n";
-  std::cerr << "AC_nx_max=" << info.int_params[AC_nx_max] << "\n";
-  std::cerr << "AC_ny_max=" << info.int_params[AC_ny_max] << "\n";
-  std::cerr << "AC_nz_max=" << info.int_params[AC_nz_max] << "\n";
+  info.int_params[AC_nx] *= size;
 
+  if (0 == rank) {
+    std::cerr << "AC_nx=" << info.int_params[AC_nx] << "\n";
+    std::cerr << "AC_ny=" << info.int_params[AC_ny] << "\n";
+    std::cerr << "AC_nz=" << info.int_params[AC_nz] << "\n";
+    std::cerr << "AC_mx=" << info.int_params[AC_mx] << "\n";
+    std::cerr << "AC_my=" << info.int_params[AC_my] << "\n";
+    std::cerr << "AC_mz=" << info.int_params[AC_mz] << "\n";
+    std::cerr << "AC_nx_min=" << info.int_params[AC_nx_min] << "\n";
+    std::cerr << "AC_ny_min=" << info.int_params[AC_ny_min] << "\n";
+    std::cerr << "AC_nz_min=" << info.int_params[AC_nz_min] << "\n";
+    std::cerr << "AC_nx_max=" << info.int_params[AC_nx_max] << "\n";
+    std::cerr << "AC_ny_max=" << info.int_params[AC_ny_max] << "\n";
+    std::cerr << "AC_nz_max=" << info.int_params[AC_nz_max] << "\n";
+  }
   const int x = info.int_params[AC_nx];
   const int y = info.int_params[AC_ny];
   const int z = info.int_params[AC_nz];
@@ -134,11 +139,7 @@ int main(int argc, char **argv) {
     strategy = PlacementStrategy::Trivial;
   }
 
-  if (0 == rank) {
-    std::cout << "domain: " << x << "," << y << "," << z << "\n";
-  }
-
-  {
+  { // scope domains before mpi_finalize
     size_t radius = 3;
 
     DistributedDomain dd(x, y, z);
@@ -206,16 +207,18 @@ int main(int argc, char **argv) {
 
     for (size_t iter = 0; iter < 5; ++iter) {
 
-      // launch operations on interior
-      // stencil defines compute region in terms of grid points, while asteroth does it in terms of
-      // memory offset
+      // stencil defines compute region in terms of grid points
+      // while asteroth does it in terms of memory offset.
+      // we will need to add in the offset from the stencil region
       const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
+
+      // launch operations on interior
       for (size_t di = 0; di < dd.domains().size(); ++di) {
         auto &d = dd.domains()[di];
         nvtxRangePush("launch");
         Rect3 cr = interiors[di];
-        cr.lo += acOff;
-        cr.hi += acOff;
+        cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
+        cr.hi += acOff - dd.get_origin(di);
         std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
         // std::cerr << src0.origin() << "=src0 origin\n";
         d.set_device();
@@ -235,8 +238,8 @@ int main(int argc, char **argv) {
         for (size_t si = 0; si < exteriors[di].size(); ++si) {
           nvtxRangePush("launch");
           Rect3 cr = exteriors[di][si];
-          cr.lo += acOff;
-          cr.hi += acOff;
+        cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
+        cr.hi += acOff - dd.get_origin(di);
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
