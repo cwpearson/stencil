@@ -188,7 +188,7 @@ int main(int argc, char **argv) {
   partitioning, so we just scale the whole compute region to keep the gridpoints / subdomain roughly constant.
   */
   if (1 == numNodes) {
-    std::vector<int64_t> pfs = prime_factors(numSubdoms);
+    std::vector<int> pfs = prime_factors(numSubdoms);
     for (auto pf : pfs) {
       if (x <= y && x <= z) {
         x *= pf;

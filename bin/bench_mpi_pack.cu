@@ -285,7 +285,7 @@ int main(int argc, char **argv) {
 
   Dim3 allocExt(1024, 1024, 1024);
   BenchResult result;
-  MPI_Datatype ty;
+  // MPI_Datatype ty;
 
   std::vector<Dim3> dims = {Dim3(1, 1024, 1024), Dim3(2, 1024, 512), Dim3(4, 1024, 256),  Dim3(8, 1024, 128),
                             Dim3(16, 1024, 64),  Dim3(32, 1024, 32), Dim3(64, 1024, 16),  Dim3(128, 1024, 8),
