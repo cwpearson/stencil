@@ -209,6 +209,7 @@ int main(int argc, char **argv) {
         std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
         // std::cerr << src0.origin() << "=src0 origin\n";
         d.set_device();
+        acDeviceLoadScalarUniform(d.gpu(),cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
         integrate_substep(0, cStreamInterior[di], cr, vbas[di]);
         integrate_substep(1, cStreamInterior[di], cr, vbas[di]);
         integrate_substep(2, cStreamInterior[di], cr, vbas[di]);

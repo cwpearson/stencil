@@ -53,6 +53,8 @@ AcResult integrate_substep(const int stepNumber, // integration.cuh::acKenrelInt
 AcResult acDeviceLoadDefaultUniforms(const int device);
 AcResult acDeviceLoadMeshInfo(const int device, const AcMeshInfo meshInfo);
 
+AcResult acDeviceLoadScalarUniform(const int device, cudaStream_t stream, const AcRealParam param, const AcReal value);
+
 
 #if 0
 /** */
