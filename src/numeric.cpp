@@ -3,8 +3,9 @@
 #include <algorithm>
 #include <cmath>
 
-std::vector<int64_t> prime_factors(int64_t n) {
-  std::vector<int64_t> result;
+template<typename T>
+std::vector<T> prime_factors(T n) {
+  std::vector<T> result;
   if (0 == n) {
     return result;
   }
@@ -20,6 +21,9 @@ std::vector<int64_t> prime_factors(int64_t n) {
   }
   if (n > 2)
     result.push_back(n);
-  std::sort(result.begin(), result.end(), [](int64_t a, int64_t b) { return b < a; });
+  std::sort(result.begin(), result.end(), [](T a, T b) { return b < a; });
   return result;
 }
+
+template std::vector<int> prime_factors(int n);
+template std::vector<int64_t> prime_factors(int64_t n);

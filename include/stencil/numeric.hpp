@@ -17,6 +17,6 @@ inline int64_t nextPowerOfTwo(int64_t x) {
 
 /* return the prime factors of n, sorted largest to smallest
 */
-std::vector<int64_t> prime_factors(int64_t n);
+template <typename T> std::vector<T> prime_factors(T n);
 
 inline int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
