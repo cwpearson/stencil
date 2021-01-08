@@ -52,7 +52,6 @@ target_compile_options(
     -Xcompiler=-Wswitch-enum;
     -Xcompiler=-Wvla;
     -Xptxas=-v;
-    -Xcompiler=-mtune=native;
     --use_fast_math;
     -lineinfo;
     -g;

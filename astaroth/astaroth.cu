@@ -160,10 +160,15 @@ int main(int argc, char **argv) {
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // create a stream for the integration kernels to run in
-    std::vector<RcStream> computeStreams(dd.domains().size());
+    // one stream for the interior, plus one stream for each exterior
+    std::vector<RcStream> cStreamInterior(dd.domains().size());
+    std::vector<std::vector<RcStream>> cStreamExterior(dd.domains().size());
     for (size_t di = 0; di < dd.domains().size(); ++di) {
-      computeStreams[di] = RcStream(dd.domains()[di].gpu());
+      int device = dd.domains()[di].gpu();
+      cStreamInterior[di] = RcStream(device);
+      for (int i = 0; i < 26; ++i) { // 26 possible nbrs
+        cStreamExterior[di].push_back(RcStream(device));
+      }
     }
 
     // create mesh info for each device
@@ -194,7 +199,7 @@ int main(int argc, char **argv) {
       d.set_device();
       dim3 dimBlock = Dim3::make_block_dim(d.raw_size(), 512);
       dim3 dimGrid = ((d.raw_size()) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      init_kernel<<<dimGrid, dimBlock, 0, computeStreams[di]>>>(d.get_curr_accessor(dh0), d.get_compute_region(), 10);
+      init_kernel<<<dimGrid, dimBlock, 0, cStreamInterior[di]>>>(d.get_curr_accessor(dh0), d.get_compute_region(), 10);
       CUDA_RUNTIME(cudaDeviceSynchronize());
     }
 
@@ -222,9 +227,9 @@ int main(int argc, char **argv) {
         std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
         // std::cerr << src0.origin() << "=src0 origin\n";
         d.set_device();
-        integrate_substep(0, computeStreams[di], cr, vbas[di]);
-        integrate_substep(1, computeStreams[di], cr, vbas[di]);
-        integrate_substep(2, computeStreams[di], cr, vbas[di]);
+        integrate_substep(0, cStreamInterior[di], cr, vbas[di]);
+        integrate_substep(1, cStreamInterior[di], cr, vbas[di]);
+        integrate_substep(2, cStreamInterior[di], cr, vbas[di]);
         nvtxRangePop(); // launch
       }
 
@@ -238,22 +243,27 @@ int main(int argc, char **argv) {
         for (size_t si = 0; si < exteriors[di].size(); ++si) {
           nvtxRangePush("launch");
           Rect3 cr = exteriors[di][si];
-        cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
-        cr.hi += acOff - dd.get_origin(di);
+          cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
+          cr.hi += acOff - dd.get_origin(di);
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          integrate_substep(0, computeStreams[di], cr, vbas[di]);
-          integrate_substep(1, computeStreams[di], cr, vbas[di]);
-          integrate_substep(2, computeStreams[di], cr, vbas[di]);
+          integrate_substep(0, cStreamExterior[di][si], cr, vbas[di]);
+          integrate_substep(1, cStreamExterior[di][si], cr, vbas[di]);
+          integrate_substep(2, cStreamExterior[di][si], cr, vbas[di]);
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());
         }
       }
 
       // wait for stencil to complete
-      for (auto &s : computeStreams) {
+      for (auto &s : cStreamInterior) {
         CUDA_RUNTIME(cudaStreamSynchronize(s));
+      }
+      for (auto &v : cStreamExterior) {
+        for (auto &s : v) {
+          CUDA_RUNTIME(cudaStreamSynchronize(s));
+        }
       }
 
       // swap

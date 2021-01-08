@@ -81,7 +81,7 @@ AcResult integrate_substep(const int stepNumber, // integration.cuh::acKenrelInt
     solve<1><<<dimGrid, dimBlock, 0, stream>>>(start, end, vba);
   else
     solve<2><<<dimGrid, dimBlock, 0, stream>>>(start, end, vba);
-  CUDA_RUNTIME(cudaDeviceSynchronize());
+  CUDA_RUNTIME(cudaGetLastError());
 
   return AC_SUCCESS;
 }
