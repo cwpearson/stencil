@@ -14,47 +14,22 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "astaroth_utils.h"
 #include "kernels.h"
 
-#if 0
-/*! set compute region to dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
- */
-template <typename T>
-__global__ void init_kernel(Accessor<T> dst,    //<! [out] pointer to beginning of allocation
-                            const Rect3 cr,     //<! [in] compute region
-                            const double period //<! [in] sine wave period
-) {
-  for (int64_t z = cr.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < cr.hi.z; z += gridDim.z * blockDim.z) {
-    for (int64_t y = cr.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < cr.hi.y; y += gridDim.y * blockDim.y) {
-      for (int64_t x = cr.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < cr.hi.x; x += gridDim.x * blockDim.x) {
-        dst[Dim3(x, y, z)] = sin(2 * 3.14159 / period * x + 2 * 3.14159 / period * y + 2 * 3.14159 / period * z);
-      }
+
+int3 decompose(int p) {
+  
+  int3 ret{1,1,1};
+
+  for (int pf : prime_factors(p)) {
+    if (ret.x <= ret.y && ret.x <= ret.z) {
+      ret.x *= pf;
+    } else if (ret.y <= ret.z) {
+      ret.y *= pf;
+    } else {
+      ret.z *= pf;
     }
   }
+  return ret;
 }
-#endif
-
-#if 0
-/* Apply the stencil to the coordinates in `reg`
- */
-__global__ void stencil_kernel(Accessor<AcReal> dst, const Accessor<AcReal> src, const Rect3 reg) {
-
-  for (int64_t z = reg.lo.z + blockIdx.z * blockDim.z + threadIdx.z; z < reg.hi.z; z += gridDim.z * blockDim.z) {
-    for (int64_t y = reg.lo.y + blockIdx.y * blockDim.y + threadIdx.y; y < reg.hi.y; y += gridDim.y * blockDim.y) {
-      for (int64_t x = reg.lo.x + blockIdx.x * blockDim.x + threadIdx.x; x < reg.hi.x; x += gridDim.x * blockDim.x) {
-        Dim3 o(x, y, z);
-        float val = 0;
-        val += src[o + Dim3(-1, 0, 0)];
-        val += src[o + Dim3(0, -1, 0)];
-        val += src[o + Dim3(0, 0, -1)];
-        val += src[o + Dim3(1, 0, 0)];
-        val += src[o + Dim3(0, 1, 0)];
-        val += src[o + Dim3(0, 0, 1)];
-        val /= 6;
-        dst[o] = val;
-      }
-    }
-  }
-}
-#endif
 
 int main(int argc, char **argv) {
 
@@ -104,7 +79,14 @@ int main(int argc, char **argv) {
   AcMeshInfo info{};
   acLoadConfig(AC_DEFAULT_CONFIG, &info);
 
-  info.int_params[AC_nx] *= size;
+  // figure out the whole domain size
+  {
+    int3 i3 = decompose(size);
+    info.int_params[AC_nx] *= i3.x;
+    info.int_params[AC_ny] *= i3.y;
+    info.int_params[AC_nz] *= i3.z;
+  }
+  
 
   if (0 == rank) {
     std::cerr << "AC_nx=" << info.int_params[AC_nx] << "\n";
