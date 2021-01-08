@@ -12,6 +12,7 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "stencil/stencil.hpp"
 
 #include "kernels.h"
+#include "astaroth_utils.h"
 
 #if 0
 /*! set compute region to dst[x,y,z] = sin(x+y+z + origin.x + origin.y + origin.z)
@@ -148,6 +149,22 @@ int main(int argc, char **argv) {
       computeStreams[di] = RcStream(dd.domains()[di].gpu());
     }
 
+    // create mesh info for each device
+    for (size_t di = 0; di < dd.domains().size(); ++di) {
+      int device = dd.domains()[di].gpu();
+      acDeviceLoadDefaultUniforms(device);
+
+     
+
+      // like from config_loader.cc
+      AcMeshInfo info{};
+      acLoadConfig(AC_DEFAULT_CONFIG, &info);
+      info.int_params[AC_nx];
+      info.int_params[AC_nx];
+      info.int_params[AC_nx];
+      acDeviceLoadMeshInfo(device, info);
+    }
+
     // create the VBAs for each domain
     std::vector<VertexBufferArray> vbas(dd.domains().size());
     for (size_t di = 0; di < dd.domains().size(); ++di) {
@@ -188,7 +205,9 @@ int main(int argc, char **argv) {
         std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
         // std::cerr << src0.origin() << "=src0 origin\n";
         d.set_device();
-        integrate_substep(cr, vbas[di]);
+        integrate_substep(0, computeStreams[di], cr, vbas[di]);
+        integrate_substep(1, computeStreams[di], cr, vbas[di]);
+        integrate_substep(2, computeStreams[di], cr, vbas[di]);
         nvtxRangePop(); // launch
       }
 
@@ -205,7 +224,9 @@ int main(int argc, char **argv) {
           std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          integrate_substep(cr, vbas[di]);
+          integrate_substep(0, computeStreams[di], cr, vbas[di]);
+          integrate_substep(1, computeStreams[di], cr, vbas[di]);
+          integrate_substep(2, computeStreams[di], cr, vbas[di]);
           nvtxRangePop(); // launch
           // CUDA_RUNTIME(cudaDeviceSynchronize());
         }

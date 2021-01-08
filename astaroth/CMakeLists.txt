@@ -26,6 +26,7 @@ target_compile_options(
     -Wvla;
     -Wformat=2;
     -mtune=native;
+    -g;
   >
 )
 
@@ -53,6 +54,9 @@ target_compile_options(
     -Xptxas=-v;
     -Xcompiler=-mtune=native;
     --use_fast_math;
+    -lineinfo;
+    -g;
+    -fno-omit-frame-pointer;
   >
 )
 
@@ -78,6 +82,7 @@ set_property(TARGET ${tgt} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 endmacro()
 
 
-add_executable(astaroth astaroth.cu kernels.cu)
+add_executable(astaroth astaroth.cu kernels.cu astaroth_utils.cu)
+target_compile_definitions(astaroth PRIVATE -DAC_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/astaroth.conf")
 target_link_libraries(astaroth stencil::stencil)
 add_args(astaroth)

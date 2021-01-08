@@ -59,7 +59,9 @@ static __device__ inline acComplex operator*(const acComplex &a, const acComplex
 #include "packing.cuh"
 #include "reductions.cuh"
 
-AcResult integrate_substep(Rect3 cr, // compute region
+AcResult integrate_substep(const int stepNumber, // integration.cuh::acKenrelIntegrateSubset::step_number
+                           cudaStream_t stream,
+                           Rect3 cr, // compute region
                            VertexBufferArray vba) {
 
   dim3 dimBlock(32, 1, 4);
@@ -73,140 +75,119 @@ AcResult integrate_substep(Rect3 cr, // compute region
   end.y = cr.hi.y;
   end.z = cr.hi.z;
 
-  solve<0><<<dimGrid, dimBlock>>>(start, end, vba);
+  if (stepNumber == 0)
+    solve<0><<<dimGrid, dimBlock, 0, stream>>>(start, end, vba);
+  else if (stepNumber == 1)
+    solve<1><<<dimGrid, dimBlock, 0, stream>>>(start, end, vba);
+  else
+    solve<2><<<dimGrid, dimBlock, 0, stream>>>(start, end, vba);
+  CUDA_RUNTIME(cudaDeviceSynchronize());
 
   return AC_SUCCESS;
 }
 
-#if 0
-AcResult
-acDeviceLoadScalarUniform(const Device device, const Stream stream, const AcRealParam param,
-                          const AcReal value)
-{
-    cudaSetDevice(device->id);
-    if (param < 0 || param >= NUM_REAL_PARAMS) {
-        fprintf(stderr, "WARNING: invalid AcRealParam %d.\n", param);
-        return AC_FAILURE;
-    }
+AcResult acDeviceLoadScalarUniform(const int device, cudaStream_t stream, const AcRealParam param, const AcReal value) {
+  cudaSetDevice(device);
+  if (param < 0 || param >= NUM_REAL_PARAMS) {
+    fprintf(stderr, "WARNING: invalid AcRealParam %d.\n", param);
+    return AC_FAILURE;
+  }
 
-    if (!is_valid(value)) {
-        fprintf(stderr, "WARNING: Passed an invalid value %g to device constant %s. Skipping.\n",
-                (double)value, realparam_names[param]);
-        return AC_FAILURE;
-    }
+  if (!is_valid(value)) {
+    fprintf(stderr, "WARNING: Passed an invalid value %g to device constant %s. Skipping.\n", (double)value,
+            realparam_names[param]);
+    return AC_FAILURE;
+  }
 
-    const size_t offset = (size_t)&d_mesh_info.real_params[param] - (size_t)&d_mesh_info;
-    ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset,
-                                        cudaMemcpyHostToDevice, device->streams[stream]));
-    return AC_SUCCESS;
-}
-#endif
-
-#if 0
-AcResult
-acDeviceLoadVectorUniform(const Device device, const Stream stream, const AcReal3Param param,
-                          const AcReal3 value)
-{
-    cudaSetDevice(device->id);
-    if (param < 0 || param >= NUM_REAL3_PARAMS) {
-        fprintf(stderr, "WARNING: invalid AcReal3Param %d\n", param);
-        return AC_FAILURE;
-    }
-
-    if (!is_valid(value)) {
-        fprintf(stderr,
-                "WARNING: Passed an invalid value (%g, %g, %g) to device constant %s. Skipping.\n",
-                (double)value.x, (double)value.y, (double)value.z, real3param_names[param]);
-        return AC_FAILURE;
-    }
-
-    const size_t offset = (size_t)&d_mesh_info.real3_params[param] - (size_t)&d_mesh_info;
-    ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset,
-                                        cudaMemcpyHostToDevice, device->streams[stream]));
-    return AC_SUCCESS;
-}
-#endif
-
-#if 0
-AcResult
-acDeviceLoadIntUniform(const Device device, const Stream stream, const AcIntParam param,
-                       const int value)
-{
-    cudaSetDevice(device->id);
-    if (param < 0 || param >= NUM_INT_PARAMS) {
-        fprintf(stderr, "WARNING: invalid AcIntParam %d\n", param);
-        return AC_FAILURE;
-    }
-
-    if (!is_valid(value)) {
-        fprintf(stderr, "WARNING: Passed an invalid value %d to device constant %s. Skipping.\n",
-                value, intparam_names[param]);
-        return AC_FAILURE;
-    }
-
-    const size_t offset = (size_t)&d_mesh_info.int_params[param] - (size_t)&d_mesh_info;
-    ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset,
-                                        cudaMemcpyHostToDevice, device->streams[stream]));
-    return AC_SUCCESS;
+  const size_t offset = (size_t)&d_mesh_info.real_params[param] - (size_t)&d_mesh_info;
+  ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset, cudaMemcpyHostToDevice, stream));
+  return AC_SUCCESS;
 }
 
-AcResult
-acDeviceLoadInt3Uniform(const Device device, const Stream stream, const AcInt3Param param,
-                        const int3 value)
-{
-    cudaSetDevice(device->id);
-    if (param < 0 || param >= NUM_INT3_PARAMS) {
-        fprintf(stderr, "WARNING: invalid AcInt3Param %d\n", param);
-        return AC_FAILURE;
-    }
+AcResult acDeviceLoadVectorUniform(const int device, cudaStream_t stream, const AcReal3Param param,
+                                   const AcReal3 value) {
+  cudaSetDevice(device);
+  if (param < 0 || param >= NUM_REAL3_PARAMS) {
+    fprintf(stderr, "WARNING: invalid AcReal3Param %d\n", param);
+    return AC_FAILURE;
+  }
 
-    if (!is_valid(value.x) || !is_valid(value.y) || !is_valid(value.z)) {
-        fprintf(stderr,
-                "WARNING: Passed an invalid value (%d, %d, %def) to device constant %s. "
-                "Skipping.\n",
-                value.x, value.y, value.z, int3param_names[param]);
-        return AC_FAILURE;
-    }
+  if (!is_valid(value)) {
+    fprintf(stderr, "WARNING: Passed an invalid value (%g, %g, %g) to device constant %s. Skipping.\n", (double)value.x,
+            (double)value.y, (double)value.z, real3param_names[param]);
+    return AC_FAILURE;
+  }
 
-    const size_t offset = (size_t)&d_mesh_info.int3_params[param] - (size_t)&d_mesh_info;
-    ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset,
-                                        cudaMemcpyHostToDevice, device->streams[stream]));
-    return AC_SUCCESS;
+  const size_t offset = (size_t)&d_mesh_info.real3_params[param] - (size_t)&d_mesh_info;
+  ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset, cudaMemcpyHostToDevice, stream));
+  return AC_SUCCESS;
 }
 
-AcResult
-acDeviceLoadMeshInfo(const Device device, const AcMeshInfo device_config)
-{
-    cudaSetDevice(device->id);
+AcResult acDeviceLoadIntUniform(const int device, cudaStream_t stream, const AcIntParam param, const int value) {
+  cudaSetDevice(device);
+  if (param < 0 || param >= NUM_INT_PARAMS) {
+    fprintf(stderr, "WARNING: invalid AcIntParam %d\n", param);
+    return AC_FAILURE;
+  }
 
-    ERRCHK_ALWAYS(device_config.int_params[AC_nx] == device->local_config.int_params[AC_nx]);
-    ERRCHK_ALWAYS(device_config.int_params[AC_ny] == device->local_config.int_params[AC_ny]);
-    ERRCHK_ALWAYS(device_config.int_params[AC_nz] == device->local_config.int_params[AC_nz]);
-    ERRCHK_ALWAYS(device_config.int_params[AC_multigpu_offset] ==
-                  device->local_config.int_params[AC_multigpu_offset]);
+  if (!is_valid(value)) {
+    fprintf(stderr, "WARNING: Passed an invalid value %d to device constant %s. Skipping.\n", value,
+            intparam_names[param]);
+    return AC_FAILURE;
+  }
 
-    for (int i = 0; i < NUM_INT_PARAMS; ++i)
-        acDeviceLoadIntUniform(device, STREAM_DEFAULT, (AcIntParam)i, device_config.int_params[i]);
+  const size_t offset = (size_t)&d_mesh_info.int_params[param] - (size_t)&d_mesh_info;
+  ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset, cudaMemcpyHostToDevice, stream));
+  return AC_SUCCESS;
+}
 
-    for (int i = 0; i < NUM_INT3_PARAMS; ++i)
-        acDeviceLoadInt3Uniform(device, STREAM_DEFAULT, (AcInt3Param)i,
-                                device_config.int3_params[i]);
+AcResult acDeviceLoadInt3Uniform(const int device, cudaStream_t stream, const AcInt3Param param, const int3 value) {
+  cudaSetDevice(device);
+  if (param < 0 || param >= NUM_INT3_PARAMS) {
+    fprintf(stderr, "WARNING: invalid AcInt3Param %d\n", param);
+    return AC_FAILURE;
+  }
 
-    for (int i = 0; i < NUM_REAL_PARAMS; ++i)
-        acDeviceLoadScalarUniform(device, STREAM_DEFAULT, (AcRealParam)i,
-                                  device_config.real_params[i]);
+  if (!is_valid(value.x) || !is_valid(value.y) || !is_valid(value.z)) {
+    fprintf(stderr,
+            "WARNING: Passed an invalid value (%d, %d, %def) to device constant %s. "
+            "Skipping.\n",
+            value.x, value.y, value.z, int3param_names[param]);
+    return AC_FAILURE;
+  }
 
-    for (int i = 0; i < NUM_REAL3_PARAMS; ++i)
-        acDeviceLoadVectorUniform(device, STREAM_DEFAULT, (AcReal3Param)i,
-                                  device_config.real3_params[i]);
+  const size_t offset = (size_t)&d_mesh_info.int3_params[param] - (size_t)&d_mesh_info;
+  ERRCHK_CUDA(cudaMemcpyToSymbolAsync(d_mesh_info, &value, sizeof(value), offset, cudaMemcpyHostToDevice, stream));
+  return AC_SUCCESS;
+}
 
-    return AC_SUCCESS;
+AcResult acDeviceLoadMeshInfo(const int device, const AcMeshInfo meshInfo) {
+  cudaSetDevice(device);
+
+//   ERRCHK_ALWAYS(meshInfo.int_params[AC_nx] == device->local_config.int_params[AC_nx]);
+//   ERRCHK_ALWAYS(meshInfo.int_params[AC_ny] == device->local_config.int_params[AC_ny]);
+//   ERRCHK_ALWAYS(meshInfo.int_params[AC_nz] == device->local_config.int_params[AC_nz]);
+//   ERRCHK_ALWAYS(meshInfo.int_params[AC_multigpu_offset] == device->local_config.int_params[AC_multigpu_offset]);
+
+  for (int i = 0; i < NUM_INT_PARAMS; ++i)
+    acDeviceLoadIntUniform(device, STREAM_DEFAULT, (AcIntParam)i, meshInfo.int_params[i]);
+
+  for (int i = 0; i < NUM_INT3_PARAMS; ++i)
+    acDeviceLoadInt3Uniform(device, STREAM_DEFAULT, (AcInt3Param)i, meshInfo.int3_params[i]);
+
+  for (int i = 0; i < NUM_REAL_PARAMS; ++i)
+    acDeviceLoadScalarUniform(device, STREAM_DEFAULT, (AcRealParam)i, meshInfo.real_params[i]);
+
+  for (int i = 0; i < NUM_REAL3_PARAMS; ++i)
+    acDeviceLoadVectorUniform(device, STREAM_DEFAULT, (AcReal3Param)i, meshInfo.real3_params[i]);
+
+  return AC_SUCCESS;
 }
 
 AcResult
-acDeviceLoadDefaultUniforms(const Device device)
+acDeviceLoadDefaultUniforms(const int device)
 {
-    cudaSetDevice(device->id);
+    cudaSetDevice(device);
 
     // clang-format off
     // Scalar
@@ -233,4 +214,3 @@ acDeviceLoadDefaultUniforms(const Device device)
     ERRCHK_CUDA_KERNEL_ALWAYS();
     return AC_SUCCESS;
 }
-#endif

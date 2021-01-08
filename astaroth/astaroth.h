@@ -1,5 +1,7 @@
 #pragma once
 
+ #define AC_DOUBLE_PRECISION 1
+
 // Library flags
 #define STENCIL_ORDER (6)
 #define NGHOST (STENCIL_ORDER / 2)
@@ -67,6 +69,17 @@ typedef enum {
 } VertexBufferHandle;
 #undef AC_GEN_ID
 
+#define _UNUSED __attribute__((unused)) // Does not give a warning if unused
+#define AC_GEN_STR(X) #X,
+static const char* rtype_names[] _UNUSED      = {AC_FOR_RTYPES(AC_GEN_STR) "-end-"};
+static const char* intparam_names[] _UNUSED   = {AC_FOR_USER_INT_PARAM_TYPES(AC_GEN_STR) "-end-"};
+static const char* int3param_names[] _UNUSED  = {AC_FOR_USER_INT3_PARAM_TYPES(AC_GEN_STR) "-end-"};
+static const char* realparam_names[] _UNUSED  = {AC_FOR_USER_REAL_PARAM_TYPES(AC_GEN_STR) "-end-"};
+static const char* real3param_names[] _UNUSED = {AC_FOR_USER_REAL3_PARAM_TYPES(AC_GEN_STR) "-end-"};
+static const char* scalararray_names[] _UNUSED = {AC_FOR_SCALARARRAY_HANDLES(AC_GEN_STR) "-end-"};
+static const char* vtxbuf_names[] _UNUSED      = {AC_FOR_VTXBUF_HANDLES(AC_GEN_STR) "-end-"};
+#undef AC_GEN_STR
+#undef _UNUSED
 
 typedef struct {
     int int_params[NUM_INT_PARAMS];
@@ -76,7 +89,11 @@ typedef struct {
 } AcMeshInfo;
 
 
-
+// Device
+typedef struct device_s* Device; // Opaque pointer to device_s. Analogous to dispatchable handles
+                                 // in Vulkan, f.ex. VkDevice
 
 
 #define AC_MPI_ENABLED 1
+
+AcResult acDeviceCreate(const int id, const AcMeshInfo device_config, Device* device);

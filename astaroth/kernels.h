@@ -31,8 +31,9 @@ struct device_s {
   int id;
   AcMeshInfo local_config;
 
-  // Concurrency
-  // cudaStream_t streams[NUM_STREAMS];
+  //   Concurrency
+  // TODO set this
+  cudaStream_t streams[NUM_STREAMS];
 
   // Memory
   VertexBufferArray vba;
@@ -44,10 +45,16 @@ struct device_s {
 extern "C" {
 #endif
 
-AcResult integrate_substep(Rect3 cr, // compute region
+AcResult integrate_substep(const int stepNumber, // integration.cuh::acKenrelIntegrateSubset::step_number
+                           cudaStream_t stream,
+                           Rect3 cr, // compute region
                            VertexBufferArray vba);
 
-#if 0 // not sure if we need these
+AcResult acDeviceLoadDefaultUniforms(const int device);
+AcResult acDeviceLoadMeshInfo(const int device, const AcMeshInfo meshInfo);
+
+
+#if 0
 /** */
 AcResult acKernelPeriodicBoundconds(const cudaStream_t stream, const int3 start, const int3 end,
                                     AcReal* vtxbuf);
