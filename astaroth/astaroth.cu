@@ -14,10 +14,9 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "astaroth_utils.h"
 #include "kernels.h"
 
-
 int3 decompose(int p) {
-  
-  int3 ret{1,1,1};
+
+  int3 ret{1, 1, 1};
 
   for (int pf : prime_factors(p)) {
     if (ret.x <= ret.y && ret.x <= ret.z) {
@@ -86,7 +85,6 @@ int main(int argc, char **argv) {
     info.int_params[AC_ny] *= i3.y;
     info.int_params[AC_nz] *= i3.z;
   }
-  
 
   if (0 == rank) {
     std::cerr << "AC_nx=" << info.int_params[AC_nx] << "\n";
@@ -199,58 +197,56 @@ int main(int argc, char **argv) {
       // we will need to add in the offset from the stencil region
       const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
 
-      // launch operations on interior
-      for (size_t di = 0; di < dd.domains().size(); ++di) {
-        auto &d = dd.domains()[di];
-        nvtxRangePush("launch");
-        Rect3 cr = interiors[di];
-        cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
-        cr.hi += acOff - dd.get_origin(di);
-        std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
-        // std::cerr << src0.origin() << "=src0 origin\n";
-        d.set_device();
-        acDeviceLoadScalarUniform(d.gpu(),cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
-        integrate_substep(0, cStreamInterior[di], cr, vbas[di]);
-        integrate_substep(1, cStreamInterior[di], cr, vbas[di]);
-        integrate_substep(2, cStreamInterior[di], cr, vbas[di]);
-        nvtxRangePop(); // launch
-      }
-
-      // exchange halo
-      std::cerr << rank << ": exchange\n";
-      dd.exchange();
-
-      // launch on exteriors
-      for (size_t di = 0; di < dd.domains().size(); ++di) {
-        auto &d = dd.domains()[di];
-        for (size_t si = 0; si < exteriors[di].size(); ++si) {
+      for (int substep = 0; substep < 3; ++substep) {
+        // launch operations on interior
+        for (size_t di = 0; di < dd.domains().size(); ++di) {
+          auto &d = dd.domains()[di];
           nvtxRangePush("launch");
-          Rect3 cr = exteriors[di][si];
+          Rect3 cr = interiors[di];
           cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
           cr.hi += acOff - dd.get_origin(di);
-          std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
+          std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
-          integrate_substep(0, cStreamExterior[di][si], cr, vbas[di]);
-          integrate_substep(1, cStreamExterior[di][si], cr, vbas[di]);
-          integrate_substep(2, cStreamExterior[di][si], cr, vbas[di]);
+          acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
+          integrate_substep(substep, cStreamInterior[di], cr, vbas[di]);
           nvtxRangePop(); // launch
-          // CUDA_RUNTIME(cudaDeviceSynchronize());
         }
-      }
 
-      // wait for stencil to complete
-      for (auto &s : cStreamInterior) {
-        CUDA_RUNTIME(cudaStreamSynchronize(s));
-      }
-      for (auto &v : cStreamExterior) {
-        for (auto &s : v) {
+        // exchange halo
+        std::cerr << rank << ": exchange\n";
+        dd.exchange();
+
+        // launch on exteriors
+        for (size_t di = 0; di < dd.domains().size(); ++di) {
+          auto &d = dd.domains()[di];
+          for (size_t si = 0; si < exteriors[di].size(); ++si) {
+            nvtxRangePush("launch");
+            Rect3 cr = exteriors[di][si];
+            cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
+            cr.hi += acOff - dd.get_origin(di);
+            std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
+            // std::cerr << src0.origin() << "=src0 origin\n";
+            d.set_device();
+            integrate_substep(substep, cStreamExterior[di][si], cr, vbas[di]);
+            nvtxRangePop(); // launch
+            // CUDA_RUNTIME(cudaDeviceSynchronize());
+          }
+        }
+
+        // wait for stencil to complete
+        for (auto &s : cStreamInterior) {
           CUDA_RUNTIME(cudaStreamSynchronize(s));
         }
-      }
+        for (auto &v : cStreamExterior) {
+          for (auto &s : v) {
+            CUDA_RUNTIME(cudaStreamSynchronize(s));
+          }
+        }
 
-      // swap
-      dd.swap();
+        // swap inputs and outputs
+        dd.swap();
+      }
     }
 
     if (0)
