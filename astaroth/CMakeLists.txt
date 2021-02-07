@@ -55,7 +55,7 @@ target_compile_options(
     --use_fast_math;
     -lineinfo;
     -g;
-    -fno-omit-frame-pointer;
+    #-fno-omit-frame-pointer;
   >
 )
 

@@ -145,12 +145,12 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
     stencil
     PRIVATE
     $<$<COMPILE_LANGUAGE:CUDA>:
-     -G
-     -Xcompiler=-fno-omit-frame-pointer
+     -G;
+     -Xcompiler=-fno-omit-frame-pointer;
     >
     $<$<COMPILE_LANGUAGE:CXX>:
-     -fno-omit-frame-pointer
-     -g
+     -fno-omit-frame-pointer;
+     -g;
     >
   )
 elseif (CMAKE_BUILD_TYPE MATCHES Release)
