@@ -26,7 +26,7 @@ echo "" > $OUT
 
 for flags in "--staged" "--staged --colo" "--staged --colo --peer" "--staged --colo --peer --kernel"; do
   echo "nodes,ranks/node,ranks,x,y,z,iter (s),exch (s)" >> $OUT
-  for nodes in 1; do
+  for nodes in 1 2 4 8 16 32 64; do
     for rpn in 1 2 6; do
       let n=$nodes*$rpn
       echo -n "${nodes},${rpn}," | tee -a $OUT
