@@ -81,7 +81,7 @@ set_property(TARGET ${tgt} PROPERTY CUDA_SEPARABLE_COMPILATION ON)
 endmacro()
 
 
-add_executable(astaroth astaroth.cu kernels.cu astaroth_utils.cu)
+add_executable(astaroth astaroth.cu kernels.cu astaroth_utils.cu statistics.cpp)
 target_compile_definitions(astaroth PRIVATE -DAC_DEFAULT_CONFIG="${CMAKE_CURRENT_SOURCE_DIR}/astaroth.conf")
 target_link_libraries(astaroth stencil::stencil)
 add_args(astaroth)

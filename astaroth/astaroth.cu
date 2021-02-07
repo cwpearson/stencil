@@ -2,7 +2,6 @@
 Try to do some rough approximation of astaroth using the stencil library.
 */
 
-#include <chrono>
 #include <cmath>
 #include <thread>
 
@@ -13,6 +12,7 @@ Try to do some rough approximation of astaroth using the stencil library.
 
 #include "astaroth_utils.h"
 #include "kernels.h"
+#include "statistics.hpp"
 
 int3 decompose(int p) {
 
@@ -119,6 +119,8 @@ int main(int argc, char **argv) {
     strategy = PlacementStrategy::Trivial;
   }
 
+  Statistics stats;
+
   { // scope domains before mpi_finalize
     size_t radius = 3;
 
@@ -190,12 +192,14 @@ int main(int argc, char **argv) {
     const std::vector<Rect3> interiors = dd.get_interior();
     const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
 
+    // stencil defines compute region in terms of grid points
+    // while asteroth does it in terms of memory offset.
+    // we will need to add in the offset from the stencil region
+    const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
+
     for (size_t iter = 0; iter < 5; ++iter) {
 
-      // stencil defines compute region in terms of grid points
-      // while asteroth does it in terms of memory offset.
-      // we will need to add in the offset from the stencil region
-      const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
+      double start = MPI_Wtime();
 
       for (int substep = 0; substep < 3; ++substep) {
         // launch operations on interior
@@ -205,7 +209,7 @@ int main(int argc, char **argv) {
           Rect3 cr = interiors[di];
           cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
           cr.hi += acOff - dd.get_origin(di);
-          std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
+          // std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
           // std::cerr << src0.origin() << "=src0 origin\n";
           d.set_device();
           acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
@@ -225,7 +229,7 @@ int main(int argc, char **argv) {
             Rect3 cr = exteriors[di][si];
             cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
             cr.hi += acOff - dd.get_origin(di);
-            std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
+            // std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
             // std::cerr << src0.origin() << "=src0 origin\n";
             d.set_device();
             integrate_substep(substep, cStreamExterior[di][si], cr, vbas[di]);
@@ -247,12 +251,21 @@ int main(int argc, char **argv) {
         // swap inputs and outputs
         dd.swap();
       }
+
+      double elapsed = MPI_Wtime() - start;
+
+      MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      stats.insert(elapsed);
     }
 
     if (0)
       dd.write_paraview("final");
 
   } // send domains out of scope before MPI_Finalize
+
+  if (0 == rank) {
+    std::cerr << stats.trimean() << "\n";
+  }
 
   MPI_Finalize();
 

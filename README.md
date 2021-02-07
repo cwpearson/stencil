@@ -260,6 +260,13 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
   * `Apply`
 * In the `Coloring` section of the `Properties` tab, choose the name of the data field.
 
+## Astaroth Simulator
+
+Experimental implementation of the sataroth code using this library for halo exchange.
+
+* `mpirun -n <N> astaroth/astaroth`
+
+The astaroth configuration is defined in `astaroth/astaroth.conf`
 
 ## Design Goals
   * v1 (iWAPT)
