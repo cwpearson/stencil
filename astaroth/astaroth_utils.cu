@@ -25,7 +25,7 @@ void parse_config(const char* path, AcMeshInfo* config)
     FILE* fp;
     fp = fopen(path, "r");
     // For knowing which .conf file will be used
-    printf("Config file path: %s\n", path);
+    fprintf(stderr,"Config file path: %s\n", path);
     ERRCHK_ALWAYS(fp != NULL);
 
     const size_t BUF_SIZE = 128;

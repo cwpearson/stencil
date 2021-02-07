@@ -70,7 +70,7 @@ int main(int argc, char **argv) {
   }
 
   if (0 == rank) {
-    std::cout << "assuming " << numSubdoms << " subdomains\n";
+    std::cerr << "assuming " << numSubdoms << " subdomains\n";
   }
 
   // load config
@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
     strategy = PlacementStrategy::Trivial;
   }
 
-  Statistics stats;
+  Statistics iterTime, exchTime;
 
   { // scope domains before mpi_finalize
     size_t radius = 3;
@@ -199,7 +199,8 @@ int main(int argc, char **argv) {
 
     for (size_t iter = 0; iter < 5; ++iter) {
 
-      double start = MPI_Wtime();
+      double iterStart = MPI_Wtime();
+      double exchElapsed = 0;
 
       for (int substep = 0; substep < 3; ++substep) {
         // launch operations on interior
@@ -219,7 +220,9 @@ int main(int argc, char **argv) {
 
         // exchange halo
         std::cerr << rank << ": exchange\n";
+        double exchStart = MPI_Wtime();
         dd.exchange();
+        exchElapsed += MPI_Wtime() - exchStart;
 
         // launch on exteriors
         for (size_t di = 0; di < dd.domains().size(); ++di) {
@@ -252,10 +255,12 @@ int main(int argc, char **argv) {
         dd.swap();
       }
 
-      double elapsed = MPI_Wtime() - start;
+      double iterElapsed = MPI_Wtime() - iterStart;
 
-      MPI_Allreduce(MPI_IN_PLACE, &elapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
-      stats.insert(elapsed);
+      MPI_Allreduce(MPI_IN_PLACE, &iterElapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      MPI_Allreduce(MPI_IN_PLACE, &exchElapsed, 1, MPI_DOUBLE, MPI_MAX, MPI_COMM_WORLD);
+      iterTime.insert(iterElapsed);
+      exchTime.insert(exchElapsed);
     }
 
     if (0)
@@ -264,7 +269,13 @@ int main(int argc, char **argv) {
   } // send domains out of scope before MPI_Finalize
 
   if (0 == rank) {
-    std::cerr << stats.trimean() << "\n";
+    std::cout << size;
+    std::cout << "," << info.int_params[AC_nx];
+    std::cout << "," << info.int_params[AC_ny];
+    std::cout << "," << info.int_params[AC_nz];
+    std::cout << "," << iterTime.trimean();
+    std::cout << "," << exchTime.trimean();
+    std::cout << "\n";
   }
 
   MPI_Finalize();
