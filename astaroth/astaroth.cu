@@ -213,7 +213,7 @@ int main(int argc, char **argv) {
     // we will need to add in the offset from the stencil region
     const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
 
-    for (size_t iter = 0; iter < 5; ++iter) {
+    for (size_t iter = 0; iter < 50; ++iter) {
 
       double iterStart = MPI_Wtime();
       double exchElapsed = 0;
