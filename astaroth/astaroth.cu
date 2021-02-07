@@ -40,8 +40,16 @@ int main(int argc, char **argv) {
 
   argparse::Parser p("Astaroth simulator");
   bool trivialPlacement = false;
+  bool useStaged = false;
+  bool useColo = false;
+  bool useMemcpyPeer = false;
+  bool useKernel = false;
 
   p.add_flag(trivialPlacement, "--trivial")->help("use trivial placement");
+  p.add_flag(useStaged, "--staged")->help("Enable RemoteSender/Recver");
+  p.add_flag(useColo, "--colo")->help("Enable ColocatedHaloSender/Recver");
+  p.add_flag(useMemcpyPeer, "--peer")->help("Enable PeerAccessSender");
+  p.add_flag(useKernel, "--kernel")->help("Enable PeerCopySender");
 
   // If there was an error during parsing, report it.
   if (!p.parse(argc, argv)) {
@@ -58,6 +66,23 @@ int main(int argc, char **argv) {
     }
     MPI_Finalize();
     exit(EXIT_SUCCESS);
+  }
+
+  Method methods = Method::None;
+  if (useStaged) {
+    methods |= Method::CudaMpi;
+  }
+  if (useColo) {
+    methods |= Method::ColoPackMemcpyUnpack;
+  }
+  if (useMemcpyPeer) {
+    methods |= Method::CudaMemcpyPeer;
+  }
+  if (useKernel) {
+    methods |= Method::CudaKernel;
+  }
+  if (Method::None == methods) {
+    methods = Method::Default;
   }
 
   int devCount;
@@ -104,15 +129,6 @@ int main(int argc, char **argv) {
   const int y = info.int_params[AC_ny];
   const int z = info.int_params[AC_nz];
   MPI_Barrier(MPI_COMM_WORLD);
-
-  Method methods = Method::None;
-  methods |= Method::CudaMpi;
-  methods |= Method::ColoPackMemcpyUnpack;
-  methods |= Method::CudaMemcpyPeer;
-  methods |= Method::CudaKernel;
-  if (Method::None == methods) {
-    methods = Method::Default;
-  }
 
   PlacementStrategy strategy = PlacementStrategy::NodeAware;
   if (trivialPlacement) {
@@ -219,7 +235,7 @@ int main(int argc, char **argv) {
         }
 
         // exchange halo
-        std::cerr << rank << ": exchange\n";
+        // std::cerr << rank << ": exchange\n";
         double exchStart = MPI_Wtime();
         dd.exchange();
         exchElapsed += MPI_Wtime() - exchStart;
