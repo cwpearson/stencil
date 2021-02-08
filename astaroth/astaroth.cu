@@ -89,9 +89,13 @@ int main(int argc, char **argv) {
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
   int numSubdoms;
+  int numNodes;
+  int ranksPerNode;
   {
     MpiTopology topo(MPI_COMM_WORLD);
     numSubdoms = size / topo.colocated_size() * devCount;
+    numNodes = size / topo.colocated_size();
+    ranksPerNode = topo.colocated_size();
   }
 
   if (0 == rank) {
@@ -105,7 +109,11 @@ int main(int argc, char **argv) {
 
   // figure out the whole domain size
   {
-    int3 i3 = decompose(size);
+    int3 i3 = decompose(ranksPerNode);
+    info.int_params[AC_nx] *= i3.x;
+    info.int_params[AC_ny] *= i3.y;
+    info.int_params[AC_nz] *= i3.z;
+    i3 = decompose(numNodes);
     info.int_params[AC_nx] *= i3.x;
     info.int_params[AC_ny] *= i3.y;
     info.int_params[AC_nz] *= i3.z;
