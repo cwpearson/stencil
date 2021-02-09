@@ -3,7 +3,7 @@
 #BSUB -J 64node_astaroth
 #BSUB -o 64node_astaroth.o%J
 #BSUB -e 64node_astaroth.e%J
-#BSUB -W 2:00
+#BSUB -W 0:45
 #BSUB -nnodes 64
 #BSUB -alloc_flags gpudefault
 
@@ -17,14 +17,14 @@ module load cuda/11.0.3
 module load nsight-systems/2020.3.1.71
 
 DIR=/gpfs/alpine/csc362/scratch/cpearson/stencil_results
-OUT=$DIR/astaroth.csv
+OUT=$DIR/64node_astaroth.csv
 
 set -x
 
 mkdir -p $DIR
 echo "" > $OUT
 
-for flags in "--staged" "--staged --colo" "--staged --colo --peer" "--staged --colo --peer --kernel" "--trivial --staged --colo --peer --kernel"; do
+for flags in "--staged" "--trivial --staged" "--staged --colo" "--staged --colo --peer" "--staged --colo --peer --kernel" "--trivial --staged --colo --peer --kernel"; do
   echo $flags >> $OUT
   echo "nodes,ranks/node,ranks,x,y,z,iter (s),exch (s)" >> $OUT
   for nodes in 1 2 4 8 16 32 64; do
