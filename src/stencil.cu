@@ -4,6 +4,7 @@
 #include "stencil/tx_colocated.cuh"
 
 #include <vector>
+#include <cstdlib>
 
 DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
     : size_(x, y, z), placement_(nullptr), flags_(Method::Default), strategy_(PlacementStrategy::NodeAware) {
@@ -25,6 +26,12 @@ DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
 
   MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
   MPI_Comm_size(MPI_COMM_WORLD, &worldSize_);
+
+  /* Try to set the planfile output prefix from environment
+   */
+  if (const char *s = std::getenv("STENCIL_OUTPUT_PREFIX")) {
+    outputPrefix_ = std::string(s);
+  }
 
 #ifdef STENCIL_SETUP_STATS
   MPI_Barrier(MPI_COMM_WORLD);
