@@ -44,12 +44,14 @@ int main(int argc, char **argv) {
   bool useColo = false;
   bool useMemcpyPeer = false;
   bool useKernel = false;
+  bool noCompute = false;
 
   p.add_flag(trivialPlacement, "--trivial")->help("use trivial placement");
   p.add_flag(useStaged, "--staged")->help("Enable RemoteSender/Recver");
   p.add_flag(useColo, "--colo")->help("Enable ColocatedHaloSender/Recver");
   p.add_flag(useMemcpyPeer, "--peer")->help("Enable PeerAccessSender");
   p.add_flag(useKernel, "--kernel")->help("Enable PeerCopySender");
+  p.add_flag(noCompute, "--no-compute")->help("Don't launch compute kernels");
 
   // If there was an error during parsing, report it.
   if (!p.parse(argc, argv)) {
@@ -230,16 +232,18 @@ int main(int argc, char **argv) {
         // launch operations on interior
         for (size_t di = 0; di < dd.domains().size(); ++di) {
           auto &d = dd.domains()[di];
-          nvtxRangePush("launch");
-          Rect3 cr = interiors[di];
-          cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
-          cr.hi += acOff - dd.get_origin(di);
-          // std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
-          // std::cerr << src0.origin() << "=src0 origin\n";
-          d.set_device();
-          acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
-          integrate_substep(substep, cStreamInterior[di], cr, vbas[di]);
-          nvtxRangePop(); // launch
+          if (!noCompute) {
+            nvtxRangePush("launch");
+            Rect3 cr = interiors[di];
+            cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
+            cr.hi += acOff - dd.get_origin(di);
+            // std::cerr << rank << ": launch on region=" << cr << " (interior)\n";
+            // std::cerr << src0.origin() << "=src0 origin\n";
+            d.set_device();
+            acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
+            integrate_substep(substep, cStreamInterior[di], cr, vbas[di]);
+            nvtxRangePop(); // launch
+          }
         }
 
         // exchange halo
@@ -252,26 +256,30 @@ int main(int argc, char **argv) {
         for (size_t di = 0; di < dd.domains().size(); ++di) {
           auto &d = dd.domains()[di];
           for (size_t si = 0; si < exteriors[di].size(); ++si) {
-            nvtxRangePush("launch");
-            Rect3 cr = exteriors[di][si];
-            cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
-            cr.hi += acOff - dd.get_origin(di);
-            // std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
-            // std::cerr << src0.origin() << "=src0 origin\n";
-            d.set_device();
-            integrate_substep(substep, cStreamExterior[di][si], cr, vbas[di]);
-            nvtxRangePop(); // launch
-            // CUDA_RUNTIME(cudaDeviceSynchronize());
+            if (!noCompute) {
+              nvtxRangePush("launch");
+              Rect3 cr = exteriors[di][si];
+              cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
+              cr.hi += acOff - dd.get_origin(di);
+              // std::cerr << rank << ": launch on region=" << cr << " (exterior)\n";
+              // std::cerr << src0.origin() << "=src0 origin\n";
+              d.set_device();
+              integrate_substep(substep, cStreamExterior[di][si], cr, vbas[di]);
+              nvtxRangePop(); // launch
+                              // CUDA_RUNTIME(cudaDeviceSynchronize());
+            }
           }
         }
 
-        // wait for stencil to complete
-        for (auto &s : cStreamInterior) {
-          CUDA_RUNTIME(cudaStreamSynchronize(s));
-        }
-        for (auto &v : cStreamExterior) {
-          for (auto &s : v) {
+        if (!noCompute) {
+          // wait for stencil to complete
+          for (auto &s : cStreamInterior) {
             CUDA_RUNTIME(cudaStreamSynchronize(s));
+          }
+          for (auto &v : cStreamExterior) {
+            for (auto &s : v) {
+              CUDA_RUNTIME(cudaStreamSynchronize(s));
+            }
           }
         }
 
