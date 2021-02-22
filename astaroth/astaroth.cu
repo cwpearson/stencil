@@ -14,7 +14,7 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "kernels.h"
 #include "statistics.hpp"
 
-int3 decompose(int p) {
+int3 decompose_xyz(int p) {
 
   int3 ret{1, 1, 1};
 
@@ -25,6 +25,22 @@ int3 decompose(int p) {
       ret.y *= pf;
     } else {
       ret.z *= pf;
+    }
+  }
+  return ret;
+}
+
+int3 decompose_zyx(int p) {
+
+  int3 ret{1, 1, 1};
+
+  for (int pf : prime_factors(p)) {
+    if (ret.z <= ret.y && ret.z <= ret.x) {
+      ret.z *= pf;
+    } else if (ret.y <= ret.x) {
+      ret.y *= pf;
+    } else {
+      ret.x *= pf;
     }
   }
   return ret;
@@ -111,14 +127,21 @@ int main(int argc, char **argv) {
 
   // figure out the whole domain size
   {
-    int3 i3 = decompose(ranksPerNode);
+#if 0
+    int3 i3 = decompose_xyz(ranksPerNode);
     info.int_params[AC_nx] *= i3.x;
     info.int_params[AC_ny] *= i3.y;
     info.int_params[AC_nz] *= i3.z;
-    i3 = decompose(numNodes);
+    i3 = decompose_xyz(numNodes);
     info.int_params[AC_nx] *= i3.x;
     info.int_params[AC_ny] *= i3.y;
     info.int_params[AC_nz] *= i3.z;
+#else
+    int3 i3 = decompose_zyx(size);
+    info.int_params[AC_nx] *= i3.x;
+    info.int_params[AC_ny] *= i3.y;
+    info.int_params[AC_nz] *= i3.z;
+#endif
   }
 
   if (0 == rank) {
