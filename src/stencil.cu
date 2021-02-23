@@ -3,8 +3,8 @@
 #include "stencil/logging.hpp"
 #include "stencil/tx_colocated.cuh"
 
-#include <vector>
 #include <cstdlib>
+#include <vector>
 
 DistributedDomain::DistributedDomain(size_t x, size_t y, size_t z)
     : size_(x, y, z), placement_(nullptr), flags_(Method::Default), strategy_(PlacementStrategy::NodeAware) {
@@ -207,12 +207,22 @@ void DistributedDomain::do_placement() {
   double start = MPI_Wtime();
 #endif
   nvtxRangePush("placement");
-  if (strategy_ == PlacementStrategy::NodeAware) {
+  switch (strategy_) {
+  case PlacementStrategy::NodeAware: {
     assert(!placement_);
     placement_ = new NodeAware(size_, mpiTopology_, radius_, gpus_);
-  } else {
+    break;
+  }
+  case PlacementStrategy::Trivial: {
     assert(!placement_);
     placement_ = new Trivial(size_, mpiTopology_, gpus_);
+    break;
+  }
+  case PlacementStrategy::IntraNodeRandom: {
+    assert(!placement_);
+    placement_ = new IntraNodeRandom(size_, mpiTopology_, radius_, gpus_);
+    break;
+  }
   }
   assert(placement_);
   nvtxRangePop(); // "placement"

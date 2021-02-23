@@ -255,7 +255,11 @@ public:
   Dim3 node_idx(int64_t i) const noexcept { return dimensionize(i, node_dim()); }
 };
 
-enum class PlacementStrategy { NodeAware, Trivial };
+enum class PlacementStrategy {
+  NodeAware,
+  Trivial,
+  IntraNodeRandom // grouped by node, but randomly within nodes
+};
 
 class Placement {
 
