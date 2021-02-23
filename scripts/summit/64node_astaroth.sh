@@ -3,7 +3,7 @@
 #BSUB -J 64node_astaroth
 #BSUB -o 64node_astaroth.o%J
 #BSUB -e 64node_astaroth.e%J
-#BSUB -W 0:45
+#BSUB -W 1:00
 #BSUB -nnodes 64
 #BSUB -alloc_flags gpudefault
 
@@ -25,10 +25,11 @@ mkdir -p $DIR
 echo "" > $OUT
 
 for flags in "--staged" "--trivial --staged" "--staged --colo" "--staged --colo --peer" "--staged --colo --peer --kernel" "--trivial --staged --colo --peer --kernel"; do
+  flags="$flags --no-compute"
   echo $flags >> $OUT
   echo "nodes,ranks/node,ranks,x,y,z,iter (s),exch (s)" >> $OUT
   for nodes in 1 2 4 8 16 32 64; do
-    for rpn in 1 2 6; do
+    for rpn in 1 2 4 6; do
       let n=$nodes*$rpn
       echo -n "${nodes},${rpn}," | tee -a $OUT
       jsrun --smpiargs="-gpu" -n $n -r $rpn -a 1 -g 1 -c 7 -b rs ../../build/astaroth/astaroth $flags | tee -a $OUT

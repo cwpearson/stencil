@@ -25,6 +25,7 @@ mkdir -p $DIR
 echo "" > $OUT
 
 for flags in "--staged" "--trivial --staged" "--staged --colo" "--staged --colo --peer" "--staged --colo --peer --kernel" "--trivial --staged --colo --peer --kernel"; do
+  flags="$flags --no-compute"
   echo $flags >> $OUT
   echo "nodes,ranks/node,ranks,x,y,z,iter (s),exch (s)" >> $OUT
   for nodes in 1 2 4 8 16 32 64 128 256 512; do
