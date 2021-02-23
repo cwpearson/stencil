@@ -25,6 +25,7 @@
 #include "stencil/nvml.hpp"
 #include "stencil/partition.hpp"
 #include "stencil/pitched_ptr.hpp"
+#include "stencil/placement_intranoderandom.hpp"
 #include "stencil/radius.hpp"
 #include "stencil/topology.hpp"
 #include "stencil/tx.hpp"

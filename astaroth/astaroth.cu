@@ -56,6 +56,7 @@ int main(int argc, char **argv) {
 
   argparse::Parser p("Astaroth simulator");
   bool trivialPlacement = false;
+  bool randomPlacement = false;
   bool useStaged = false;
   bool useColo = false;
   bool useMemcpyPeer = false;
@@ -63,6 +64,7 @@ int main(int argc, char **argv) {
   bool noCompute = false;
 
   p.add_flag(trivialPlacement, "--trivial")->help("use trivial placement");
+  p.add_flag(randomPlacement, "--random")->help("use random placement");
   p.add_flag(useStaged, "--staged")->help("Enable RemoteSender/Recver");
   p.add_flag(useColo, "--colo")->help("Enable ColocatedHaloSender/Recver");
   p.add_flag(useMemcpyPeer, "--peer")->help("Enable PeerAccessSender");
@@ -166,6 +168,8 @@ int main(int argc, char **argv) {
   PlacementStrategy strategy = PlacementStrategy::NodeAware;
   if (trivialPlacement) {
     strategy = PlacementStrategy::Trivial;
+  } else if (randomPlacement) {
+    strategy = PlacementStrategy::IntraNodeRandom;
   }
 
   Statistics iterTime, exchTime;
