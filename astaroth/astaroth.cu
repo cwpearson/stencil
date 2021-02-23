@@ -247,11 +247,19 @@ int main(int argc, char **argv) {
     const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
 
     for (size_t iter = 0; iter < 200; ++iter) {
-
-      double iterStart = MPI_Wtime();
       double exchElapsed = 0;
+      MPI_Barrier(MPI_COMM_WORLD);
+      double iterStart = MPI_Wtime();
 
       for (int substep = 0; substep < 3; ++substep) {
+        
+        // during no-compute, need a barrier here, otherwise we measure any load imbalance
+        // as communication time. With compute, the total iteration time is more meaningful and 
+        // we don't want to add a barrier
+        if (noCompute) {
+          MPI_Barrier(MPI_COMM_WORLD);
+        }
+
         // launch operations on interior
         for (size_t di = 0; di < dd.domains().size(); ++di) {
           auto &d = dd.domains()[di];
