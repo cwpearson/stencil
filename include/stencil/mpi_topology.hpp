@@ -15,7 +15,7 @@ private:
 public:
   /* Should be called by all processes in comm
    */
-  MpiTopology(MPI_Comm comm) : comm_(comm), shmComm_({}) {
+  MpiTopology(MPI_Comm comm) : comm_(comm), shmComm_{} {
     if (comm_) {
       MPI_Comm_split_type(comm_, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shmComm_);
 
