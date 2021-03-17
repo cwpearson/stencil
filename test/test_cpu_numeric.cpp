@@ -19,12 +19,19 @@ TEST_CASE("get_max_abs_error") {
   using namespace Catch::literals;
 
   SECTION("double 0.1") {
-    std::vector<double> a{1.0, 2.0, 3.0};
-    std::vector<double> b{1.1, 2.0, 3.0};
-    REQUIRE(0.1_a == get_max_abs_error(a.data(), b.data(), a.size()));
+    {
+      std::vector<double> a{1.0, 2.0, 3.0};
+      std::vector<double> b{1.1, 2.0, 3.0};
+      REQUIRE(0.1_a == get_max_abs_error(a.data(), b.data(), a.size()));
+    }
+    {
+      std::vector<double> a{1.0, 2.0, 3.0};
+      std::vector<double> b{0.9, 2.0, 3.0};
+      REQUIRE(0.1_a == get_max_abs_error(a.data(), b.data(), a.size()));
+    }
   }
 
-    SECTION("double 0.0") {
+  SECTION("double 0.0") {
     std::vector<double> a{1.0, 2.0, 3.0};
     std::vector<double> b{1.0, 2.0, 3.0};
     REQUIRE(0.0_a == get_max_abs_error(a.data(), b.data(), a.size()));
