@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <vector>
 
 inline int64_t nextPowerOfTwo(int64_t x) {
@@ -16,7 +18,15 @@ inline int64_t nextPowerOfTwo(int64_t x) {
 }
 
 /* return the prime factors of n, sorted largest to smallest
-*/
+ */
 template <typename T> std::vector<T> prime_factors(T n);
 
 inline int64_t div_ceil(int64_t n, int64_t d) { return (n + d - 1) / d; }
+
+template <typename T> T get_max_abs_error(const T *a, const T *b, const size_t n) {
+  T maxAbsErr = std::numeric_limits<T>::lowest();
+  for (size_t i = 0; i < n; ++i) {
+    maxAbsErr = std::max(maxAbsErr, std::abs(a[i] - b[i]));
+  }
+  return maxAbsErr;
+}
