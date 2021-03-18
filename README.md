@@ -250,14 +250,13 @@ Re-run cmake again.
 First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 --paraview --iters 1000`.
 
 * `File` > `Open`. Open individually, not as a group
-  * Select the delimiters, then hit apply on the `Properties` tab of the Pipeline Browser. `,` is the delimiter used by this library.
-* Group the files into a single dataset.
+  * Ensure the delimiters are correct (`,`), then hit `Apply` on the `Properties` tab of the Pipeline Browser. This may hang for a while while the files are loaded.
   * Select the two files, then `Filters` > `Common` > `Group Datasets`.
   * `Apply`. This will create a new combined GroupDatasets1 in the pipeline browser.
 * Select the dataset and `Filters` > `Alphabetical` > `Table to Points`
-  * Select the x,y,z columns in the `Properties` tab
+  * Select the x,y,z columns in the `Properties` tab (should be `X`, `Y`, and `Z` respectively).
   * Click on the vizualization window
-  * `Apply`
+  * `Apply`. A bunch of points should appear.
 * In the `Coloring` section of the `Properties` tab, choose the name of the data field.
 
 ## Astaroth Simulator
@@ -284,7 +283,7 @@ The astaroth configuration is defined in `astaroth/astaroth.conf`
     * [x] Control which GPUs a distributed domain should use
       * `DistributedDomain::use_gpus(const std::vector<int> &gpus)` 
     * [x] Control which exchange method should be used
-  * v2 (next publication)
+  * v2 (Thesis)
     * [x] ParaView output files `DistributedDomain::write_paraview(const std::string &prefix)`
     * [x] support uneven radius
     * [x] "Accessor Object" for data
