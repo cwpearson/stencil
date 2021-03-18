@@ -14,6 +14,64 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "kernels.h"
 #include "statistics.hpp"
 
+template <typename T>
+static __global__ void periodic_ramp_init_kernel(Accessor<T> dst, //<! [out] region to fill
+                                                 Rect3 dstExt     //<! [in] the extent of the region to initialize
+) {
+  const T ripple[4] = {0, 0.25, 0, -0.25};
+  const size_t period = sizeof(ripple) / sizeof(ripple[0]);
+
+  const size_t tiz = blockDim.z * blockIdx.z + threadIdx.z;
+  const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
+  const size_t tix = blockDim.x * blockIdx.x + threadIdx.x;
+
+  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z; z += gridDim.z * blockDim.z) {
+    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y; y += gridDim.y * blockDim.y) {
+      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
+
+        Dim3 p(x, y, z);
+        T val = p.x + ripple[p.x % period] + p.y + ripple[p.y % period] + p.z + ripple[p.z % period];
+        dst[p] = val;
+      }
+    }
+  }
+}
+
+static __device__ uint32_t hash32(uint32_t x) {
+  x = ((x >> 16) ^ x) * 0x45d9f3b;
+  x = ((x >> 16) ^ x) * 0x45d9f3b;
+  x = (x >> 16) ^ x;
+  return x;
+}
+
+static __device__ uint64_t hash64(uint64_t x) {
+  x = (x ^ (x >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
+  x = (x ^ (x >> 27)) * UINT64_C(0x94d049bb133111eb);
+  x = x ^ (x >> 31);
+  return x;
+}
+
+template <typename T>
+static __global__ void hash_init_kernel(Accessor<T> dst, //<! [out] region to fill
+                                       Rect3 dstExt     //<! [in] the extent of the region to initialize
+) {
+
+  const size_t tiz = blockDim.z * blockIdx.z + threadIdx.z;
+  const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
+  const size_t tix = blockDim.x * blockIdx.x + threadIdx.x;
+
+  for (size_t z = dstExt.lo.z + tiz; z < dstExt.hi.z; z += gridDim.z * blockDim.z) {
+    for (size_t y = dstExt.lo.y + tiy; y < dstExt.hi.y; y += gridDim.y * blockDim.y) {
+      for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
+
+        Dim3 p(x, y, z);
+        T val = float(hash64(p.x) ^ hash64(p.y) ^ hash64(p.z)) / float(uint64_t(-1));
+        dst[p] = val;
+      }
+    }
+  }
+}
+
 int3 decompose_xyz(int p) {
 
   int3 ret{1, 1, 1};
@@ -62,6 +120,8 @@ int main(int argc, char **argv) {
   bool useMemcpyPeer = false;
   bool useKernel = false;
   bool noCompute = false;
+  bool paraviewInit = false;
+  bool paraviewFinal = false;
 
   p.add_flag(trivialPlacement, "--trivial")->help("use trivial placement");
   p.add_flag(randomPlacement, "--random")->help("use random placement");
@@ -70,6 +130,8 @@ int main(int argc, char **argv) {
   p.add_flag(useMemcpyPeer, "--peer")->help("Enable PeerAccessSender");
   p.add_flag(useKernel, "--kernel")->help("Enable PeerCopySender");
   p.add_flag(noCompute, "--no-compute")->help("Don't launch compute kernels");
+  p.add_flag(paraviewInit, "--paraview-init")->help("write paraview file after init");
+  p.add_flag(paraviewFinal, "--paraview-final")->help("write paraview file at end");
 
   // If there was an error during parsing, report it.
   if (!p.parse(argc, argv)) {
@@ -109,13 +171,13 @@ int main(int argc, char **argv) {
   CUDA_RUNTIME(cudaGetDeviceCount(&devCount));
 
   int numSubdoms;
-  int numNodes;
-  int ranksPerNode;
+  // int numNodes;
+  // int ranksPerNode;
   {
     MpiTopology topo(MPI_COMM_WORLD);
     numSubdoms = size / topo.colocated_size() * devCount;
-    numNodes = size / topo.colocated_size();
-    ranksPerNode = topo.colocated_size();
+    // numNodes = size / topo.colocated_size();
+    // ranksPerNode = topo.colocated_size();
   }
 
   if (0 == rank) {
@@ -227,20 +289,28 @@ int main(int argc, char **argv) {
       }
     }
 
-#if 0
+#if 1
     std::cerr << "init\n";
     for (size_t di = 0; di < dd.domains().size(); ++di) {
       auto &d = dd.domains()[di];
       d.set_device();
       dim3 dimBlock = Dim3::make_block_dim(d.raw_size(), 512);
       dim3 dimGrid = ((d.raw_size()) + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
-      init_kernel<<<dimGrid, dimBlock, 0, cStreamInterior[di]>>>(d.get_curr_accessor(dh0), d.get_compute_region(), 10);
+      for (DataHandle<AcReal> dh : handles) {
+        hash_init_kernel<<<dimGrid, dimBlock, 0, cStreamInterior[di]>>>(d.get_curr_accessor(dh),
+                                                                                 d.get_compute_region());
+      }
       CUDA_RUNTIME(cudaDeviceSynchronize());
+      std::cerr << "init done\n";
+    }
+#endif
+
+    if (paraviewInit) {
+      dd.write_paraview("init");
+      MPI_Barrier(MPI_COMM_WORLD);
     }
 
-    if (0)
-      dd.write_paraview("init");
-#endif
+    // TODO - add a single exchange and verification code here
 
     const std::vector<Rect3> interiors = dd.get_interior();
     const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
@@ -250,15 +320,15 @@ int main(int argc, char **argv) {
     // we will need to add in the offset from the stencil region
     const Dim3 acOff = Dim3(STENCIL_ORDER / 2, STENCIL_ORDER / 2, STENCIL_ORDER / 2);
 
-    for (size_t iter = 0; iter < 200; ++iter) {
+    for (size_t iter = 0; iter < 1; ++iter) {
       double exchElapsed = 0;
       MPI_Barrier(MPI_COMM_WORLD);
       double iterStart = MPI_Wtime();
 
       for (int substep = 0; substep < 3; ++substep) {
-        
+
         // during no-compute, need a barrier here, otherwise we measure any load imbalance
-        // as communication time. With compute, the total iteration time is more meaningful and 
+        // as communication time. With compute, the total iteration time is more meaningful and
         // we don't want to add a barrier
         if (noCompute) {
           MPI_Barrier(MPI_COMM_WORLD);
@@ -282,7 +352,7 @@ int main(int argc, char **argv) {
         }
 
         // exchange halo
-        // std::cerr << rank << ": exchange\n";
+        std::cerr << rank << ": exchange\n";
         double exchStart = MPI_Wtime();
         dd.exchange();
         exchElapsed += MPI_Wtime() - exchStart;
@@ -317,10 +387,9 @@ int main(int argc, char **argv) {
             }
           }
         }
-
-        // swap inputs and outputs
-        dd.swap();
       }
+      // swap inputs and outputs
+      dd.swap();
 
       double iterElapsed = MPI_Wtime() - iterStart;
 
@@ -330,8 +399,10 @@ int main(int argc, char **argv) {
       exchTime.insert(exchElapsed);
     }
 
-    if (0)
+    if (paraviewFinal) {
       dd.write_paraview("final");
+      MPI_Barrier(MPI_COMM_WORLD);
+    }
 
   } // send domains out of scope before MPI_Finalize
 
