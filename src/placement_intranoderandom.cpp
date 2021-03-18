@@ -1,7 +1,5 @@
 #include "stencil/placement_intranoderandom.hpp"
 
-
-
 IntraNodeRandom::IntraNodeRandom(const Dim3 &size, // total domain size
                                  MpiTopology &mpiTopo, Radius radius,
                                  const std::vector<int> &rankCudaIds // which CUDA devices the calling
@@ -143,9 +141,11 @@ IntraNodeRandom::IntraNodeRandom(const Dim3 &size, // total domain size
         const size_t gi = node * gpusPerNode + id;
         {
           const Dim3 nodeIdx = partition_.node_idx(id);
+#if 0
           LOG_DEBUG("global id=" << gi << " nodeIdx=" << nodeIdx
                                  << " size=" << partition_.subdomain_size(sysIdx * nodeDim + nodeIdx)
                                  << " rank=" << rank << " gpuId=" << gpuId << " (cuda=" << cuda << ")");
+#endif
           (void)nodeIdx; // in case debug is not defined
         }
 
