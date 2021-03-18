@@ -130,7 +130,7 @@ Dim3 LocalDomain::halo_pos(const Dim3 &dir, const bool halo) const noexcept {
 
 std::vector<unsigned char> LocalDomain::region_to_host(const Dim3 &pos, const Dim3 &ext,
                                                        const size_t qi // quantity index
-                                                       ) const {
+) const {
 
   const size_t bytes = elem_size(qi) * ext.flatten();
 
@@ -177,14 +177,30 @@ void LocalDomain::realize() {
     LOG_SPEW("radius +z=" << radius_.z(1));
     LOG_SPEW("radius -z=" << radius_.z(-1));
 
-    cudaExtent extent = make_cudaExtent(extent.width = (sz_.x + radius_.x(-1) + radius_.x(1)) * elemSz,
-                                        extent.height = sz_.y + radius_.y(-1) + radius_.y(1),
-                                        extent.depth = sz_.z + radius_.z(-1) + radius_.z(1));
+    cudaExtent extent = make_cudaExtent((sz_.x + radius_.x(-1) + radius_.x(1)) * elemSz,
+                                        sz_.y + radius_.y(-1) + radius_.y(1), sz_.z + radius_.z(-1) + radius_.z(1));
 
-    cudaPitchedPtr c = {}; // current
-    cudaPitchedPtr n = {}; // next
+    // TODO: make the pitch optional
+    cudaPitchedPtr c{}; // current
+    cudaPitchedPtr n{}; // next
+
+    /* astaroth does not handle pitched allocations.
+     we use cudaPitchedPtr to carry the pitch information through, so jsut set the pitch to the logical width when using
+     with astaroth
+    */
+#if 0
     CUDA_RUNTIME(cudaMalloc3D(&c, extent));
     CUDA_RUNTIME(cudaMalloc3D(&n, extent));
+#else
+    CUDA_RUNTIME(cudaMalloc(&c.ptr, extent.width * extent.height * extent.depth));
+    c.pitch = extent.width;
+    c.xsize = extent.width;
+    c.ysize = extent.height;
+    CUDA_RUNTIME(cudaMalloc(&n.ptr, extent.width * extent.height * extent.depth));
+    n.pitch = extent.width;
+    n.xsize = extent.width;
+    n.ysize = extent.height;
+#endif
     currDataPtrs_[i] = c;
     nextDataPtrs_[i] = n;
   }
