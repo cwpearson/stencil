@@ -211,7 +211,7 @@ TEST_CASE("exchange") {
     check_exchange(r);
   }
 
-  SECTION("+x=2, mx=1") { // -x doesnt work as a section on CLI
+  SECTION("px=2, mx=1") {
     Radius r = Radius::constant(0);
     r.dir(1, 0, 0) = 2;
     r.dir(-1, 0, 0) = 1;
