@@ -1243,14 +1243,14 @@ void DistributedDomain::write_paraview(const std::string &prefix, bool zeroNaNs)
               if (zeroNaNs && std::isnan(val)) {
                 val = 0.0;
               }
-              fprintf(outf, "%s%f", delim, val);
+              fprintf(outf, "%s%.17f", delim, val);
             } else if (4 == domain.elem_size(qi)) {
               float val = reinterpret_cast<float *>(
                   quantities[qi].data())[lz * (domain.sz_.y * domain.sz_.x) + ly * domain.sz_.x + lx];
               if (zeroNaNs && std::isnan(val)) {
                 val = 0.0f;
               }
-              fprintf(outf, "%s%f", delim, val);
+              fprintf(outf, "%s%.9f", delim, val);
             }
           }
 
