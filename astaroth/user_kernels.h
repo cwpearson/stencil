@@ -442,9 +442,26 @@ AcReal3 out_uu = READ_OUT(handle_out_uu);const AcReal3Data aa = READ(handle_aa);
 AcReal3 out_aa = READ_OUT(handle_out_aa);const AcRealData ss = READ(handle_ss);
 AcReal out_ss = READ_OUT(handle_out_ss);AcReal dt =DCONST(AC_dt) ;
 out_lnrho =rk3 (out_lnrho ,lnrho ,continuity (globalVertexIdx ,uu ,lnrho ,dt ),dt );
+// if (threadIdx.x == 0 && blockIdx.x == 0 && threadIdx.y == 0 && blockIdx.y == 0 && threadIdx.z == 0 && blockIdx.z == 0)
+// printf("[%d %d %d] %e, %e, %e, %e -> %e\n",
+// vertexIdx.x, vertexIdx.y, vertexIdx.z, uu.x.value, uu.y.value, uu.z.value, lnrho.value, out_lnrho);
 out_aa =rk3 (out_aa ,aa ,induction (uu ,aa ),dt );
 out_uu =rk3 (out_uu ,uu ,momentum (globalVertexIdx ,uu ,lnrho ,ss ,aa ,dt ),dt );
+// if (threadIdx.x == 0 && blockIdx.x == 0 && threadIdx.y == 0 && blockIdx.y == 0 && threadIdx.z == 0 && blockIdx.z == 0)
+// printf("[%d %d %d] %e, %e, %e -> %e %e %e\n",
+// vertexIdx.x, vertexIdx.y, vertexIdx.z, uu.x.value, uu.y.value, uu.z.value, out_uu.x, out_uu.y, out_uu.z);
 out_ss =rk3 (out_ss ,ss ,entropy (ss ,uu ,lnrho ,aa ),dt );
+
+// if (threadIdx.x == 0 && blockIdx.x == 0 && threadIdx.y == 0 && blockIdx.y == 0 && threadIdx.z == 0 && blockIdx.z == 0)
+// printf("[%d %d %d] %d mx=%d, my=%d\n",
+// vertexIdx.x, vertexIdx.y, vertexIdx.z,idx,DCONST(AC_mx),DCONST(AC_mxy));
+
+// if (threadIdx.x == 0 && blockIdx.x == 0 && threadIdx.y == 0 && blockIdx.y == 0 && threadIdx.z == 0 && blockIdx.z == 0)
+// printf("[%d %d %d] [%d %d %d]\n",
+// vertexIdx.x, vertexIdx.y, vertexIdx.z, globalVertexIdx.x, globalVertexIdx.y, globalVertexIdx.z);
+
+// if (threadIdx.x == 0 && blockIdx.x == 0 && threadIdx.y == 0 && blockIdx.y == 0 && threadIdx.z == 0 && blockIdx.z == 0)
+// printf("[%p]\n", buffer.out[0]);
 WRITE_OUT(handle_out_lnrho, out_lnrho);
 WRITE_OUT(handle_out_uu, out_uu);
 WRITE_OUT(handle_out_aa, out_aa);
