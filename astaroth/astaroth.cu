@@ -14,6 +14,8 @@ Try to do some rough approximation of astaroth using the stencil library.
 #include "kernels.h"
 #include "statistics.hpp"
 
+#define OVERLAP 1
+
 // handle IDs
 const int H_LNRHO = 0;
 const int H_UUX = 1;
@@ -144,7 +146,7 @@ static __global__ void radial_explosion_init_kernel(Accessor<T> uux, Accessor<T>
   const T dsy = 0.04908738521;
   const T dsz = 0.04908738521;
 
-  const Dim3 orig(0.01, 32 * dsy, 64 * dsz);
+  const double3 orig{0.01, 32 * dsy, 50 * dsz};
 
   const size_t tiz = blockDim.z * blockIdx.z + threadIdx.z;
   const size_t tiy = blockDim.y * blockIdx.y + threadIdx.y;
@@ -155,12 +157,11 @@ static __global__ void radial_explosion_init_kernel(Accessor<T> uux, Accessor<T>
       for (size_t x = dstExt.lo.x + tix; x < dstExt.hi.x; x += gridDim.x * blockDim.x) {
 
         const Dim3 p(x, y, z);
-        T xx = abs(x * dsx - orig.x);
-        T yy = abs(y * dsy - orig.y);
-        T zz = abs(z * dsz - orig.z);
+        T xx = x * dsx - orig.x;
+        T yy = y * dsy - orig.y;
+        T zz = z * dsz - orig.z;
         // printf("%f %f %f\n", xx, yy, zz);
-        const T rr2 = pow(xx, 2.0) + pow(yy, 2.0) + pow(zz, 2.0);
-        const T rr = sqrt(rr2);
+        const T rr = sqrt(pow(xx, 2.0) + pow(yy, 2.0) + pow(zz, 2.0));
 
         T theta, phi, uu_radial;
 
@@ -304,6 +305,11 @@ int main(int argc, char **argv) {
   p.add_flag(paraviewInit, "--paraview-init")->help("write paraview file after init");
   p.add_flag(paraviewFinal, "--paraview-final")->help("write paraview file at end");
 
+
+  int iters = 1;
+  p.add_positional(iters)->required();
+  int paraviewPeriod = std::max(1, iters / 10);
+
   // If there was an error during parsing, report it.
   if (!p.parse(argc, argv)) {
     if (0 == rank) {
@@ -431,22 +437,19 @@ int main(int argc, char **argv) {
       exit(EXIT_FAILURE);
     }
 
+    // dd.set_methods(Method::CudaMpi);
+
     // create arrays
     std::cerr << "realize\n";
     dd.realize();
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    // one stream for the interior, plus one stream for each exterior
-    std::vector<RcStream> cStreamInterior(dd.domains().size());
-    std::vector<std::vector<RcStream>> cStreamExterior(dd.domains().size());
-    for (size_t di = 0; di < dd.domains().size(); ++di) {
-      int device = dd.domains()[di].gpu();
-      cStreamInterior[di] = RcStream(device);
-      for (int i = 0; i < 26; ++i) { // 26 possible nbrs
-        cStreamExterior[di].push_back(RcStream(device));
-      }
-    }
+
+    // set multigpu_offset for astaroth
+    Dim3 orig = dd.get_origin(0);
+    info.int3_params[AC_multigpu_offset] = {int(orig.x), int(orig.y), int(orig.z)};
+
 
     // create mesh info for each device
     for (size_t di = 0; di < dd.domains().size(); ++di) {
@@ -468,6 +471,19 @@ int main(int argc, char **argv) {
         std::cerr << rank << ": out[" << i << "]=" << vba.out[i] << "\n";
       }
     }
+
+
+    // one stream for the interior, plus one stream for each exterior
+    std::vector<RcStream> cStreamInterior(dd.domains().size());
+    std::vector<std::vector<RcStream>> cStreamExterior(dd.domains().size());
+    for (size_t di = 0; di < dd.domains().size(); ++di) {
+      int device = dd.domains()[di].gpu();
+      cStreamInterior[di] = RcStream(device);
+      for (int i = 0; i < 26; ++i) { // 26 possible nbrs
+        cStreamExterior[di].push_back(RcStream(device));
+      }
+    }
+
 
 #if 1
     std::cerr << "init\n";
@@ -501,7 +517,7 @@ int main(int argc, char **argv) {
 
       // constant for lnrho
       const_init_kernel<<<dimGrid, dimBlock, 0, cStreamInterior[di]>>>(d.get_curr_accessor(handles[H_LNRHO]),
-                                                                       d.get_compute_region(), 1.0);
+                                                                       d.get_compute_region(), 0.5);
 
       // radial explosion for velocity
       radial_explosion_init_kernel<<<dimGrid, dimBlock, 0, cStreamInterior[di]>>>(
@@ -523,7 +539,10 @@ int main(int argc, char **argv) {
 
     const std::vector<Rect3> interiors = dd.get_interior();
     const std::vector<std::vector<Rect3>> exteriors = dd.get_exterior();
-
+    std::vector<Rect3> fulls;
+    for (auto &d : dd.domains()) {
+      fulls.push_back(d.get_compute_region());
+    }
     // stencil defines compute region in terms of grid points
     // while asteroth does it in terms of memory offset.
     // we will need to add in the offset from the stencil region
@@ -543,6 +562,7 @@ int main(int argc, char **argv) {
           MPI_Barrier(MPI_COMM_WORLD);
         }
 
+#if OVERLAP
         // launch operations on interior
         for (size_t di = 0; di < dd.domains().size(); ++di) {
           auto &d = dd.domains()[di];
@@ -555,11 +575,12 @@ int main(int argc, char **argv) {
             // std::cerr << src0.origin() << "=src0 origin\n";
             d.set_device();
             // acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
-            acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, 1e-7);
+            acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, 1e-8);
             integrate_substep(substep, cStreamInterior[di], cr, vbas[di]);
             nvtxRangePop(); // launch
           }
         }
+#endif
 
         // exchange halo
         std::cerr << rank << ": exchange " << iter << "\n";
@@ -567,6 +588,7 @@ int main(int argc, char **argv) {
         dd.exchange();
         exchElapsed += MPI_Wtime() - exchStart;
 
+#if OVERLAP
         // launch on exteriors
         for (size_t di = 0; di < dd.domains().size(); ++di) {
           auto &d = dd.domains()[di];
@@ -585,6 +607,25 @@ int main(int argc, char **argv) {
             }
           }
         }
+#else
+        // launch operations on full region
+        for (size_t di = 0; di < dd.domains().size(); ++di) {
+          auto &d = dd.domains()[di];
+          if (!noCompute) {
+            nvtxRangePush("launch");
+            Rect3 cr = fulls[di];
+            cr.lo += acOff - dd.get_origin(di); // astaroth indexing is memory offset based
+            cr.hi += acOff - dd.get_origin(di);
+            std::cerr << rank << ": launch on region=" << cr << " (full)\n";
+            std::cerr << dd.get_origin(di) << "=dd origin\n";
+            d.set_device();
+            // acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, AC_REAL_EPSILON);
+            acDeviceLoadScalarUniform(d.gpu(), cStreamInterior[di], AC_dt, 1e-8);
+            integrate_substep(substep, cStreamInterior[di], cr, vbas[di]);
+            nvtxRangePop(); // launch
+          }
+        }
+#endif
 
         if (!noCompute) {
           // wait for stencil to complete
@@ -613,7 +654,7 @@ int main(int argc, char **argv) {
       iterTime.insert(iterElapsed);
       exchTime.insert(exchElapsed);
 
-      if (iter % 100 == 99) {
+      if (iter % paraviewPeriod == 0 && iter != 0) {
         std::stringstream ss;
         ss << "iter" << iter;
         dd.write_paraview(ss.str());
