@@ -82,12 +82,13 @@ public:
       const Dim3 srcPos = srcDomain->halo_pos(msg.dir_, false /*interior*/);
       const Dim3 dstPos = dstDomain->halo_pos(msg.dir_ * -1, true /*exterior*/);
       const Dim3 extent = srcDomain->halo_extent(msg.dir_);
+      LOG_SPEW("multi_translate dir=" << msg.dir_ << " src=" << srcPos << " dst=" << dstPos << " ext" << extent);
       RcStream &stream = streams_[srcDomain->gpu()];
       const dim3 dimBlock = Dim3::make_block_dim(extent, 512 /*threads per block*/);
       const dim3 dimGrid = (extent + Dim3(dimBlock) - 1) / (Dim3(dimBlock));
       assert(stream.device() == srcDomain->gpu());
       assert(srcDomain->num_data() == dstDomain->num_data());
-      LOG_SPEW("multi_translate grid=" << dimGrid << " block=" << dimBlock);
+      // LOG_SPEW("multi_translate grid=" << dimGrid << " block=" << dimBlock);
       CUDA_RUNTIME(rt::time(cudaSetDevice, stream.device()));
 #if 0
       multi_translate<<<dimGrid, dimBlock, 0, stream>>>(dstDomain->dev_curr_datas(), dstPos,
@@ -378,6 +379,7 @@ public:
   void finish_prepare() override { sender_.finish_prepare(); }
 
   void send() noexcept override {
+    LOG_SPEW("ColoHaloSender::send()");
     nvtxRangePush("ColoHaloSender: init pack");
     packer_.pack();
     nvtxRangePop();
