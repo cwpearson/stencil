@@ -258,6 +258,11 @@ First, get some paraview files: for example, `mpirun -n 2 bin/jacobi3d 60 60 60 
   * Click on the vizualization window
   * `Apply`. A bunch of points should appear.
 * In the `Coloring` section of the `Properties` tab, choose the name of the data field.
+* Select the TableToPoints and add the `Glyph` filter.
+  * Glyph type `Box`
+  * Scale Factor `1.0`
+  * Glyph Mode `All points`
+  * Use the eye in the Pipeline browser to turn off the TableToPoints and leave the glyph turned on
 
 ## Astaroth Simulator
 
