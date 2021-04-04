@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
+#include <cstdlib>
 
 inline int64_t nextPowerOfTwo(int64_t x) {
   x--;
